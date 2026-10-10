@@ -67,6 +67,8 @@ test('the canvas starts blank and grows live while the model tracks concepts', a
   await page.getByRole('tooltip').getByRole('button', { name: 'Approfondisci' }).click();
   const panel = page.getByLabel('Dettaglio concetto');
   await panel.waitFor();
+  // The panel opens before its data arrives: wait for the list, not just the frame.
+  await panel.locator('.visits li').nth(2).waitFor();
   assert.equal(await panel.locator('.visits li').count(), 3, 'all visits of the concept, incl. the merged one');
   await page.screenshot({ path: join(out, '5-approfondisci.png') });
 });
