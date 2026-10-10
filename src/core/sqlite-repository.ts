@@ -1,0 +1,198 @@
+import { DatabaseSync } from 'node:sqlite';
+import { randomUUID } from 'node:crypto';
+import type { Repository } from './repository.ts';
+import type { Concept, ConceptDetail, ConceptMatch, Conversation, ConversationTree, Visit } from './types.ts';
+import { SCHEMA } from './schema.ts';
+
+type Row = Record<string, unknown>;
+
+const now = () => new Date().toISOString();
+
+function toConversation(r: Row): Conversation {
+  return {
+    id: r.id as string,
+    title: r.title as string,
+    client: (r.client as string | null) ?? null,
+    currentVisitId: (r.current_visit_id as string | null) ?? null,
+    startedAt: r.started_at as string,
+    lastActivityAt: r.last_activity_at as string,
+  };
+}
+
+function toConcept(r: Row): Concept {
+  return {
+    id: r.id as string,
+    name: r.name as string,
+    createdAt: r.created_at as string,
+    lastSeenAt: r.last_seen_at as string,
+    visitCount: Number(r.visit_count ?? 0),
+  };
+}
+
+function toVisit(r: Row): Visit {
+  return {
+    id: r.id as string,
+    conversationId: r.conversation_id as string,
+    conceptId: r.concept_id as string,
+    parentVisitId: (r.parent_visit_id as string | null) ?? null,
+    title: r.title as string,
+    summary: r.summary as string,
+    excerpt: (r.excerpt as string | null) ?? null,
+    seq: Number(r.seq),
+    createdAt: r.created_at as string,
+  };
+}
+
+const CONCEPT_SELECT = `
+  SELECT c.*, (SELECT COUNT(*) FROM visits v WHERE v.concept_id = c.id) AS visit_count
+  FROM concepts c`;
+
+/** Builds an FTS5 query that matches any word of at least 3 characters (trigram minimum). */
+function ftsQuery(text: string): string | null {
+  const words = text.split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 3);
+  if (words.length === 0) return null;
+  return words.map((w) => `"${w.replaceAll('"', '')}"`).join(' OR ');
+}
+
+export class SqliteRepository implements Repository {
+  private db: DatabaseSync;
+
+  constructor(path: string) {
+    this.db = new DatabaseSync(path);
+    this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
+    this.db.exec(SCHEMA);
+  }
+
+  createConversation(input: { title: string; client: string | null }): Conversation {
+    const id = randomUUID();
+    const t = now();
+    this.db
+      .prepare('INSERT INTO conversations (id, title, client, started_at, last_activity_at) VALUES (?, ?, ?, ?, ?)')
+      .run(id, input.title, input.client, t, t);
+    return this.getConversation(id)!;
+  }
+
+  getConversation(id: string): Conversation | undefined {
+    const r = this.db.prepare('SELECT * FROM conversations WHERE id = ?').get(id);
+    return r ? toConversation(r) : undefined;
+  }
+
+  listConversations(): Conversation[] {
+    return this.db.prepare('SELECT * FROM conversations ORDER BY last_activity_at DESC').all().map(toConversation);
+  }
+
+  setCurrentVisit(conversationId: string, visitId: string | null): void {
+    this.db
+      .prepare('UPDATE conversations SET current_visit_id = ?, last_activity_at = ? WHERE id = ?')
+      .run(visitId, now(), conversationId);
+  }
+
+  findConceptByNorm(nameNorm: string): Concept | undefined {
+    const r = this.db.prepare(`${CONCEPT_SELECT} WHERE c.name_norm = ?`).get(nameNorm);
+    return r ? toConcept(r) : undefined;
+  }
+
+  getConcept(id: string): Concept | undefined {
+    const r = this.db.prepare(`${CONCEPT_SELECT} WHERE c.id = ?`).get(id);
+    return r ? toConcept(r) : undefined;
+  }
+
+  createConcept(input: { name: string; nameNorm: string }): Concept {
+    const id = randomUUID();
+    const t = now();
+    this.db
+      .prepare('INSERT INTO concepts (id, name, name_norm, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?)')
+      .run(id, input.name, input.nameNorm, t, t);
+    this.db.prepare('INSERT INTO concepts_fts (concept_id, name) VALUES (?, ?)').run(id, input.name);
+    return this.getConcept(id)!;
+  }
+
+  deleteConcept(id: string): void {
+    this.db.prepare('DELETE FROM concepts_fts WHERE concept_id = ?').run(id);
+    this.db.prepare('DELETE FROM concepts WHERE id = ?').run(id);
+  }
+
+  similarConcepts(name: string, excludeId: string, limit: number): ConceptMatch[] {
+    const q = ftsQuery(name);
+    if (!q) return [];
+    return this.db
+      .prepare(
+        `SELECT f.concept_id AS id, c.name AS name FROM concepts_fts f
+         JOIN concepts c ON c.id = f.concept_id
+         WHERE concepts_fts MATCH ? AND f.concept_id <> ?
+         ORDER BY bm25(concepts_fts) LIMIT ?`,
+      )
+      .all(q, excludeId, limit)
+      .map((r) => ({ id: r.id as string, name: r.name as string }));
+  }
+
+  getConceptDetail(id: string): ConceptDetail | undefined {
+    const concept = this.getConcept(id);
+    if (!concept) return undefined;
+    const visits = this.db
+      .prepare(
+        `SELECT v.*, cv.title AS conversation_title FROM visits v
+         JOIN conversations cv ON cv.id = v.conversation_id
+         WHERE v.concept_id = ? ORDER BY v.created_at DESC`,
+      )
+      .all(id)
+      .map((r) => ({ ...toVisit(r), conversationTitle: r.conversation_title as string }));
+    return { ...concept, visits };
+  }
+
+  getVisit(id: string): Visit | undefined {
+    const r = this.db.prepare('SELECT * FROM visits WHERE id = ?').get(id);
+    return r ? toVisit(r) : undefined;
+  }
+
+  createVisit(input: Omit<Visit, 'id' | 'seq' | 'createdAt'>): Visit {
+    const id = randomUUID();
+    const t = now();
+    const { next } = this.db
+      .prepare('SELECT COALESCE(MAX(seq), 0) + 1 AS next FROM visits WHERE conversation_id = ?')
+      .get(input.conversationId) as { next: number };
+    this.db
+      .prepare(
+        `INSERT INTO visits (id, conversation_id, concept_id, parent_visit_id, title, summary, excerpt, seq, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(id, input.conversationId, input.conceptId, input.parentVisitId, input.title, input.summary, input.excerpt, next, t);
+    this.db.prepare('UPDATE concepts SET last_seen_at = ? WHERE id = ?').run(t, input.conceptId);
+    return this.getVisit(id)!;
+  }
+
+  setVisitConcept(visitId: string, conceptId: string): void {
+    this.db.prepare('UPDATE visits SET concept_id = ? WHERE id = ?').run(conceptId, visitId);
+  }
+
+  countVisitsOfConcept(conceptId: string): number {
+    const r = this.db.prepare('SELECT COUNT(*) AS n FROM visits WHERE concept_id = ?').get(conceptId) as { n: number };
+    return Number(r.n);
+  }
+
+  getTree(conversationId: string): ConversationTree | undefined {
+    const conversation = this.getConversation(conversationId);
+    if (!conversation) return undefined;
+    const visits = this.db
+      .prepare('SELECT * FROM visits WHERE conversation_id = ? ORDER BY seq')
+      .all(conversationId)
+      .map(toVisit);
+    return { conversation, visits };
+  }
+
+  transaction<T>(fn: () => T): T {
+    this.db.exec('BEGIN');
+    try {
+      const result = fn();
+      this.db.exec('COMMIT');
+      return result;
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
+  }
+
+  close(): void {
+    this.db.close();
+  }
+}
