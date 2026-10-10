@@ -25,14 +25,14 @@ export function VisitNode({ data }: NodeProps<VisitNodeType>) {
       onMouseLeave={hide}
       data-testid="visit"
     >
-      <Handle type="target" position={Position.Left} />
+      <Handle type="target" position={data.handles === 'rl' ? Position.Right : Position.Left} className={data.handles} />
       <span className="visit-title">{visit.title}</span>
       {data.also.length > 0 && (
         <span className="also" title={`Anche in: ${data.also.join(', ')}`}>
           anche in: {data.also.join(', ')}
         </span>
       )}
-      <Handle type="source" position={Position.Right} />
+      <Handle type="source" position={data.handles === 'rl' ? Position.Left : Position.Right} className={data.handles} />
       <NodeToolbar isVisible={hovered} position={side} offset={10}>
         <div className="tooltip passive" role="tooltip">
           <p>{visit.summary || 'Nessun riassunto.'}</p>
