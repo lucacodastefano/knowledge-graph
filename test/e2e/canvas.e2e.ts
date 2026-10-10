@@ -237,3 +237,109 @@ test('three layouts, radial by default, no overlapping nodes, and the choice is 
   await page.reload();
   assert.equal(await page.getByLabel('Layout').inputValue(), 'mindmap');
 });
+
+/** Tree edges that do not leave their parent on the side facing the child, or do not reach the child's facing side. */
+function misattached(page: import('playwright').Page, kind: string) {
+  return page.evaluate((kind) => {
+    const bad: string[] = [];
+    const box = (id: string) => document.querySelector(`.react-flow__node[data-id="${id}"]`)!.getBoundingClientRect();
+    for (const g of document.querySelectorAll('[data-testid^="rf__edge-t-"]')) {
+      const child = g.getAttribute('data-testid')!.slice('rf__edge-t-'.length);
+      const path = g.querySelector<SVGPathElement>('path.react-flow__edge-path')!;
+      const m = path.getScreenCTM()!;
+      const s = path.getPointAtLength(0).matrixTransform(m);
+      const e = path.getPointAtLength(path.getTotalLength()).matrixTransform(m);
+      const parent = /^Edge from (\S+) to /.exec(g.getAttribute('aria-label') ?? '')![1];
+      const [p, c] = [box(parent), box(child)];
+      const near = (a: number, b: number) => Math.abs(a - b) < 8;
+      const title = (document.querySelector(`.react-flow__node[data-id="${child}"] .visit-title`) as HTMLElement).innerText;
+      if (kind === 'radial') {
+        if (!near(s.x, p.x + p.width / 2) || !near(s.y, p.y + p.height / 2)) bad.push(`${title}: not from the parent centre`);
+        continue;
+      }
+      const toRight = c.x + c.width / 2 > p.x + p.width / 2;
+      if (!near(s.x, toRight ? p.right : p.left) || s.y < p.top || s.y > p.bottom) bad.push(`${title}: leaves the wrong side of its parent`);
+      if (!near(e.x, toRight ? c.left : c.right) || e.y < c.top || e.y > c.bottom) bad.push(`${title}: reaches the wrong side`);
+    }
+    return bad;
+  }, kind);
+}
+
+test('mind map: balanced halves, edges on the facing side as branches move, and the hovered node highlights its relatives', async (t) => {
+  const client = new Client({ name: 'e2e', version: '1' });
+  await client.connect(new StreamableHTTPClientTransport(new URL('/mcp', base)));
+  // An open MCP connection keeps the runner alive: close it even when an assertion fails.
+  t.after(() => client.close());
+  const track = (nodes: { title: string; parent: string }[]) =>
+    client.callTool({ name: 'kc_track', arguments: { nodes: nodes.map((n) => ({ ...n, summary: `${n.title}.` })) } });
+  await client.callTool({ name: 'kc_start', arguments: { title: 'Mappa mentale di prova' } });
+  await track([{ title: 'Centro', parent: 'root' }]);
+  await track([
+    { title: 'Ramo A', parent: 'Centro' },
+    { title: 'Foglia A1', parent: '#0' },
+    { title: 'Ramo B', parent: 'Centro' },
+    { title: 'Concetto condiviso', parent: '#2' },
+    { title: 'Ramo C', parent: 'Centro' },
+    { title: 'Foglia C1', parent: '#4' },
+    { title: 'Ramo D', parent: 'Centro' },
+    { title: 'Foglia D1', parent: '#6' },
+  ]);
+  await track([{ title: 'Concetto condiviso', parent: 'Ramo D' }]);
+
+  const page = await browser.newPage({ viewport: { width: 1400, height: 820 } });
+  await page.goto(base);
+  const visits = page.locator('[data-testid=visit]');
+  await visits.nth(9).waitFor();
+  await page.getByLabel('Layout').selectOption('mindmap');
+  await page.waitForTimeout(800);
+  const centreX = async (title: string) => {
+    const b = (await titled(page, new RegExp(`^${title}$`)).first().boundingBox())!;
+    return b.x + b.width / 2;
+  };
+  const hub = await centreX('Centro');
+  // Leaves 1, 1, 1, 2: three branches on the right, the heavier one alone on the left.
+  assert.ok((await centreX('Ramo B')) > hub, 'Ramo B starts on the right');
+  assert.ok((await centreX('Ramo D')) < hub, 'Ramo D starts on the left');
+  assert.deepEqual(await misattached(page, 'mindmap'), []);
+
+  // Ramo A grows to 4 leaves: the halves rebalance, B moves to the left and its edges must follow (no stale handles).
+  await track([1, 2, 3].map((i) => ({ title: `Foglia A${i + 1}`, parent: 'Ramo A' })));
+  await titled(page, 'Foglia A4').waitFor();
+  await page.waitForTimeout(800);
+  assert.ok((await centreX('Ramo B')) < (await centreX('Centro')), 'Ramo B moved to the left');
+  assert.deepEqual(await misattached(page, 'mindmap'), []);
+  await page.screenshot({ path: join(out, '12-mappa-mentale.png') });
+
+  // Switching layout without reloading re-attaches every edge too.
+  for (const kind of ['radial', 'tree', 'mindmap']) {
+    await page.getByLabel('Layout').selectOption(kind);
+    await page.waitForTimeout(800);
+    assert.deepEqual(await misattached(page, kind), [], kind);
+  }
+
+  // Hover: the node, its parent and the other node of its concept stand out, with their edges; the rest fades.
+  await titled(page, 'Concetto condiviso').first().hover();
+  await page.locator('.visit.focus').waitFor();
+  const titles = (sel: string) => page.locator(`${sel} .visit-title`).allInnerTexts();
+  assert.deepEqual((await titles('.visit.related')).sort(), ['Concetto condiviso', 'Ramo B']);
+  assert.equal(await page.locator('.visit.dim').count(), (await visits.count()) - 3);
+  assert.equal(await page.locator('.react-flow__edge.cross-link.related').count(), 1);
+  assert.equal(await page.locator('.react-flow__edge.related:not(.cross-link)').count(), 1);
+  await page.screenshot({ path: join(out, '13-evidenzia.png') });
+  await page.mouse.move(700, 790);
+  await page.waitForFunction(() => !document.querySelector('.visit.dim'));
+
+  // Click: the highlight stays without the pointer; a click on the canvas or Esc clears it.
+  await titled(page, 'Ramo A').click();
+  await page.mouse.move(700, 790);
+  await page.waitForTimeout(400);
+  assert.deepEqual(await titles('.visit.focus'), ['Ramo A']);
+  assert.deepEqual((await titles('.visit.related')).sort(), ['Centro', 'Foglia A1', 'Foglia A2', 'Foglia A3', 'Foglia A4']);
+  await page.mouse.click(700, 790);
+  await page.waitForFunction(() => !document.querySelector('.visit.dim'));
+  await titled(page, 'Ramo A').click();
+  await page.mouse.move(700, 790);
+  await page.locator('.visit.focus').waitFor();
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => !document.querySelector('.visit.focus'));
+});

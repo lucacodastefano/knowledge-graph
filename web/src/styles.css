@@ -43,7 +43,7 @@ body { background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -ap
 main { position: relative; flex: 1; min-height: 0; }
 
 .react-flow { --xy-background-color: var(--bg); --xy-edge-stroke: var(--edge); --xy-controls-button-background-color: var(--surface); --xy-controls-button-color: var(--text); --xy-controls-button-border-color: var(--border); }
-.react-flow__edge.cross-link path { stroke-dasharray: 6 4; stroke: var(--accent); stroke-width: 2; opacity: 0.9; }
+.react-flow__edge.cross-link .react-flow__edge-path { stroke-dasharray: 6 4; stroke: var(--accent); stroke-width: 1.5; opacity: 0.7; }
 .visit .also { display: block; font-size: 11px; color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .visit.shared .visit-title { -webkit-line-clamp: 1; }
 .visit .also { max-width: 100%; }
@@ -53,11 +53,12 @@ main { position: relative; flex: 1; min-height: 0; }
 .key-points { margin: 6px 0; padding-left: 18px; }
 .setting { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); cursor: pointer; }
 
-.visit { width: 190px; height: 46px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; text-align: center; cursor: default; transition: box-shadow 0.3s, border-color 0.3s; }
+.visit { width: 190px; height: 46px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; text-align: center; cursor: default; transition: box-shadow 0.3s, border-color 0.3s, opacity 0.2s; }
 .visit-title { overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; font-weight: 500; }
 .visit.current { border: 2px solid var(--accent); }
 .visit.fresh { animation: appear 1.6s ease-out; }
-@keyframes appear { from { box-shadow: 0 0 0 8px var(--accent-soft); transform: scale(0.85); opacity: 0; } 30% { opacity: 1; transform: scale(1); } to { box-shadow: 0 0 0 0 transparent; } }
+/* No transform here: React Flow measures the handles while the node appears, and a scaled node would leave its edges off the sides. */
+@keyframes appear { from { box-shadow: 0 0 0 8px var(--accent-soft); opacity: 0; } 30% { opacity: 1; } to { box-shadow: 0 0 0 0 transparent; } }
 .visit .react-flow__handle { opacity: 0; }
 
 .tooltip { width: 280px; padding: 12px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 8px 24px rgb(0 0 0 / 0.15); }
@@ -132,6 +133,15 @@ button.icon:hover { color: var(--text); }
   .danger-text, button.danger-text { color: #f87171; }
 }
 
-/* Radial layout (WP7): edges meet at the node centre, drawn under the nodes */
+/* Every node has handles on both sides and on its centre (radial and cross-links), drawn under the node */
 .visit .react-flow__handle.center { top: 50%; left: 50%; right: auto; transform: translate(-50%, -50%); }
+
+/* Highlight around the hovered or selected node: parent, children, same concept; the rest fades */
+.visit.focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.visit.related { border-color: var(--accent); }
+.visit.dim { opacity: 0.35; }
+.react-flow__edge .react-flow__edge-path { transition: opacity 0.2s; }
+.react-flow__edge.dim .react-flow__edge-path { opacity: 0.15; }
+.react-flow__edge.related .react-flow__edge-path { stroke: var(--accent); stroke-width: 2; }
+.react-flow__edge.cross-link.related .react-flow__edge-path { stroke-width: 2.5; opacity: 1; }
 .overlay-bar select + select { margin-left: 8px; }

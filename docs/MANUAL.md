@@ -126,8 +126,9 @@ The tree of the conversation: each node is a concept as it came up, children are
 
 - A **dashed link** joins two nodes of the same concept: the conversation came back to it, possibly from another branch. Such nodes also show **anche in: …** with the other places.
 - **Hover** a node for a moment: the node's text (the key sentences of the answer) appears beside it, with **Approfondisci** (open the concept panel). It closes as soon as you move to another node; **Esc** closes it too.
+- **Relations at a glance**: pointing at a node highlights its parent, its children and the other nodes of the same concept (with the dashed links to them), and fades everything else. **Click** a node to keep the highlight while you move around; click it again, click an empty spot of the canvas or press **Esc** to clear it.
 - The menu at the top picks the conversation; **Segui l'ultima conversazione** (default) follows whichever conversation is active.
-- The second menu picks the layout, remembered by the browser: **Radiale** (default: the first topic in the middle, each level on a wider ring), **Mappa mentale** (the topic in the middle, branches to the right and to the left) or **Albero** (left to right). The bottom-left button fits the whole tree on screen.
+- The second menu picks the layout, remembered by the browser: **Radiale** (default: the first topic in the middle, each level on a wider ring), **Mappa mentale** (the topic in the middle, branches to the right and to the left, split so both halves are about as tall; a branch changes side only when that clearly improves the balance) or **Albero** (left to right). The bottom-left button fits the whole tree on screen.
 
 ### Grafo personale (personal graph)
 
