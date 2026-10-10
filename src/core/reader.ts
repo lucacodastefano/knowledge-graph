@@ -1,5 +1,5 @@
 import type { Repository } from './repository.ts';
-import type { Concept, Visit } from './types.ts';
+import type { Concept, ConceptPage, ConceptSection, Visit } from './types.ts';
 import { normalizeName } from './normalize.ts';
 import { TrackerError } from './tracker.ts';
 
@@ -26,6 +26,8 @@ export interface Profile {
 }
 
 const RECALL_LIMIT = 5;
+/** Sub-concept levels shown as sections in "Approfondisci" (D17). */
+const SECTION_DEPTH = 2;
 const NOTES_PER_CONCEPT = 3;
 const NEAR_PER_CONCEPT = 5;
 const NOTE_MAX = 300;
@@ -66,6 +68,34 @@ export class Reader {
         near: this.repo.neighbourConcepts(c.id, NEAR_PER_CONCEPT).map((n) => n.name),
       };
     });
+  }
+
+  /** "Approfondisci": every occurrence of a concept with its parent and its sub-concepts as sections (D16, D17). */
+  conceptPage(conceptId: string): ConceptPage | undefined {
+    const detail = this.repo.getConceptDetail(conceptId);
+    if (!detail) return undefined;
+    const trees = new Map<string, Visit[]>();
+    const visitsOf = (conversationId: string) => {
+      if (!trees.has(conversationId)) trees.set(conversationId, this.repo.getTree(conversationId)?.visits ?? []);
+      return trees.get(conversationId)!;
+    };
+    return {
+      ...detail,
+      visits: detail.visits.map((v) => {
+        const all = visitsOf(v.conversationId);
+        const sections = (parentId: string, depth: number): ConceptSection[] =>
+          depth === 0
+            ? []
+            : all
+                .filter((c) => c.parentVisitId === parentId)
+                .map((c) => ({ title: c.title, summary: c.summary, detail: c.detail, children: sections(c.id, depth - 1) }));
+        return {
+          ...v,
+          parentTitle: all.find((p) => p.id === v.parentVisitId)?.title ?? null,
+          sections: sections(v.id, SECTION_DEPTH),
+        };
+      }),
+    };
   }
 
   /**

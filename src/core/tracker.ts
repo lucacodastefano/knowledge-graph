@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import type { Repository } from './repository.ts';
-import type { Concept, ConceptMatch, Conversation, Visit } from './types.ts';
+import type { Concept, ConceptMatch, Conversation, Settings, Visit } from './types.ts';
 import { normalizeName } from './normalize.ts';
 import { restatesParent } from './similarity.ts';
 
@@ -15,6 +15,8 @@ export interface TrackNodeInput {
    */
   parent?: string;
   excerpt?: string;
+  /** Key points, only when the canvas setting allows it (D17). */
+  detail?: string;
   /** Link directly to a known concept instead of matching by name. */
   conceptId?: string;
 }
@@ -110,11 +112,12 @@ export class Tracker {
         const visits = knownConcept ? this.repo.getTree(conversationId)!.visits : [];
         const summary = node.summary.trim();
         const excerpt = node.excerpt?.trim() || null;
+        const detail = node.detail?.trim() || null;
 
         // Same concept under the same parent: refresh that node instead of duplicating it (D15).
         const twin = visits.find((v) => v.conceptId === concept!.id && v.parentVisitId === parentVisitId);
         if (twin) {
-          this.repo.setVisitSummary(twin.id, summary, excerpt);
+          this.repo.setVisitSummary(twin.id, summary, excerpt, detail ?? twin.detail);
           updatedVisits.push(this.repo.getVisit(twin.id)!);
           current = twin.id;
           out.push({ id: twin.id, conceptId: concept!.id, knownConcept, revisit: true, updated: true, similar: [] });
@@ -124,7 +127,7 @@ export class Tracker {
         const revisit = visits.some((v) => v.conceptId === concept!.id);
         concept ??= this.repo.createConcept({ name: title, nameNorm: normalizeName(title) });
 
-        const visit = this.repo.createVisit({ conversationId, conceptId: concept.id, parentVisitId, title, summary, excerpt });
+        const visit = this.repo.createVisit({ conversationId, conceptId: concept.id, parentVisitId, title, summary, excerpt, detail });
         created.push({ visit, concept: this.repo.getConcept(concept.id)! });
         current = visit.id;
         out.push({
@@ -228,6 +231,15 @@ export class Tracker {
   /** Removes a node (kc_remove); its children move up to its parent. */
   remove(conversationId: string, nodeRef: string): void {
     this.deleteVisit(this.resolveNode(conversationId, nodeRef).id);
+  }
+
+  settings(): Settings {
+    return { detail: this.repo.getSetting('detail') === 'on' };
+  }
+
+  updateSettings(patch: Partial<Settings>): Settings {
+    if (patch.detail !== undefined) this.repo.setSetting('detail', patch.detail ? 'on' : 'off');
+    return this.settings();
   }
 
   focus(conversationId: string, visitId: string | null): void {

@@ -1,9 +1,9 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
-import { type Tracker, TrackerError } from '../core/tracker.ts';
+import { type TrackNodeInput, type Tracker, TrackerError } from '../core/tracker.ts';
 import { Reader } from '../core/reader.ts';
-import { TRACKING_INSTRUCTIONS } from './instructions.ts';
+import { trackingInstructions } from './instructions.ts';
 
 /** Per MCP session: which conversation this client is writing to. */
 export interface McpSessionState {
@@ -27,10 +27,11 @@ function guarded(fn: () => CallToolResult): CallToolResult {
 }
 
 export function createMcpServer(tracker: Tracker, state: McpSessionState): McpServer {
-  const server = new McpServer(
-    { name: 'knowledge-graph', version: '0.1.0' },
-    { instructions: TRACKING_INSTRUCTIONS },
-  );
+  // D17: the detail field and its rule exist only when the canvas setting is on, read once per chat (session).
+  const withDetail = tracker.settings().detail;
+  const instructions = trackingInstructions(withDetail);
+  const server = new McpServer({ name: 'knowledge-graph', version: '0.1.0' }, { instructions });
+  const detailField = withDetail ? { detail: z.string().optional().describe('Only when going deep on this node: 5-10 key points, one per line') } : {};
 
   const reader = new Reader(tracker.repo);
 
@@ -68,6 +69,7 @@ export function createMcpServer(tracker: Tracker, state: McpSessionState): McpSe
               parent: z.string().describe('Title of the node it belongs under (from the tree), "root", or "#n" for an earlier node of this call'),
               excerpt: z.string().optional().describe('Rarely: a formula or code line to keep verbatim'),
               conceptId: z.string().optional().describe('Known concept id to reuse'),
+              ...detailField,
             }),
           )
           .min(1),
@@ -76,7 +78,7 @@ export function createMcpServer(tracker: Tracker, state: McpSessionState): McpSe
     ({ nodes }) =>
       guarded(() => {
         const id = conversationId();
-        const result = ok(tracker.track(id, nodes));
+        const result = ok(tracker.track(id, nodes as TrackNodeInput[]));
         result.content.push({ type: 'text', text: `${reader.tree(id, false, true)}\n${TRACKED_NOTE}` });
         return result;
       }),
@@ -186,7 +188,7 @@ export function createMcpServer(tracker: Tracker, state: McpSessionState): McpSe
   server.registerPrompt(
     'kc_instructions',
     { description: 'How to keep the knowledge-graph canvas up to date during a conversation.' },
-    () => ({ messages: [{ role: 'user', content: { type: 'text', text: TRACKING_INSTRUCTIONS } }] }),
+    () => ({ messages: [{ role: 'user', content: { type: 'text', text: instructions } }] }),
   );
 
   return server;

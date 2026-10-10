@@ -79,6 +79,7 @@ fts_concepts(name, summaries)                            -- FTS5 per ricerca e s
 | `kc_focus(node_id)` | Torna su un nodo esistente (diventa il corrente) | RF4 |
 | `kc_link(visit_id, concept_id)` | Conferma che una visita è un concetto già noto (unisce) | RF6 |
 | `kc_move(node, parent)` | Sposta un nodo (con i figli) sotto un altro nodo o alla radice, indicati per titolo o id; non unisce concetti | RF18 |
+| (opzione) `detail` in `kc_track` | 5-10 punti chiave quando la risposta approfondisce un nodo; esposto con la sua regola solo se l'impostazione del canvas "Dettaglio approfondito" è accesa (tabella `settings`, letta all'apertura di ogni sessione MCP) | D17 |
 | `kc_rename(node, title)` | Rinomina un nodo; un titolo già usato da un altro concetto lo collega a quel concetto (D1) | D16 |
 | `kc_remove(node)` | Elimina un nodo; i figli salgono al suo padre | D16 |
 | `kc_recall(query)` | "Cosa sa già Luca di X?": concetti, riassunti, date | RF8 |

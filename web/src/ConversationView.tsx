@@ -11,7 +11,7 @@ import {
 } from '@xyflow/react';
 import { api, type Conversation, type ConversationTree } from './api.ts';
 import type { Found, LiveEvent } from './App.tsx';
-import { buildEdges, layout, type VisitNode as VisitNodeType } from './layout.ts';
+import { alsoIn, buildEdges, layout, type VisitNode as VisitNodeType } from './layout.ts';
 import { VisitNode } from './VisitNode.tsx';
 import { VisitPanel } from './VisitPanel.tsx';
 
@@ -91,6 +91,7 @@ function Tree({ live, found, onOpenConcept }: Props) {
     let cancelled = false;
     void layout(tree.visits).then((pos) => {
       if (cancelled) return;
+      const also = alsoIn(tree.visits);
       setNodes((prev) => {
         const measured = new Map(prev.map((n) => [n.id, n.measured]));
         return tree.visits.map((v) => ({
@@ -104,6 +105,7 @@ function Tree({ live, found, onOpenConcept }: Props) {
             fresh: false,
             hovered: false,
             match: false,
+            also: also.get(v.id) ?? [],
             onHover,
             onOpen: onOpenConcept,
             onEdit: setEditing,

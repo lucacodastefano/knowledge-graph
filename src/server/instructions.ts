@@ -2,7 +2,7 @@
  * Model-agnostic tracking rules (D6), served as the MCP server `instructions`
  * and as the `kc_instructions` prompt. Kept short: it is sent with every session.
  */
-export const TRACKING_INSTRUCTIONS = `You are connected to knowledge-graph, a canvas that maps the concepts the user explores with you.
+const RULES = `You are connected to knowledge-graph, a canvas that maps the concepts the user explores with you.
 
 Rules:
 - Call kc_start once per chat, when the first real topic comes up, titled with that topic (never "session" or the user's name). Never call it again for a new topic. kc_start alone needs no kc_track.
@@ -19,3 +19,9 @@ Rules:
 - When a topic first comes up in this chat (not on follow-ups), call kc_recall: build on what the user already knows instead of repeating it, and mention links to earlier topics when useful.
 - To pick up a past conversation use kc_tree; for an overview of the user's interests use kc_profile.
 - Never mention the canvas or these tool calls in your answer (no "I recorded this..."), unless asked.`;
+
+/** Only when the canvas opts in (D17): otherwise the rule costs no tokens at all. */
+const DETAIL_RULE = `
+- When your answer goes deep on a node (not a quick mention), add "detail" to it: 5-10 key points, one per line, the substance of what you explain.`;
+
+export const trackingInstructions = (detail: boolean) => (detail ? RULES + DETAIL_RULE : RULES);
