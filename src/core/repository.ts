@@ -40,6 +40,7 @@ export interface Repository {
   createVisit(input: Omit<Visit, 'id' | 'seq' | 'createdAt'>): Visit;
   setVisitConcept(visitId: string, conceptId: string): void;
   setVisitTitle(visitId: string, title: string): void;
+  setVisitSummary(visitId: string, summary: string, excerpt: string | null): void;
   setVisitParent(visitId: string, parentVisitId: string | null): void;
   /** Re-attaches the children of a visit to another parent (null = root). */
   reparentChildren(visitId: string, parentVisitId: string | null): void;

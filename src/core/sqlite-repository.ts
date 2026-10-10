@@ -69,6 +69,12 @@ export class SqliteRepository implements Repository {
     this.db = new DatabaseSync(path);
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
     this.db.exec(SCHEMA);
+    this.checkpoint();
+  }
+
+  /** Copies the WAL into the main file, so that graph.db alone is a complete backup (RNF8). */
+  checkpoint(): void {
+    this.db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
   }
 
   createConversation(input: { title: string; client: string | null }): Conversation {
@@ -257,6 +263,10 @@ export class SqliteRepository implements Repository {
     this.db.prepare('UPDATE visits SET title = ? WHERE id = ?').run(title, visitId);
   }
 
+  setVisitSummary(visitId: string, summary: string, excerpt: string | null): void {
+    this.db.prepare('UPDATE visits SET summary = ?, excerpt = ? WHERE id = ?').run(summary, excerpt, visitId);
+  }
+
   setVisitParent(visitId: string, parentVisitId: string | null): void {
     this.db.prepare('UPDATE visits SET parent_visit_id = ? WHERE id = ?').run(parentVisitId, visitId);
   }
@@ -325,6 +335,7 @@ export class SqliteRepository implements Repository {
   }
 
   close(): void {
+    this.checkpoint();
     this.db.close();
   }
 }

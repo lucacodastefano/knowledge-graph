@@ -13,6 +13,8 @@ export interface McpSessionState {
 
 const ok = (data: unknown): CallToolResult => ({ content: [{ type: 'text', text: JSON.stringify(data) }] });
 const text = (data: string): CallToolResult => ({ content: [{ type: 'text', text: data }] });
+/** Reminder after kc_track: some clients (Claude Desktop) otherwise repeat the answer after the tool call. */
+const TRACKED_NOTE = 'Recorded. Now write your answer once; do not repeat it or mention this call.';
 const fail = (message: string): CallToolResult => ({ content: [{ type: 'text', text: message }], isError: true });
 
 function guarded(fn: () => CallToolResult): CallToolResult {
@@ -30,6 +32,8 @@ export function createMcpServer(tracker: Tracker, state: McpSessionState): McpSe
     { instructions: TRACKING_INSTRUCTIONS },
   );
 
+  const reader = new Reader(tracker.repo);
+
   const conversationId = () => {
     if (!state.conversationId) state.conversationId = tracker.startConversation(undefined, state.client).id;
     return state.conversationId;
@@ -38,28 +42,30 @@ export function createMcpServer(tracker: Tracker, state: McpSessionState): McpSe
   server.registerTool(
     'kc_start',
     {
-      description: 'Start the canvas conversation (once per chat; a new topic is kc_track with parent "root"), or resume one by id.',
+      description: 'Start the canvas conversation at the first real topic of every chat (once per chat; a new topic is kc_track with parent "root"), or resume one by id.',
       inputSchema: { title: z.string().optional(), resume: z.string().optional() },
     },
     ({ title, resume }) =>
       guarded(() => {
         const c = resume ? tracker.requireConversation(resume) : tracker.startConversation(title, state.client);
         state.conversationId = c.id;
-        return ok({ conversation: c.id, current: c.currentVisitId });
+        const result = ok({ conversation: c.id });
+        result.content.push({ type: 'text', text: reader.tree(c.id, false, true) });
+        return result;
       }),
   );
 
   server.registerTool(
     'kc_track',
     {
-      description: 'Add one or more concept nodes for your last answer. One call per answer.',
+      description: 'Add the concept nodes of the answer you are about to write. One call per answer, before writing it.',
       inputSchema: {
         nodes: z
           .array(
             z.object({
               title: z.string().describe('Concept name, 1-5 words'),
               summary: z.string().describe('1-3 sentences of what you explained'),
-              parent: z.string().optional().describe('"current" (default), "root", a node id, or "#n"'),
+              parent: z.string().describe('Title of the node it belongs under (from the tree), "root", or "#n" for an earlier node of this call'),
               excerpt: z.string().optional().describe('Rarely: a formula or code line to keep verbatim'),
               conceptId: z.string().optional().describe('Known concept id to reuse'),
             }),
@@ -67,26 +73,34 @@ export function createMcpServer(tracker: Tracker, state: McpSessionState): McpSe
           .min(1),
       },
     },
-    ({ nodes }) => guarded(() => ok(tracker.track(conversationId(), nodes))),
+    ({ nodes }) =>
+      guarded(() => {
+        const id = conversationId();
+        const result = ok(tracker.track(id, nodes));
+        result.content.push({ type: 'text', text: `${reader.tree(id, false, true)}\n${TRACKED_NOTE}` });
+        return result;
+      }),
   );
 
   server.registerTool(
     'kc_focus',
     {
       description: 'Move back to a node already on the canvas; it becomes the current node.',
-      inputSchema: { node: z.string() },
+      inputSchema: { node: z.string().describe('Title or id') },
     },
     ({ node }) =>
       guarded(() => {
-        tracker.focus(conversationId(), node);
-        return ok({ current: node });
+        const id = conversationId();
+        const visit = tracker.resolveNode(id, node);
+        tracker.focus(id, visit.id);
+        return ok({ current: visit.id });
       }),
   );
 
   server.registerTool(
     'kc_link',
     {
-      description: 'Merge a node into an existing concept (when kc_track reported it as similar).',
+      description: 'Merge a node into an existing concept: same idea under two names (e.g. kc_track reported it as similar). To re-attach a node elsewhere use kc_move.',
       inputSchema: { node: z.string(), conceptId: z.string() },
     },
     ({ node, conceptId }) =>
@@ -96,7 +110,22 @@ export function createMcpServer(tracker: Tracker, state: McpSessionState): McpSe
       }),
   );
 
-  const reader = new Reader(tracker.repo);
+  server.registerTool(
+    'kc_move',
+    {
+      description: 'Move a node (with its children) under another node, or to "root". Does not merge concepts.',
+      inputSchema: {
+        node: z.string().describe('Title or id of the node to move'),
+        parent: z.string().describe('Title or id of the new parent, or "root"'),
+      },
+    },
+    ({ node, parent }) =>
+      guarded(() => {
+        const id = conversationId();
+        tracker.move(id, node, parent);
+        return text(reader.tree(id, false, true));
+      }),
+  );
 
   server.registerTool(
     'kc_recall',

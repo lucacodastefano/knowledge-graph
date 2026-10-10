@@ -72,13 +72,14 @@ export class Reader {
    * Compact indented outline of a conversation (RF9): one line per node with its id,
    * so the model can kc_focus on it. Defaults to the most recent conversation.
    */
-  tree(conversationId: string | null, withSummaries: boolean): string {
+  tree(conversationId: string | null, withSummaries: boolean, compact = false): string {
     const id = conversationId ?? this.repo.listConversations()[0]?.id;
     if (!id) return 'No conversations yet.';
     const tree = this.repo.getTree(id);
     if (!tree) throw new TrackerError(`Conversation ${id} not found`);
 
     const { conversation, visits } = tree;
+    if (compact && visits.length === 0) return 'Tree: empty';
     const children = new Map<string | null, Visit[]>();
     const ids = new Set(visits.map((v) => v.id));
     for (const v of visits) {
@@ -86,12 +87,15 @@ export class Reader {
       children.set(parent, [...(children.get(parent) ?? []), v]);
     }
 
-    const lines = [`${conversation.title} [${conversation.id}] ${day(conversation.lastActivityAt)}, ${visits.length} nodes`];
+    // Compact: the outline returned after kc_start/kc_track, titles only, so the model sees where it is (D15).
+    const lines = compact
+      ? ['Tree:']
+      : [`${conversation.title} [${conversation.id}] ${day(conversation.lastActivityAt)}, ${visits.length} nodes`];
     const walk = (parent: string | null, depth: number) => {
       for (const v of children.get(parent) ?? []) {
         const current = v.id === conversation.currentVisitId ? ' *current' : '';
         const summary = withSummaries && v.summary ? `: ${v.summary}` : '';
-        lines.push(`${'  '.repeat(depth)}- ${v.title} [${v.id}]${current}${summary}`);
+        lines.push(compact ? `${'  '.repeat(depth)}- ${v.title}` : `${'  '.repeat(depth)}- ${v.title} [${v.id}]${current}${summary}`);
         walk(v.id, depth + 1);
       }
     };
