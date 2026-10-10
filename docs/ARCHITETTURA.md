@@ -92,7 +92,8 @@ Più un **prompt MCP** `kc_instructions` con le regole di tracciamento scritte i
 1. **Tracciamento**: Luca chiede → il modello risponde → a fine risposta una sola chiamata `kc_track` → il demone salva, aggancia i concetti, emette un evento → il canvas disegna i nodi.
 2. **Hover**: il canvas ha già titolo e riassunto breve in memoria → tooltip immediato → "Approfondisci" chiama `/api/concepts/:id` → pannello con tutte le visite.
 3. **Richiamo**: il modello, prima di spiegare un tema, chiama `kc_recall` → sa cosa Luca ha già visto e lo dà per noto.
-4. **Correzione manuale** (D8): azione sul canvas → `/api` → evento → stesso aggiornamento visto da tutti.
+4. **Grafo personale**: la scheda "Grafo personale" chiama `/api/graph` (tutti i concetti con conteggio visite + archi pesati derivati dalle visite e da `concept_links`) → Sigma.js con layout ForceAtlas2; a ogni evento live ricarica e unisce i dati tenendo le posizioni dei nodi noti, così il disegno non salta.
+5. **Correzione manuale** (D8): azione sul canvas → `/api` → evento → stesso aggiornamento visto da tutti.
 
 ## 7. Sicurezza e privacy
 

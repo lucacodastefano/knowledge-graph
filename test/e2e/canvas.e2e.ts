@@ -9,6 +9,8 @@ import { mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { chromium } from 'playwright';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { SqliteRepository } from '../../src/core/sqlite-repository.ts';
 import { Tracker } from '../../src/core/tracker.ts';
 import { buildApp } from '../../src/server/app.ts';
@@ -71,4 +73,33 @@ test('the canvas starts blank and grows live while the model tracks concepts', a
   await panel.locator('.visits li').nth(2).waitFor();
   assert.equal(await panel.locator('.visits li').count(), 3, 'all visits of the concept, incl. the merged one');
   await page.screenshot({ path: join(out, '5-approfondisci.png') });
+});
+
+test('the personal graph shows every concept, previews it on hover and grows live', async () => {
+  const page = await browser.newPage({ viewport: { width: 1400, height: 820 } });
+  await page.goto(`${base}/#personale`);
+  const counter = page.getByTestId('concept-count');
+  await counter.waitFor();
+  // 12 visits in the simulated conversation: two return to "Partizioni" and one was merged into it.
+  assert.equal(await counter.innerText(), '10 concetti');
+  await page.waitForTimeout(500);
+  await page.screenshot({ path: join(out, '6-grafo-personale.png') });
+
+  const box = (await page.getByTestId('personal-graph').boundingBox())!;
+  const pos = await page.evaluate(
+    () => (window as unknown as { __kgPersonal: { position(l: string): { x: number; y: number } } }).__kgPersonal.position('Partizioni'),
+  );
+  await page.mouse.move(box.x + pos.x, box.y + pos.y);
+  const tooltip = page.getByRole('tooltip');
+  await tooltip.waitFor();
+  assert.match(await tooltip.innerText(), /Visto 3 volte/);
+  await page.screenshot({ path: join(out, '7-grafo-hover.png') });
+  await tooltip.getByRole('button', { name: 'Approfondisci' }).click();
+  await page.getByLabel('Dettaglio concetto').locator('.visits li').nth(2).waitFor();
+
+  const client = new Client({ name: 'e2e', version: '1' });
+  await client.connect(new StreamableHTTPClientTransport(new URL('/mcp', base)));
+  await client.callTool({ name: 'kc_track', arguments: { nodes: [{ title: 'Schema registry', summary: 'Contratti degli eventi.' }] } });
+  await page.getByText('11 concetti').waitFor();
+  await client.close();
 });

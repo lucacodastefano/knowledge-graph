@@ -1,7 +1,7 @@
-import type { ConceptDetail, Conversation, ConversationTree, Visit } from '../../src/core/types.ts';
+import type { ConceptDetail, Conversation, ConversationTree, PersonalGraph, Visit } from '../../src/core/types.ts';
 import type { TrackerEvent } from '../../src/core/tracker.ts';
 
-export type { ConceptDetail, Conversation, ConversationTree, TrackerEvent, Visit };
+export type { ConceptDetail, Conversation, ConversationTree, PersonalGraph, TrackerEvent, Visit };
 
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(path);
@@ -13,6 +13,7 @@ export const api = {
   conversations: () => get<Conversation[]>('/api/conversations'),
   tree: (id: string) => get<ConversationTree>(`/api/conversations/${id}/tree`),
   concept: (id: string) => get<ConceptDetail>(`/api/concepts/${id}`),
+  graph: () => get<PersonalGraph>('/api/graph'),
 };
 
 /** Live updates from the daemon, with automatic reconnect. Returns an unsubscribe function. */
