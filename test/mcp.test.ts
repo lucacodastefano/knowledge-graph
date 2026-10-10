@@ -166,3 +166,37 @@ test("Luca's case: wrappers are refused, and an existing wrapper is dissolved by
   assert.match((renamed.content as { text: string }[])[0].text, /- Deroghe ai principi/);
   await client.close();
 });
+
+test('detail is exposed only when the canvas turns it on, and Approfondisci shows sub-concepts as sections', async () => {
+  const schemaOf = async (c: Client) =>
+    JSON.stringify((await c.listTools()).tools.find((t) => t.name === 'kc_track')!.inputSchema);
+  const off = await connect();
+  assert.ok(!(await schemaOf(off)).includes('detail'));
+  assert.ok(!(off.getInstructions() ?? '').includes('detail'));
+  await off.close();
+
+  const patch = (body: object) =>
+    fetch(new URL('/api/settings', base), { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  assert.deepEqual(await (await patch({ detail: true })).json(), { detail: true });
+  const on = await connect();
+  assert.ok((await schemaOf(on)).includes('detail'));
+  assert.match(on.getInstructions() ?? '', /"detail"/);
+  await on.close();
+  await patch({ detail: false });
+
+  const id = tracker.startConversation('Architettura', null).id;
+  const [da] = tracker.track(id, [
+    { title: 'Design Authority', summary: 'Organo di governo.', parent: 'root', detail: '- decide\n- verifica' },
+    { title: 'Gate', summary: 'Punti di controllo.', parent: '#0' },
+    { title: 'Gate di design', summary: 'Prima dello sviluppo.', parent: '#1' },
+    { title: 'Deroghe', summary: 'Eccezioni motivate.', parent: '#0' },
+  ]);
+  const page = await (await fetch(new URL(`/api/concepts/${da.conceptId}`, base))).json();
+  const [occ] = page.visits;
+  assert.equal(occ.detail, '- decide\n- verifica');
+  assert.equal(occ.parentTitle, null);
+  assert.deepEqual(
+    occ.sections.map((s: { title: string; children: { title: string }[] }) => [s.title, s.children.map((c) => c.title)]),
+    [['Gate', ['Gate di design']], ['Deroghe', []]],
+  );
+});

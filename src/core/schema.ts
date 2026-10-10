@@ -37,6 +37,11 @@ CREATE TABLE IF NOT EXISTS concept_links (
   PRIMARY KEY (from_concept_id, to_concept_id, kind)
 );
 
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS concepts_fts USING fts5(
   concept_id UNINDEXED, name, tokenize = 'trigram remove_diacritics 1'
 );

@@ -29,6 +29,10 @@ after(async () => {
   await app.close();
 });
 
+/** A node by its title only: the "anche in" badge is part of the node's text. */
+const titled = (page: import('playwright').Page, title: string | RegExp) =>
+  page.locator('[data-testid=visit]').filter({ has: page.locator('.visit-title', { hasText: title }) });
+
 function simulate(delayMs: number): Promise<string> {
   return new Promise((resolve, reject) => {
     const p = spawn(process.execPath, [join(import.meta.dirname, '..', '..', 'scripts', 'simulate.ts'), base, String(delayMs)]);
@@ -57,21 +61,25 @@ test('the canvas starts blank and grows live while the model tracks concepts', a
   assert.ok((await page.locator('.react-flow__edge.cross-link').count()) >= 2, 'dashed cross-links for returning concepts');
   await page.screenshot({ path: join(out, '3-completo.png') });
 
-  const node = page.locator('[data-testid=visit]', { hasText: 'Consumer group' });
+  const node = titled(page, 'Consumer group');
   await node.hover();
   const tooltip = page.getByRole('tooltip');
   await tooltip.waitFor();
   assert.match(await tooltip.innerText(), /ogni partizione è letta da un solo membro/);
   await page.screenshot({ path: join(out, '4-hover.png') });
 
-  await page.locator('[data-testid=visit]', { hasText: /^Partizioni$/ }).first().hover();
+  await titled(page, /^Partizioni$/).first().hover();
   assert.equal(await page.getByRole('tooltip').count(), 1, 'only one tooltip at a time');
   await page.getByRole('tooltip').getByRole('button', { name: 'Approfondisci' }).click();
   const panel = page.getByLabel('Dettaglio concetto');
   await panel.waitFor();
   // The panel opens before its data arrives: wait for the list, not just the frame.
-  await panel.locator('.visits li').nth(2).waitFor();
-  assert.equal(await panel.locator('.visits li').count(), 3, 'all visits of the concept, incl. the merged one');
+  await panel.locator('.visits > li').nth(2).waitFor();
+  assert.equal(await panel.locator('.visits > li').count(), 3, 'all visits of the concept, incl. the merged one');
+  // D17: sub-concepts as sections; D16: each occurrence says where it sits, and the node shows "anche in".
+  await panel.getByRole('heading', { name: 'Chiave di partizionamento' }).waitFor();
+  assert.match(await panel.innerText(), /sotto «Event sourcing»/);
+  assert.match(await titled(page, /^Partizioni$/).first().innerText(), /anche in:/);
   await page.screenshot({ path: join(out, '5-approfondisci.png') });
 });
 
@@ -131,7 +139,7 @@ test('search finds a concept and the canvas corrects nodes and concepts (RF17, D
   await panel.getByRole('button', { name: 'Rinomina' }).click();
   await panel.getByLabel('Nuovo nome').fill('Consumer groups');
   await panel.getByRole('button', { name: 'Salva' }).click();
-  await visits.filter({ hasText: /^Consumer groups$/ }).waitFor();
+  await titled(page, /^Consumer groups$/).waitFor();
 
   // A name already taken is refused with a hint to merge.
   await panel.getByRole('button', { name: 'Rinomina' }).click();
@@ -153,7 +161,7 @@ test('search finds a concept and the canvas corrects nodes and concepts (RF17, D
 
   // Edit a single node: move it, rename it, then delete another one.
   const editNode = async (title: string) => {
-    await visits.filter({ hasText: title }).hover();
+    await titled(page, title).hover();
     await page.getByRole('tooltip').getByRole('button', { name: 'Modifica' }).click();
     const p = page.getByLabel('Modifica nodo');
     await p.waitFor();
@@ -164,7 +172,7 @@ test('search finds a concept and the canvas corrects nodes and concepts (RF17, D
   await edit.getByLabel('Sotto').selectOption(kafkaId);
   await edit.getByLabel('Titolo').fill('Snapshot');
   await edit.getByRole('button', { name: 'Salva' }).click();
-  await visits.filter({ hasText: /^Snapshot$/ }).waitFor();
+  await titled(page, /^Snapshot$/).waitFor();
   assert.equal((await tree()).visits.find((v) => v.title === 'Snapshot')!.parentVisitId, kafkaId);
   await page.screenshot({ path: join(out, '9-modifica-nodo.png') });
   await edit.getByRole('button', { name: 'Chiudi modifica' }).click();

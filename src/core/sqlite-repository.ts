@@ -47,6 +47,7 @@ function toVisit(r: Row): Visit {
     title: r.title as string,
     summary: r.summary as string,
     excerpt: (r.excerpt as string | null) ?? null,
+    detail: (r.detail as string | null) ?? null,
     seq: Number(r.seq),
     createdAt: r.created_at as string,
   };
@@ -163,6 +164,7 @@ export class SqliteRepository implements Repository {
       for (const r of this.db.prepare('SELECT id, name FROM concepts').all()) set.run(similarityKey(r.name as string), r.id as string);
     }
     this.db.exec('CREATE INDEX IF NOT EXISTS concepts_key ON concepts(name_key)');
+    if (!has('visits', 'detail')) this.db.exec('ALTER TABLE visits ADD COLUMN detail TEXT');
   }
 
   findConceptsByKey(name: string, excludeId: string): ConceptMatch[] {
@@ -270,10 +272,10 @@ export class SqliteRepository implements Repository {
       .get(input.conversationId) as { next: number };
     this.db
       .prepare(
-        `INSERT INTO visits (id, conversation_id, concept_id, parent_visit_id, title, summary, excerpt, seq, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO visits (id, conversation_id, concept_id, parent_visit_id, title, summary, excerpt, detail, seq, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(id, input.conversationId, input.conceptId, input.parentVisitId, input.title, input.summary, input.excerpt, next, t);
+      .run(id, input.conversationId, input.conceptId, input.parentVisitId, input.title, input.summary, input.excerpt, input.detail, next, t);
     this.db.prepare('UPDATE concepts SET last_seen_at = ? WHERE id = ?').run(t, input.conceptId);
     return this.getVisit(id)!;
   }
@@ -286,8 +288,8 @@ export class SqliteRepository implements Repository {
     this.db.prepare('UPDATE visits SET title = ? WHERE id = ?').run(title, visitId);
   }
 
-  setVisitSummary(visitId: string, summary: string, excerpt: string | null): void {
-    this.db.prepare('UPDATE visits SET summary = ?, excerpt = ? WHERE id = ?').run(summary, excerpt, visitId);
+  setVisitSummary(visitId: string, summary: string, excerpt: string | null, detail: string | null): void {
+    this.db.prepare('UPDATE visits SET summary = ?, excerpt = ?, detail = ? WHERE id = ?').run(summary, excerpt, detail, visitId);
   }
 
   setVisitParent(visitId: string, parentVisitId: string | null): void {
@@ -343,6 +345,14 @@ export class SqliteRepository implements Repository {
       .all()
       .map((r) => ({ source: r.source as string, target: r.target as string, weight: Number(r.weight) }));
     return { concepts, edges };
+  }
+
+  getSetting(key: string): string | undefined {
+    return this.db.prepare('SELECT value FROM settings WHERE key = ?').get(key)?.value as string | undefined;
+  }
+
+  setSetting(key: string, value: string): void {
+    this.db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, value);
   }
 
   transaction<T>(fn: () => T): T {

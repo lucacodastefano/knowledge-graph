@@ -13,6 +13,8 @@ export interface VisitNodeData extends Record<string, unknown> {
   hovered: boolean;
   /** Visit of the concept picked in the search. */
   match: boolean;
+  /** Where else this concept appears in the conversation: the parents of its other nodes (D16). */
+  also: string[];
   onHover: (visitId: string | null) => void;
   onOpen: (conceptId: string) => void;
   onEdit: (visitId: string) => void;
@@ -33,6 +35,22 @@ export function buildEdges(visits: Visit[]): Edge[] {
     lastByConcept.set(v.conceptId, v);
   }
   return edges;
+}
+
+/** For each node, the parents of the other nodes of the same concept ("anche in", D16). */
+export function alsoIn(visits: Visit[]): Map<string, string[]> {
+  const title = new Map(visits.map((v) => [v.id, v.title]));
+  const byConcept = new Map<string, Visit[]>();
+  for (const v of visits) byConcept.set(v.conceptId, [...(byConcept.get(v.conceptId) ?? []), v]);
+  return new Map(
+    visits.map((v) => [
+      v.id,
+      byConcept
+        .get(v.conceptId)!
+        .filter((o) => o.id !== v.id)
+        .map((o) => (o.parentVisitId ? title.get(o.parentVisitId) ?? '' : 'radice')),
+    ]),
+  );
 }
 
 /** Layered left-to-right layout computed on tree edges only, so cross-links never distort the tree. */

@@ -4,6 +4,7 @@ import { ConversationView } from './ConversationView.tsx';
 import { PersonalView } from './PersonalView.tsx';
 import { DetailPanel } from './DetailPanel.tsx';
 import { ConceptSearch } from './ConceptSearch.tsx';
+import { api } from './api.ts';
 
 /** A tracker event with a sequence number, so views can react to every change. */
 export interface LiveEvent {
@@ -67,6 +68,7 @@ export function App() {
           {tab('conversation', 'Conversazione', '#conversazione')}
           {tab('personal', 'Grafo personale', '#personale')}
         </nav>
+        <DetailSetting />
         <span className={`dot ${online ? 'on' : ''}`} title={online ? 'Collegato' : 'Non collegato'} />
       </header>
       <main>
@@ -85,5 +87,21 @@ export function App() {
         )}
       </main>
     </div>
+  );
+}
+
+/** D17: opt-in "Dettaglio approfondito"; when off the server does not even expose the field to the model. */
+function DetailSetting() {
+  const [on, setOn] = useState<boolean | null>(null);
+  useEffect(() => void api.settings().then((s) => setOn(s.detail), () => setOn(null)), []);
+  if (on === null) return null;
+  return (
+    <label
+      className="setting"
+      title="Quando il modello approfondisce un concetto scrive anche 5-10 punti chiave. Costa qualche token in più. Vale dalla chat successiva."
+    >
+      <input type="checkbox" checked={on} onChange={(e) => void api.updateSettings({ detail: e.target.checked }).then((s) => setOn(s.detail))} />
+      Dettaglio approfondito
+    </label>
   );
 }

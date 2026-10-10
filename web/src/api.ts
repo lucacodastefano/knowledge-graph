@@ -1,7 +1,16 @@
-import type { Concept, ConceptDetail, Conversation, ConversationTree, PersonalGraph, Visit } from '../../src/core/types.ts';
+import type {
+  Concept,
+  ConceptPage,
+  ConceptSection,
+  Conversation,
+  ConversationTree,
+  PersonalGraph,
+  Settings,
+  Visit,
+} from '../../src/core/types.ts';
 import type { TrackerEvent, VisitEdit } from '../../src/core/tracker.ts';
 
-export type { Concept, ConceptDetail, Conversation, ConversationTree, PersonalGraph, TrackerEvent, Visit, VisitEdit };
+export type { Concept, ConceptPage, ConceptSection, Conversation, ConversationTree, PersonalGraph, Settings, TrackerEvent, Visit, VisitEdit };
 
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(path);
@@ -36,7 +45,9 @@ export function explain(message: string): string {
 export const api = {
   conversations: () => get<Conversation[]>('/api/conversations'),
   tree: (id: string) => get<ConversationTree>(`/api/conversations/${id}/tree`),
-  concept: (id: string) => get<ConceptDetail>(`/api/concepts/${id}`),
+  concept: (id: string) => get<ConceptPage>(`/api/concepts/${id}`),
+  settings: () => get<Settings>('/api/settings'),
+  updateSettings: (patch: Partial<Settings>) => send<Settings>('PATCH', '/api/settings', patch),
   graph: () => get<PersonalGraph>('/api/graph'),
   search: (q: string) => get<Concept[]>(`/api/search?q=${encodeURIComponent(q)}`),
   renameConcept: (id: string, name: string) => send<Concept>('PATCH', `/api/concepts/${id}`, { name }),

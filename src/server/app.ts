@@ -7,6 +7,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { type Tracker, TrackerError, type TrackerEvent, type VisitEdit } from '../core/tracker.ts';
 import { Reader } from '../core/reader.ts';
+import type { Settings } from '../core/types.ts';
 import { createMcpServer, type McpSessionState } from './mcp.ts';
 
 export interface AppOptions {
@@ -85,9 +86,15 @@ export async function buildApp({ tracker, webRoot, logger = false }: AppOptions)
   });
   app.get('/api/graph', async () => repo.getPersonalGraph());
   app.get<{ Params: { id: string } }>('/api/concepts/:id', async (req, reply) => {
-    const detail = repo.getConceptDetail(req.params.id);
-    return detail ?? reply.code(404).send({ error: 'Not found' });
+    const page = new Reader(repo).conceptPage(req.params.id);
+    return page ?? reply.code(404).send({ error: 'Not found' });
   });
+  app.get('/api/settings', async () => tracker.settings());
+  app.patch<{ Body: Partial<Settings> }>(
+    '/api/settings',
+    { schema: { body: { type: 'object', properties: { detail: { type: 'boolean' } }, additionalProperties: false } } },
+    async (req) => tracker.updateSettings(req.body),
+  );
 
   app.get<{ Querystring: { q?: string } }>('/api/search', async (req) => new Reader(repo).search(req.query.q ?? ''));
 

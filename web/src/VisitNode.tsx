@@ -9,13 +9,18 @@ export function VisitNode({ data }: NodeProps<VisitNodeType>) {
 
   return (
     <div
-      className={`visit${current ? ' current' : ''}${fresh ? ' fresh' : ''}${match ? ' match' : ''}`}
+      className={`visit${data.also.length ? ' shared' : ''}${current ? ' current' : ''}${fresh ? ' fresh' : ''}${match ? ' match' : ''}`}
       onMouseEnter={show}
       onMouseLeave={hide}
       data-testid="visit"
     >
       <Handle type="target" position={Position.Left} />
       <span className="visit-title">{visit.title}</span>
+      {data.also.length > 0 && (
+        <span className="also" title={`Anche in: ${data.also.join(', ')}`}>
+          anche in: {data.also.join(', ')}
+        </span>
+      )}
       <Handle type="source" position={Position.Right} />
       <NodeToolbar isVisible={hovered} position={Position.Bottom} offset={8}>
         <div className="tooltip" onMouseEnter={show} onMouseLeave={hide} role="tooltip">
