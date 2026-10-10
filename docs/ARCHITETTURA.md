@@ -52,7 +52,7 @@ Alternativa scartata: ogni client avvia il suo server stdio e tutti scrivono sul
 | Tempo reale | **WebSocket**, eventi dal dominio | Latenza < 1 s (RNF4) | SSE |
 | Distribuzione | **pacchetto npm**: `npx knowledge-graph` | Un comando (RNF2) | Binario singolo, Docker |
 
-**Pacchetto**: Node rifiuta il type stripping dentro `node_modules`, quindi il pacchetto pubblicato contiene JavaScript compilato. `npm run build` (lanciato da `prepack`) produce `dist/` con `tsc -p tsconfig.build.json` (`rewriteRelativeImportExtensions` riscrive gli import `.ts` in `.js`) e `web/dist/` con Vite; il comando `knowledge-graph` punta a `dist/server/cli.js`. In sviluppo si continua a eseguire `src/` direttamente. La CI installa il pacchetto impacchettato in una cartella vuota e verifica che il demone parta.
+**Pacchetto**: Node rifiuta il type stripping dentro `node_modules`, quindi il pacchetto pubblicato contiene JavaScript compilato. `npm run build` (lanciato da `prepare`, quindi anche a ogni `npm install` e nelle installazioni da GitHub) produce `dist/` con `tsc -p tsconfig.build.json` (`rewriteRelativeImportExtensions` riscrive gli import `.ts` in `.js`) e `web/dist/` con Vite; il comando `knowledge-graph` punta a `dist/server/cli.js`. In sviluppo si continua a eseguire `src/` direttamente. La CI installa il pacchetto impacchettato in una cartella vuota e verifica che il demone parta.
 | Licenza | **MIT** | Permissiva, standard | Apache 2.0 |
 
 ## 4. Modello dati
