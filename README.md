@@ -13,14 +13,16 @@ The model writes to it through [MCP](https://modelcontextprotocol.io): every new
 Requires [Node.js](https://nodejs.org) 22.18 or newer.
 
 ```bash
-npx knowledge-graph
+npx @lucacodastefano/knowledge-graph
 ```
+
+> Not on npm yet? Use `npx github:lucacodastefano/knowledge-graph` wherever this page says `npx @lucacodastefano/knowledge-graph`: it builds the package from GitHub on first run.
 
 Open http://localhost:7777, then connect your model. For Claude Code:
 
 ```bash
 claude mcp add --transport http knowledge-graph http://localhost:7777/mcp
-npx knowledge-graph install-skill   # optional: tracking rules as a Claude Code skill
+npx @lucacodastefano/knowledge-graph install-skill   # optional: tracking rules as a Claude Code skill
 ```
 
 Start chatting: the canvas fills up as you go.
@@ -28,7 +30,7 @@ Start chatting: the canvas fills up as you go.
 For Claude Desktop and clients that only speak stdio, add this to the client's MCP configuration (the bridge starts the daemon for you):
 
 ```json
-{ "mcpServers": { "knowledge-graph": { "command": "npx", "args": ["-y", "knowledge-graph", "stdio"] } } }
+{ "mcpServers": { "knowledge-graph": { "command": "npx", "args": ["-y", "@lucacodastefano/knowledge-graph", "stdio"] } } }
 ```
 
 The **[user manual](docs/MANUAL.md)** covers every client (Claude Code, Claude Desktop, Gemini CLI, VS Code, others), the canvas, corrections, search, configuration and backups.

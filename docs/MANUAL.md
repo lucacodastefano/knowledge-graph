@@ -7,8 +7,10 @@ knowledge-graph is a small local server (the *daemon*) plus a web canvas. Your c
 You need Node.js 22.18 or newer (`node -v`).
 
 ```bash
-npx knowledge-graph            # same as: npx knowledge-graph serve
+npx @lucacodastefano/knowledge-graph            # same as: npx @lucacodastefano/knowledge-graph serve
 ```
+
+Before the first npm release, run it straight from GitHub with `npx github:lucacodastefano/knowledge-graph` (the first run takes a minute: it installs and builds the package). Use the same form in the client configurations below.
 
 The daemon listens on `127.0.0.1:7777` only:
 
@@ -19,7 +21,7 @@ The daemon listens on `127.0.0.1:7777` only:
 Leave it running in a terminal while you chat. To install the command permanently instead of going through `npx`:
 
 ```bash
-npm install -g knowledge-graph
+npm install -g @lucacodastefano/knowledge-graph
 knowledge-graph
 ```
 
@@ -39,7 +41,7 @@ knowledge-graph
 | `KG_PORT` | `7777` | Port of the daemon (also used by the stdio bridge to find it) |
 | `KG_DB` | `~/.knowledge-graph/graph.db` | SQLite file holding everything |
 
-Example: `KG_PORT=8080 KG_DB=~/notes/study.db npx knowledge-graph`. If you change the port, use the same value in your client configuration.
+Example: `KG_PORT=8080 KG_DB=~/notes/study.db npx @lucacodastefano/knowledge-graph`. If you change the port, use the same value in your client configuration.
 
 ## 2. Connect your model
 
@@ -49,7 +51,7 @@ Any MCP client works. HTTP is the direct route; stdio goes through the bridge. E
 
 ```bash
 claude mcp add --transport http knowledge-graph http://localhost:7777/mcp
-npx knowledge-graph install-skill
+npx @lucacodastefano/knowledge-graph install-skill
 ```
 
 Add `--scope user` to the first command to enable it in every project. The skill is optional but recommended: it repeats the tracking and reading rules in the form Claude Code follows most reliably.
@@ -61,7 +63,7 @@ Settings → Developer → Edit Config opens `claude_desktop_config.json` (macOS
 ```json
 {
   "mcpServers": {
-    "knowledge-graph": { "command": "npx", "args": ["-y", "knowledge-graph", "stdio"] }
+    "knowledge-graph": { "command": "npx", "args": ["-y", "@lucacodastefano/knowledge-graph", "stdio"] }
   }
 }
 ```
@@ -91,7 +93,7 @@ or in `~/.gemini/settings.json`:
 ### Other clients
 
 - Supports Streamable HTTP: point it at `http://localhost:7777/mcp` and start the daemon first.
-- stdio only: command `npx`, arguments `-y knowledge-graph stdio`.
+- stdio only: command `npx`, arguments `-y @lucacodastefano/knowledge-graph stdio`.
 - If the model ignores the server instructions, paste the `kc_instructions` prompt (most clients list MCP prompts) at the start of the chat.
 
 ## 3. Using it while you chat
@@ -162,7 +164,7 @@ Type in the search box at the top (**Cerca concetti**). Results come in this ord
 | Symptom | Fix |
 |---|---|
 | `EADDRINUSE` on start | The daemon is already running (open the canvas), or another program uses the port: set `KG_PORT`. |
-| Client cannot connect over HTTP | Start the daemon first (`npx knowledge-graph`), and check the port in the URL. |
+| Client cannot connect over HTTP | Start the daemon first (`npx @lucacodastefano/knowledge-graph`), and check the port in the URL. |
 | Stdio client times out on first start | `npx` was downloading the package; restart the client once. Or install globally and use `"command": "knowledge-graph", "args": ["stdio"]`. |
 | Canvas stays empty while chatting | Check the client lists the `kc_*` tools; ask the model to "track this"; for Claude Code install the skill. |
 | Wrong or duplicated concepts | Fix them from the canvas (section 5). |

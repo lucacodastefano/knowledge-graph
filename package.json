@@ -1,5 +1,5 @@
 {
-  "name": "knowledge-graph",
+  "name": "@lucacodastefano/knowledge-graph",
   "version": "0.1.0",
   "description": "A canvas that grows a concept graph while you chat with an LLM, fed through MCP.",
   "keywords": [

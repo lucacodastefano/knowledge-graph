@@ -6,7 +6,7 @@ trap 'kill "${pid:-0}" 2>/dev/null || true; rm -rf "${work:?}"' EXIT
 npm pack --silent --pack-destination "$work" >/dev/null
 cd "$work"
 npm init -y >/dev/null
-npm install --silent ./knowledge-graph-*.tgz
+npm install --silent ./*.tgz
 export HOME="$work/home" KG_PORT=7790
 npx knowledge-graph version
 npx knowledge-graph install-skill
