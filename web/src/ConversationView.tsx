@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Background, Controls, ReactFlow, ReactFlowProvider, useReactFlow, type Edge } from '@xyflow/react';
+import {
+  applyNodeChanges,
+  Background,
+  Controls,
+  ReactFlow,
+  ReactFlowProvider,
+  useReactFlow,
+  type Edge,
+  type NodeChange,
+} from '@xyflow/react';
 import { api, type Conversation, type ConversationTree } from './api.ts';
 import type { LiveEvent } from './App.tsx';
 import { buildEdges, layout, type VisitNode as VisitNodeType } from './layout.ts';
@@ -30,6 +39,12 @@ function Tree({ live, onOpenConcept }: Props) {
     else hoverTimer.current = setTimeout(() => setHovered(null), 180);
   }, []);
   const flow = useReactFlow();
+  // Keeps React Flow's measured sizes in our state: without them every rebuild resets nodes to
+  // unmeasured (hidden), and a rebuild racing the resize observer can leave them hidden for good.
+  const onNodesChange = useCallback(
+    (changes: NodeChange<VisitNodeType>[]) => setNodes((ns) => applyNodeChanges(changes, ns)),
+    [],
+  );
   const knownIds = useRef<Set<string>>(new Set());
 
   const activeId = pinned || conversations[0]?.id || null;
@@ -72,9 +87,11 @@ function Tree({ live, onOpenConcept }: Props) {
     let cancelled = false;
     void layout(tree.visits).then((pos) => {
       if (cancelled) return;
-      setNodes(
-        tree.visits.map((v) => ({
+      setNodes((prev) => {
+        const measured = new Map(prev.map((n) => [n.id, n.measured]));
+        return tree.visits.map((v) => ({
           id: v.id,
+          measured: measured.get(v.id),
           type: 'visit',
           position: pos.get(v.id) ?? { x: 0, y: 0 },
           data: {
@@ -85,8 +102,8 @@ function Tree({ live, onOpenConcept }: Props) {
             onHover,
             onOpen: onOpenConcept,
           },
-        })),
-      );
+        }));
+      });
       setEdges(buildEdges(tree.visits));
       requestAnimationFrame(() => {
         const cur = tree.conversation.currentVisitId;
@@ -125,6 +142,8 @@ function Tree({ live, onOpenConcept }: Props) {
         <ReactFlow
           nodes={shown}
           edges={edges}
+          onNodesChange={onNodesChange}
+          deleteKeyCode={null}
           nodeTypes={nodeTypes}
           nodesDraggable={false}
           nodesConnectable={false}
