@@ -1,0 +1,41 @@
+{
+  "name": "knowledge-graph",
+  "version": "0.1.0",
+  "description": "A canvas that grows a concept graph while you chat with an LLM, fed through MCP.",
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning src/server/cli.ts serve",
+    "test": "node --disable-warning=ExperimentalWarning --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc && tsc -p web",
+    "dev:web": "vite --config web/vite.config.ts",
+    "build:web": "vite build --config web/vite.config.ts",
+    "test:e2e": "npm run build:web && node --disable-warning=ExperimentalWarning --test test/e2e/*.e2e.ts"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@fastify/static": "^10.1.6",
+    "@fastify/websocket": "^11.3.4",
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "fastify": "^5.12.5",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "@xyflow/react": "^12.12.0",
+    "elkjs": "^0.12.0",
+    "playwright": "^1.64.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "bin": {
+    "knowledge-graph": "src/server/cli.ts"
+  }
+}
