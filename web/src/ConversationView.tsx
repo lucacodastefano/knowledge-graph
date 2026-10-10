@@ -36,7 +36,7 @@ const nodeTypes = { visit: VisitNode };
 const edgeTypes = { cross: CrossEdge };
 const FRESH_MS = 1600;
 /** WP6: the tooltip opens after a short dwell and closes at once, with a grace period to reach its button. */
-const OPEN_DELAY_MS = 400;
+const OPEN_DELAY_MS = 700;
 const CLOSE_GRACE_MS = 150;
 const AUTO = '';
 const LAYOUTS: { kind: LayoutKind; label: string }[] = [
@@ -60,10 +60,12 @@ interface Props {
   live: LiveEvent | null;
   found: Found | null;
   onOpenConcept: (conceptId: string) => void;
+  /** A click on empty canvas: the app closes the detail panel. */
+  onBackgroundClick?: () => void;
 }
 
 /** The conversation as a navigation tree (D1). */
-function Tree({ live, found, onOpenConcept }: Props) {
+function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [pinned, setPinned] = useState<string>(AUTO);
   const [tree, setTree] = useState<ConversationTree | null>(null);
@@ -349,7 +351,10 @@ function Tree({ live, found, onOpenConcept }: Props) {
           edges={shownEdges}
           onNodesChange={onNodesChange}
           onNodeClick={(_, n) => setSelected((s) => (s === n.id ? null : n.id))}
-          onPaneClick={() => setSelected(null)}
+          onPaneClick={() => {
+            setSelected(null);
+            onBackgroundClick?.();
+          }}
           deleteKeyCode={null}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}

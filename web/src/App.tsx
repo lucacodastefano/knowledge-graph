@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { subscribe, type TrackerEvent } from './api.ts';
 import { ConversationView } from './ConversationView.tsx';
 import { PersonalView } from './PersonalView.tsx';
@@ -26,6 +26,12 @@ export function App() {
   const [live, setLive] = useState<LiveEvent | null>(null);
   const [online, setOnline] = useState(false);
   const [openConcept, setOpenConcept] = useState<string | null>(null);
+  const closeConcept = useCallback(() => setOpenConcept(null), []);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && closeConcept();
+    addEventListener('keydown', onKey);
+    return () => removeEventListener('keydown', onKey);
+  }, [closeConcept]);
   const [found, setFound] = useState<Found | null>(null);
 
   useEffect(() => subscribe((event) => setLive((prev) => ({ seq: (prev?.seq ?? 0) + 1, event })), setOnline), []);
@@ -73,15 +79,15 @@ export function App() {
       </header>
       <main>
         {view === 'conversation' ? (
-          <ConversationView live={live} found={found} onOpenConcept={setOpenConcept} />
+          <ConversationView live={live} found={found} onOpenConcept={setOpenConcept} onBackgroundClick={closeConcept} />
         ) : (
-          <PersonalView live={live} found={found} onOpenConcept={setOpenConcept} />
+          <PersonalView live={live} found={found} onOpenConcept={setOpenConcept} onBackgroundClick={closeConcept} />
         )}
         {openConcept && (
           <DetailPanel
             conceptId={openConcept}
             version={live?.seq ?? 0}
-            onClose={() => setOpenConcept(null)}
+            onClose={closeConcept}
             onOpen={setOpenConcept}
           />
         )}
