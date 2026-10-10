@@ -1,6 +1,6 @@
 # knowledge-graph user manual
 
-knowledge-graph is a small local server (the *daemon*) plus a web canvas. Your chat client talks to the daemon through MCP; the daemon stores concepts in SQLite and pushes every change live to the canvas in your browser. The server never calls a model: titles and summaries are written by the model you chat with.
+knowledge-graph is a small local server (the *daemon*) plus a web canvas. Your chat client talks to the daemon through MCP; the daemon stores concepts in SQLite and pushes every change live to the canvas in your browser. The server never calls a model: titles and texts are written by the model you chat with, and each node keeps the key sentences of the answer as the model wrote them, not a summary.
 
 ## 1. Install and start
 
@@ -125,7 +125,7 @@ The top bar has the search box and two tabs. The interface is in Italian.
 The tree of the conversation: each node is a concept as it came up, children are the drill-downs. The highlighted node is the *current* one, where the next topics will hang.
 
 - A **dashed link** joins two nodes of the same concept: the conversation came back to it, possibly from another branch. Such nodes also show **anche in: …** with the other places.
-- **Hover** a node for a moment: a short summary appears beside it, with **Approfondisci** (open the concept panel). It closes as soon as you move to another node; **Esc** closes it too.
+- **Hover** a node for a moment: the node's text (the key sentences of the answer) appears beside it, with **Approfondisci** (open the concept panel). It closes as soon as you move to another node; **Esc** closes it too.
 - The menu at the top picks the conversation; **Segui l'ultima conversazione** (default) follows whichever conversation is active.
 - The second menu picks the layout, remembered by the browser: **Radiale** (default: the first topic in the middle, each level on a wider ring), **Mappa mentale** (the topic in the middle, branches to the right and to the left) or **Albero** (left to right). The bottom-left button fits the whole tree on screen.
 
@@ -135,15 +135,15 @@ Every concept you ever explored, across conversations. Bigger nodes were visited
 
 ### Concept panel
 
-Opened from **Approfondisci**, from the personal graph or from search. It lists every place the concept appears (newest first): conversation, the node it sits under, date and summary, followed by its sub-concepts as sections (two levels), which is where the real depth of an explanation lives.
+Opened from **Approfondisci**, from the personal graph or from search. It lists every place the concept appears (newest first): conversation, the node it sits under, date and the text from the answer, followed by its sub-concepts as sections (two levels), which is where the real depth of an explanation lives.
 
-**Dettaglio approfondito** (checkbox in the top bar, off by default): when on, the model also writes 5-10 key points for a node when it goes deep on it, shown as a list in the panel. It costs some output tokens on those answers; when off, the model is not even told the option exists. The change applies at once, also to chats already open and without restarting the client: the daemon re-announces its tools and tells the model in the result of its next `kc_start` or `kc_track`.
+**Dettaglio approfondito** (checkbox in the top bar, off by default): when on, the model also keeps the 5-10 key points of its answer, worded as in the answer, for a node it goes deep on, shown as a list in the panel. It costs some output tokens on those answers; when off, the model is not even told the option exists. The change applies at once, also to chats already open and without restarting the client: the daemon re-announces its tools and tells the model in the result of its next `kc_start` or `kc_track`.
 
 ## 5. Fixing mistakes
 
 Models get titles wrong sometimes. Every correction is saved at once and shown live in every open canvas.
 
-Everything happens in the **concept panel**. The pencil (**✎**) makes its texts editable in place: the concept name (nodes titled with the old name follow; a name that already belongs to another concept must be merged instead), every summary and key point, the section titles, and for each place **sotto** (move it under another node or to the root, never under its own descendants). **Elimina questo nodo** removes just that node. **Salva** applies everything, **Annulla** drops it. Every save keeps the previous texts in the database, for a future version history.
+Everything happens in the **concept panel**. The pencil (**✎**) makes its texts editable in place: the concept name (nodes titled with the old name follow; a name that already belongs to another concept must be merged instead), every node text and key point, the section titles, and for each place **sotto** (move it under another node or to the root, never under its own descendants). **Elimina questo nodo** removes just that node. **Salva** applies everything, **Annulla** drops it. Every save keeps the previous texts in the database, for a future version history.
 
 The **⋯** menu has **Unisci a…** (merge this concept into another one, picked by searching: all its places move there) and **Elimina concetto** (delete the concept and all its nodes from every conversation).
 
@@ -153,7 +153,7 @@ Deleting a node never loses its children: they move up one level. A concept left
 
 ## 6. Search
 
-Type in the search box at the top (**Cerca concetti**). Results come in this order: exact name, names containing the text, then concepts whose titles or summaries mention it. Picking one opens its panel, highlights it in the conversation tree and centres the personal graph on it.
+Type in the search box at the top (**Cerca concetti**). Results come in this order: exact name, names containing the text, then concepts whose titles or texts mention it. Picking one opens its panel, highlights it in the conversation tree and centres the personal graph on it.
 
 ## 7. Your data
 

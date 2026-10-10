@@ -27,6 +27,10 @@ test('exposes the tracking tools, the instructions prompt and server instruction
   assert.deepEqual(tools, ['kc_focus', 'kc_link', 'kc_move', 'kc_profile', 'kc_recall', 'kc_remove', 'kc_rename', 'kc_start', 'kc_track', 'kc_tree']);
   assert.equal((await client.listPrompts()).prompts[0].name, 'kc_instructions');
   assert.match(client.getInstructions() ?? '', /kc_track/);
+  // Node texts are the answer's own sentences, not a summary of it.
+  assert.match(client.getInstructions() ?? '', /not a summary.*exactly as you will write them; then use them verbatim/);
+  const track = JSON.stringify((await client.listTools()).tools.find((t) => t.name === 'kc_track')!.inputSchema);
+  assert.match(track, /word for word as you will write them/);
   const skill = readFileSync(new URL('../skills/knowledge-graph/SKILL.md', import.meta.url), 'utf8');
   for (const tool of tools) assert.ok(skill.includes(`\`${tool}\``), `skill should cover ${tool}`);
   await client.close();
@@ -241,7 +245,7 @@ test('the detail setting reaches open sessions at once: tools/list_changed and a
     await new Promise((r) => setTimeout(r, 100));
     assert.equal(changed, 1);
     const schema = JSON.stringify((await client.listTools()).tools.find((t) => t.name === 'kc_track')!.inputSchema);
-    assert.ok(schema.includes('detail'));
+    assert.match(schema, /"detail":\{[^}]*key points of your answer, one per line, word for word/);
 
     const first = await track({ title: 'Primo', detail: '- uno' });
     assert.match(texts(first), /Detail setting is now on/);

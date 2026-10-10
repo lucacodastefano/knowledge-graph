@@ -35,7 +35,7 @@ function guarded(fn: () => CallToolResult, onError = ''): CallToolResult {
   }
 }
 
-const detailField = { detail: z.string().optional().describe('Only when going deep on this node: 5-10 key points, one per line') };
+const detailField = { detail: z.string().optional().describe('Only when going deep on this node: the 5-10 key points of your answer, one per line, word for word') };
 
 /**
  * kc_track input. `detail` is advertised only when the canvas setting is on (D17: no tokens otherwise), but the node
@@ -46,7 +46,7 @@ const trackShape = (withDetail: boolean) => ({
     .array(
       z.looseObject({
         title: z.string().describe('Concept name, 1-5 words'),
-        summary: z.string().describe('1-3 sentences of what you explained'),
+        summary: z.string().describe('The 1-3 key sentences of your answer on it, word for word as you will write them'),
         parent: z.string().describe('Title of the node it belongs under (from the tree, or another node of this call), "root", or "#n" for node n of this call'),
         excerpt: z.string().optional().describe('Rarely: a formula or code line to keep verbatim'),
         conceptId: z.string().optional().describe('Known concept id to reuse'),
@@ -207,7 +207,7 @@ export function createMcpServer(tracker: Tracker, state: McpSessionState): McpSe
       description: 'Outline of a conversation (default: this one, else the latest) with node ids.',
       inputSchema: {
         conversation: z.string().optional().describe('Conversation id'),
-        summaries: z.boolean().optional().describe('Include node summaries'),
+        summaries: z.boolean().optional().describe('Include node texts'),
       },
     },
     ({ conversation, summaries }) =>

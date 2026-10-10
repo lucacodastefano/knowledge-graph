@@ -7,7 +7,7 @@
 - Locale, open source, installabile con un comando (RNF1–3).
 - Qualunque client MCP deve poter scrivere e leggere (D6, RNF9).
 - Il canvas si aggiorna in tempo reale mentre il modello scrive (RF11, RNF4).
-- Nessuna chiave API o LLM lato server: l'intelligenza (titoli, riassunti, "è lo stesso concetto?") la mette il modello che chatta. Il server è un archivio veloce e stupido.
+- Nessuna chiave API o LLM lato server: l'intelligenza (titoli, testi dei nodi, "è lo stesso concetto?") la mette il modello che chatta. Il server è un archivio veloce e stupido.
 
 ## 2. Forma del sistema: un solo processo locale
 
@@ -71,39 +71,39 @@ settings(key, value)                                     -- impostazioni del can
 - **Collegamento tratteggiato** (D1) = due visite della stessa conversazione con lo stesso `concept_id`; sul nodo il badge "anche in" (D16).
 - **Approfondisci** = tutte le visite del concetto, ciascuna con il padre e i figli fino a 2 livelli come sezioni (D17).
 - **Grafo personale** = `concepts` + archi derivati dalle visite (genitore → figlio) + `concept_links`.
-- Il **riassunto di un concetto** è la lista dei riassunti delle sue visite, più recente prima. Nessun LLM lato server.
+- Il **testo di un nodo** (`summary`) non è un riassunto: sono le 1-3 frasi chiave della risposta, scritte dal modello in `kc_track` esattamente come le scrive poi nella risposta (lo chiedono istruzioni e descrizione del campo); `detail` sono i punti chiave della risposta, con le stesse parole. Il testo di un concetto è la lista dei testi delle sue visite, più recente prima. Nessun LLM lato server.
 
 ## 5. Strumenti MCP (pochi e brevi, per il costo in token)
 
 | Strumento | Fa | Requisiti |
 |---|---|---|
 | `kc_start(title?)` | Apre o riprende la conversazione, restituisce id e albero compatto | RF1 |
-| `kc_track(nodes[])` | **Batch**, chiamato **prima** di scrivere la risposta: crea una o più visite `{title, summary, parent, excerpt?}`. `parent` è obbligatorio (D15): titolo di un nodo della conversazione (ultima visita con quel titolo), `"root"`, oppure titolo o `"#n"` di un altro nodo della stessa chiamata, in qualsiasi ordine (il batch si elabora prima i padri, ordinamento topologico; un ciclo di padri è un errore). Il batch è atomico: con un errore non si scrive nulla e il risultato lo dice, chiedendo di richiamare `kc_track`. Stesso concetto sotto lo stesso padre aggiorna il riassunto invece di duplicare; in un altro ramo vale D1. Un figlio che riformula il padre (stesse parole, "Aspetti di X", "X" sotto "X e Y" che si prende tutto il ramo) viene rifiutato (D16). Restituisce gli id, al massimo 3 concetti simili per nodo (prima i quasi-duplicati: plurali, articoli, ordine delle parole, colonna `concepts.name_key`) e l'albero compatto della conversazione (solo titoli) | RF2, RF3, RF5, RF6 |
+| `kc_track(nodes[])` | **Batch**, chiamato **prima** di scrivere la risposta: crea una o più visite `{title, summary, parent, excerpt?}`. `parent` è obbligatorio (D15): titolo di un nodo della conversazione (ultima visita con quel titolo), `"root"`, oppure titolo o `"#n"` di un altro nodo della stessa chiamata, in qualsiasi ordine (il batch si elabora prima i padri, ordinamento topologico; un ciclo di padri è un errore). Il batch è atomico: con un errore non si scrive nulla e il risultato lo dice, chiedendo di richiamare `kc_track`. Stesso concetto sotto lo stesso padre aggiorna il testo invece di duplicare; in un altro ramo vale D1. Un figlio che riformula il padre (stesse parole, "Aspetti di X", "X" sotto "X e Y" che si prende tutto il ramo) viene rifiutato (D16). Restituisce gli id, al massimo 3 concetti simili per nodo (prima i quasi-duplicati: plurali, articoli, ordine delle parole, colonna `concepts.name_key`) e l'albero compatto della conversazione (solo titoli) | RF2, RF3, RF5, RF6 |
 | `kc_focus(node_id)` | Torna su un nodo esistente (diventa il corrente) | RF4 |
 | `kc_link(visit_id, concept_id)` | Conferma che una visita è un concetto già noto (unisce) | RF6 |
 | `kc_move(node, parent)` | Sposta un nodo (con i figli) sotto un altro nodo o alla radice, indicati per titolo o id; non unisce concetti | RF18 |
-| (opzione) `detail` in `kc_track` | 5-10 punti chiave quando la risposta approfondisce un nodo; esposto con la sua regola solo se l'impostazione del canvas "Dettaglio approfondito" è accesa (tabella `settings`). Vale subito: le istruzioni del server sono fisse per sessione (Claude Desktop, via bridge, ne apre una sola per tutta la vita dell'app), quindi al cambio ogni sessione aperta registra di nuovo `kc_track` (notifica `tools/list_changed`, inoltrata dal bridge) e il risultato del successivo `kc_start`/`kc_track` porta una riga con la regola o con "spento". Da spento nessun costo in token; un `detail` inviato da spento viene ignorato | D17 |
+| (opzione) `detail` in `kc_track` | I 5-10 punti chiave della risposta, con le sue parole, quando approfondisce un nodo; esposto con la sua regola solo se l'impostazione del canvas "Dettaglio approfondito" è accesa (tabella `settings`). Vale subito: le istruzioni del server sono fisse per sessione (Claude Desktop, via bridge, ne apre una sola per tutta la vita dell'app), quindi al cambio ogni sessione aperta registra di nuovo `kc_track` (notifica `tools/list_changed`, inoltrata dal bridge) e il risultato del successivo `kc_start`/`kc_track` porta una riga con la regola o con "spento". Da spento nessun costo in token; un `detail` inviato da spento viene ignorato | D17 |
 | `kc_rename(node, title)` | Rinomina un nodo; un titolo già usato da un altro concetto lo collega a quel concetto (D1) | D16 |
 | `kc_remove(node)` | Elimina un nodo; i figli salgono al suo padre | D16 |
-| `kc_recall(query)` | "Cosa sa già Luca di X?": concetti, riassunti, date | RF8 |
+| `kc_recall(query)` | "Cosa sa già Luca di X?": concetti, testi, date | RF8 |
 | `kc_tree(conversation_id?)` | Albero compatto di una conversazione | RF9 |
 | `kc_profile()` | Temi più esplorati e recenti | RF10 |
 
 Gli strumenti di lettura stanno in `src/core/reader.ts` (non scrivono mai) e rispondono in forma compatta:
-- `kc_recall`: al massimo 5 concetti `{id, name, seen, last, notes, near}`; `notes` sono gli ultimi 3 riassunti distinti, `near` i concetti esplorati subito prima o dopo. Cerca nei nomi (FTS5 trigram) e, per parole di almeno 4 lettere, anche in titoli e riassunti delle visite.
-- `kc_tree`: testo indentato, una riga per nodo con id e `*current`; i riassunti solo con `summaries: true`. Senza id usa la conversazione della sessione, altrimenti la più recente.
+- `kc_recall`: al massimo 5 concetti `{id, name, seen, last, notes, near}`; `notes` sono gli ultimi 3 testi distinti, `near` i concetti esplorati subito prima o dopo. Cerca nei nomi (FTS5 trigram) e, per parole di almeno 4 lettere, anche in titoli e testi delle visite.
+- `kc_tree`: testo indentato, una riga per nodo con id e `*current`; i testi dei nodi solo con `summaries: true`. Senza id usa la conversazione della sessione, altrimenti la più recente.
 - `kc_profile`: numero di concetti, 10 più esplorati, 10 più recenti, ultime 5 conversazioni non vuote.
 
-Più un **prompt MCP** `kc_instructions` con le regole di tracciamento scritte in modo neutro rispetto al modello (quando creare un nodo, quanto lungo il riassunto, una chiamata per turno). Per Claude Code c'è una skill pronta in `skills/knowledge-graph/SKILL.md`, installabile con `knowledge-graph install-skill` (copia in `~/.claude/skills/`). Le richieste "segna questo" / "non tracciare" (RF7) sono gestite dalle istruzioni, non servono strumenti dedicati.
+Più un **prompt MCP** `kc_instructions` con le regole di tracciamento scritte in modo neutro rispetto al modello (quando creare un nodo, testo del nodo preso dalla risposta, una chiamata per turno). Per Claude Code c'è una skill pronta in `skills/knowledge-graph/SKILL.md`, installabile con `knowledge-graph install-skill` (copia in `~/.claude/skills/`). Le richieste "segna questo" / "non tracciare" (RF7) sono gestite dalle istruzioni, non servono strumenti dedicati.
 
 ## 6. Flussi chiave
 
 1. **Tracciamento**: Luca chiede → il modello chiama una sola volta `kc_track` **prima** di scrivere la risposta (se la chiama dopo, Claude Desktop ripete la risposta), poi risponde senza mai annunciare la registrazione (lo ricordano le istruzioni, una nota breve nel risultato di `kc_start` e una in quello di `kc_track`) → il demone salva, aggancia i concetti, emette un evento → il canvas disegna i nodi.
-2. **Hover**: il canvas ha già titolo e riassunto breve in memoria → tooltip immediato → "Approfondisci" chiama `/api/concepts/:id` → pannello con tutte le visite.
+2. **Hover**: il canvas ha già titolo e testo del nodo in memoria → tooltip immediato → "Approfondisci" chiama `/api/concepts/:id` → pannello con tutte le visite.
 3. **Richiamo**: il modello, prima di spiegare un tema, chiama `kc_recall` → sa cosa Luca ha già visto e lo dà per noto.
 4. **Grafo personale**: la scheda "Grafo personale" chiama `/api/graph` (tutti i concetti con conteggio visite + archi pesati derivati dalle visite e da `concept_links`) → Sigma.js con layout ForceAtlas2; a ogni evento live ricarica e unisce i dati tenendo le posizioni dei nodi noti, così il disegno non salta.
 5. **Correzione manuale** (D8, RF18): azione sul canvas → `/api` → regola in `Tracker` → evento su `/ws` → stesso aggiornamento visto da tutti. Dal pannello del concetto: rinomina (`PATCH /api/concepts/:id`; i nodi intitolati col vecchio nome lo seguono, un nome già preso va unito), unisci (`POST /api/concepts/:id/merge`), elimina (`DELETE /api/concepts/:id`, in tutte le conversazioni). Da "Modifica" sul nodo: titolo, genitore (mai sotto un proprio discendente), concetto collegato (`PATCH /api/visits/:id`), elimina (`DELETE /api/visits/:id`). Chi perde un nodo non perde i figli: salgono di un livello; un concetto rimasto senza visite sparisce.
-6. **Ricerca** (RF17): casella in alto → `/api/search?q=` (nome esatto, poi nomi che contengono il testo, poi titoli e riassunti) → il concetto scelto si apre nel pannello, si evidenzia nell'albero e il grafo personale ci si centra.
+6. **Ricerca** (RF17): casella in alto → `/api/search?q=` (nome esatto, poi nomi che contengono il testo, poi titoli e testi) → il concetto scelto si apre nel pannello, si evidenzia nell'albero e il grafo personale ci si centra.
 
 ## 7. Sicurezza e privacy
 
