@@ -381,7 +381,24 @@ export class SqliteRepository implements Repository {
          GROUP BY c.id`,
       )
       .all()
-      .map((r) => ({ ...toConcept(r), summary: (r.summary as string) ?? '', sourceCount: Number(r.source_count ?? 0) }));
+      .map((r) => ({ ...toConcept(r), summary: (r.summary as string) ?? '', sourceCount: Number(r.source_count ?? 0), conversationIds: [] as string[] }));
+    // Conversations of each concept, the one with most visits first: the canvas colours and filters by them.
+    const byId = new Map(concepts.map((c) => [c.id, c]));
+    for (const r of this.db
+      .prepare(
+        `SELECT concept_id, conversation_id FROM visits
+         GROUP BY concept_id, conversation_id ORDER BY concept_id, COUNT(*) DESC, MIN(created_at), MIN(rowid)`,
+      )
+      .all()) {
+      byId.get(r.concept_id as string)?.conversationIds.push(r.conversation_id as string);
+    }
+    const conversations = this.db
+      .prepare(
+        `SELECT c.id, c.title FROM conversations c
+         WHERE EXISTS (SELECT 1 FROM visits v WHERE v.conversation_id = c.id) ORDER BY c.last_activity_at DESC`,
+      )
+      .all()
+      .map((r) => ({ id: r.id as string, title: r.title as string }));
     // Edges come from drill-downs (parent visit -> child visit) plus explicit concept links.
     const edges = this.db
       .prepare(
@@ -396,7 +413,7 @@ export class SqliteRepository implements Repository {
       )
       .all()
       .map((r) => ({ source: r.source as string, target: r.target as string, weight: Number(r.weight) }));
-    return { concepts, edges };
+    return { concepts, edges, conversations };
   }
 
   addRevision(r: Omit<Revision, 'createdAt'>): void {

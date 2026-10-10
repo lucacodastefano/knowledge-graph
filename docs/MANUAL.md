@@ -135,6 +135,11 @@ The tree of the conversation: each node is a concept as it came up, children are
 
 Every concept you ever explored, across conversations. Bigger nodes were visited more often; edges join concepts explored one after the other, thicker when it happened more than once. Click a node to open its panel. New concepts appear live without the layout jumping.
 
+- **Levels.** From afar each community (concepts that link mostly among themselves, found with Louvain) is a bubble named after its hub, with its concept count; concepts with no link at all sit together in **Concetti isolati**. Click a bubble or zoom in to see the single concepts. The layout keeps communities apart; **Riordina** recomputes communities and layout.
+- **Labels.** Only the bigger concepts and those near the pointer get a label, and labels never overlap each other or a peer's dot; hover a node to read any name.
+- **Colour.** **Colora per** colours by community or by conversation (a concept takes the colour of the conversation where it appears most). The legend (collapsible) lists the groups with their counts; click an entry to highlight that group.
+- **Filters.** By conversation, by period (last seen), **Nascondi isolati** and **Solo concetti con fonti** (only concepts whose answers cited at least one source). The counter shows how many concepts are left and the view fits them. The colouring, the isolated toggle and the legend state are remembered; the other filters are not.
+
 ### Concept panel
 
 Opened from **Approfondisci**, from the personal graph or from search. It lists every place the concept appears (newest first): conversation, the node it sits under, date and the text from the answer, followed by its sub-concepts as sections (two levels), which is where the real depth of an explanation lives.

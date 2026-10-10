@@ -50,7 +50,7 @@ export function VisitNode({ data }: NodeProps<VisitNodeType>) {
       )}
       <NodeToolbar isVisible={hovered} position={side} offset={10}>
         <div className="tooltip passive" role="tooltip">
-          <p>{visit.summary || 'Nessun riassunto.'}</p>
+          <p>{visit.summary || 'Nessun testo dalla risposta.'}</p>
           <button
             type="button"
             onMouseEnter={() => data.onHover(visit.id)}

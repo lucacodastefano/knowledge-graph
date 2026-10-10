@@ -26,6 +26,10 @@ test('the personal graph merges concepts and drill-downs across conversations (D
   const edge = g.edges.find((e) => e.source === byName.get('Kafka')!.id && e.target === byName.get('Partizioni')!.id);
   assert.equal(edge?.weight, 2, 'the same drill-down in two conversations is one weighted edge');
   assert.equal(g.edges.length, 2);
+  // The canvas colours and filters by conversation: each concept lists its own, the busiest first.
+  assert.deepEqual(byName.get('Kafka')!.conversationIds, [a.id, b.id]);
+  assert.deepEqual(byName.get('Offset')!.conversationIds, [b.id]);
+  assert.deepEqual(g.conversations.map((c) => c.title).sort(), ['A', 'B']);
 });
 
 test('returning to a concept under itself creates no self-loop', () => {
