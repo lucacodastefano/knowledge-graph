@@ -102,9 +102,10 @@ export function PersonalView({ live, onOpenConcept }: Props) {
     sigmaRef.current = renderer;
 
     const place = (id: string) => {
+      // Display data is in normalized "framed graph" space, not raw graph coordinates.
       const d = renderer.getNodeDisplayData(id);
       if (!d) return;
-      const p = renderer.graphToViewport({ x: d.x, y: d.y });
+      const p = renderer.framedGraphToViewport(d);
       setHover({ id, x: p.x, y: p.y });
     };
     renderer.on('enterNode', ({ node }) => {
@@ -129,7 +130,7 @@ export function PersonalView({ live, onOpenConcept }: Props) {
       position: (label: string) => {
         const id = graph.findNode((_, a) => a.label === label);
         const d = id ? renderer.getNodeDisplayData(id) : undefined;
-        return d ? renderer.graphToViewport({ x: d.x, y: d.y }) : null;
+        return d ? renderer.framedGraphToViewport(d) : null;
       },
     };
     return () => {
