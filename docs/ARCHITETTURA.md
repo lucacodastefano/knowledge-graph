@@ -1,6 +1,6 @@
 # Architettura di knowledge-graph
 
-> Stato: architettura approvata il 2026-10-10 (D11). Sono implementati `kc_start`, `kc_track`, `kc_focus`, `kc_link`, gli strumenti di lettura `kc_recall`, `kc_tree`, `kc_profile`, la skill per Claude Code, la vista conversazione, il grafo personale, le correzioni manuali con la ricerca e il pacchetto npm: il piano al §9 è completo. Il manuale per chi usa il prodotto è [MANUAL.md](MANUAL.md). Le decisioni di prodotto sono in DECISIONI.md del progetto.
+> Stato: architettura approvata il 2026-10-10 (D11). Sono implementati `kc_start`, `kc_track`, `kc_focus`, `kc_link`, `kc_move`, `kc_rename`, `kc_remove`, gli strumenti di lettura `kc_recall`, `kc_tree`, `kc_profile`, la skill per Claude Code, la vista conversazione, il grafo personale, le correzioni manuali con la ricerca e il pacchetto npm: il piano al §9 è completo. Il manuale per chi usa il prodotto è [MANUAL.md](MANUAL.md). Le decisioni di prodotto sono in DECISIONI.md del progetto.
 
 ## 1. Vincoli che guidano le scelte
 
@@ -75,10 +75,12 @@ fts_concepts(name, summaries)                            -- FTS5 per ricerca e s
 | Strumento | Fa | Requisiti |
 |---|---|---|
 | `kc_start(title?)` | Apre o riprende la conversazione, restituisce id e albero compatto | RF1 |
-| `kc_track(nodes[])` | **Batch**, chiamato **prima** di scrivere la risposta: crea una o più visite `{title, summary, parent, excerpt?}`. `parent` è obbligatorio (D15): titolo di un nodo della conversazione (ultima visita con quel titolo), `"root"` o `"#n"`. Stesso concetto sotto lo stesso padre aggiorna il riassunto invece di duplicare; in un altro ramo vale D1. Restituisce gli id, al massimo 3 concetti simili per nodo e l'albero compatto della conversazione (solo titoli) | RF2, RF3, RF5, RF6 |
+| `kc_track(nodes[])` | **Batch**, chiamato **prima** di scrivere la risposta: crea una o più visite `{title, summary, parent, excerpt?}`. `parent` è obbligatorio (D15): titolo di un nodo della conversazione (ultima visita con quel titolo), `"root"` o `"#n"`. Stesso concetto sotto lo stesso padre aggiorna il riassunto invece di duplicare; in un altro ramo vale D1. Un figlio che riformula il padre (stesse parole, "Aspetti di X", "X" sotto "X e Y" che si prende tutto il ramo) viene rifiutato (D16). Restituisce gli id, al massimo 3 concetti simili per nodo (prima i quasi-duplicati: plurali, articoli, ordine delle parole, colonna `concepts.name_key`) e l'albero compatto della conversazione (solo titoli) | RF2, RF3, RF5, RF6 |
 | `kc_focus(node_id)` | Torna su un nodo esistente (diventa il corrente) | RF4 |
 | `kc_link(visit_id, concept_id)` | Conferma che una visita è un concetto già noto (unisce) | RF6 |
 | `kc_move(node, parent)` | Sposta un nodo (con i figli) sotto un altro nodo o alla radice, indicati per titolo o id; non unisce concetti | RF18 |
+| `kc_rename(node, title)` | Rinomina un nodo; un titolo già usato da un altro concetto lo collega a quel concetto (D1) | D16 |
+| `kc_remove(node)` | Elimina un nodo; i figli salgono al suo padre | D16 |
 | `kc_recall(query)` | "Cosa sa già Luca di X?": concetti, riassunti, date | RF8 |
 | `kc_tree(conversation_id?)` | Albero compatto di una conversazione | RF9 |
 | `kc_profile()` | Temi più esplorati e recenti | RF10 |

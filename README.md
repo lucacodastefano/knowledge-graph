@@ -44,6 +44,8 @@ The **[user manual](docs/MANUAL.md)** covers every client (Claude Code, Claude D
 | `kc_focus` | Go back to a node already on the canvas |
 | `kc_link` | Merge a node into an existing concept |
 | `kc_move` | Move a node under another node |
+| `kc_rename` | Rename a node |
+| `kc_remove` | Remove a node; its children move up |
 | `kc_recall` | What the user already explored about a topic |
 | `kc_tree` | Outline of a conversation |
 | `kc_profile` | Overview of the user's knowledge |

@@ -128,6 +128,34 @@ export function createMcpServer(tracker: Tracker, state: McpSessionState): McpSe
   );
 
   server.registerTool(
+    'kc_rename',
+    {
+      description: 'Rename a node. A title already used by another concept links the two (same concept).',
+      inputSchema: { node: z.string().describe('Title or id'), title: z.string() },
+    },
+    ({ node, title }) =>
+      guarded(() => {
+        const id = conversationId();
+        tracker.rename(id, node, title);
+        return text(reader.tree(id, false, true));
+      }),
+  );
+
+  server.registerTool(
+    'kc_remove',
+    {
+      description: 'Remove a node; its children move up to its parent.',
+      inputSchema: { node: z.string().describe('Title or id') },
+    },
+    ({ node }) =>
+      guarded(() => {
+        const id = conversationId();
+        tracker.remove(id, node);
+        return text(reader.tree(id, false, true));
+      }),
+  );
+
+  server.registerTool(
     'kc_recall',
     {
       description: 'What the user already explored about a topic: concepts, past summaries, dates. Use when a topic first comes up.',

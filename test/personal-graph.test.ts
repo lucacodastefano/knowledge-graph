@@ -32,9 +32,12 @@ test('returning to a concept under itself creates no self-loop', () => {
   const tracker = new Tracker(new SqliteRepository(':memory:'));
   const c = tracker.startConversation('A', null);
   tracker.track(c.id, [
-    { title: 'Kafka', summary: 's' },
-    { title: 'kafka', summary: 's', parent: '#0' },
+    { title: 'Kafka', summary: 's', parent: 'root' },
+    { title: 'Topic', summary: 's', parent: 'root' },
   ]);
+  // A node restating its parent is refused by kc_track; a canvas correction can still produce it.
+  const tree = tracker.repo.getTree(c.id)!;
+  tracker.editVisit(tree.visits[1].id, { title: 'kafka', conceptId: tree.visits[0].conceptId, parentVisitId: tree.visits[0].id });
   assert.equal(tracker.repo.getPersonalGraph().edges.length, 0);
 });
 

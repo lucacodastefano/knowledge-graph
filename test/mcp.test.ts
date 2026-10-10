@@ -23,7 +23,7 @@ const json = (r: unknown) => JSON.parse((r as { content: { text: string }[] }).c
 test('exposes the tracking tools, the instructions prompt and server instructions', async () => {
   const client = await connect();
   const tools = (await client.listTools()).tools.map((t) => t.name).sort();
-  assert.deepEqual(tools, ['kc_focus', 'kc_link', 'kc_move', 'kc_profile', 'kc_recall', 'kc_start', 'kc_track', 'kc_tree']);
+  assert.deepEqual(tools, ['kc_focus', 'kc_link', 'kc_move', 'kc_profile', 'kc_recall', 'kc_remove', 'kc_rename', 'kc_start', 'kc_track', 'kc_tree']);
   assert.equal((await client.listPrompts()).prompts[0].name, 'kc_instructions');
   assert.match(client.getInstructions() ?? '', /kc_track/);
   const skill = readFileSync(new URL('../skills/knowledge-graph/SKILL.md', import.meta.url), 'utf8');
@@ -124,5 +124,45 @@ test('kc_track returns the tree and a reminder; parents and kc_move work by titl
   assert.equal(cycle.isError, true);
   const missing = await client.callTool({ name: 'kc_track', arguments: { nodes: [{ title: 'X', summary: 's', parent: 'Nope' }] } });
   assert.equal(missing.isError, true);
+  await client.close();
+});
+
+test("Luca's case: wrappers are refused, and an existing wrapper is dissolved by kc_remove in one call each", async () => {
+  const client = await connect();
+  await client.callTool({ name: 'kc_start', arguments: { title: 'Solution architecture' } });
+  const track = (nodes: object[]) => client.callTool({ name: 'kc_track', arguments: { nodes } });
+  await track([
+    { title: 'Integrazione di sistemi', summary: 's', parent: 'root' },
+    { title: 'Design Authority e governance', summary: 's', parent: 'root' },
+  ]);
+  const wrapper = await track([
+    { title: "Aspetti dell'integrazione tra sistemi", summary: 's', parent: 'Integrazione di sistemi' },
+    { title: 'Latenza', summary: 's', parent: '#0' },
+  ]);
+  assert.equal(wrapper.isError, true);
+  assert.match((wrapper.content as { text: string }[])[0].text, /directly under "Integrazione di sistemi"/);
+  const nested = await track([
+    { title: 'Design Authority', summary: 's', parent: 'Design Authority e governance' },
+    { title: 'Gate', summary: 's', parent: '#0' },
+  ]);
+  assert.equal(nested.isError, true);
+
+  // Wrappers left by an older version: build them through the canvas corrections, then fix the hierarchy.
+  const id = tracker.repo.listConversations().find((c) => c.title === 'Solution architecture')!.id;
+  const [aspects] = tracker.track(id, [{ title: 'Aspetti', summary: 's', parent: 'root' }]);
+  tracker.track(id, [{ title: 'Latenza', summary: 's', parent: 'Aspetti' }, { title: 'Accoppiamento', summary: 's', parent: 'Aspetti' }]);
+  tracker.move(id, aspects.id, 'Integrazione di sistemi');
+  tracker.track(id, [{ title: 'Governance board', summary: 's', parent: 'root' }, { title: 'Deroghe', summary: 's', parent: '#0' }]);
+  tracker.move(id, 'Governance board', 'Design Authority e governance');
+
+  await client.callTool({ name: 'kc_remove', arguments: { node: 'Aspetti' } });
+  const fixed = await client.callTool({ name: 'kc_remove', arguments: { node: 'Governance board' } });
+  assert.equal(
+    (fixed.content as { text: string }[])[0].text.replace(/ \[.+?\]| \*current/g, '').split('\n').slice(1).join('\n'),
+    ['- Integrazione di sistemi', '  - Latenza', '  - Accoppiamento', '- Design Authority e governance', '  - Deroghe'].join('\n'),
+  );
+
+  const renamed = await client.callTool({ name: 'kc_rename', arguments: { node: 'Deroghe', title: 'Deroghe ai principi' } });
+  assert.match((renamed.content as { text: string }[])[0].text, /- Deroghe ai principi/);
   await client.close();
 });
