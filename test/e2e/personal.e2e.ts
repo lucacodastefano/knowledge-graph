@@ -176,3 +176,25 @@ test('colour by community or conversation with a legend, and filters by conversa
   assert.equal(await page.getByLabel('Colora per').inputValue(), 'conversation');
   assert.equal(await page.getByLabel('Filtra conversazione').inputValue(), '');
 });
+
+test('a superclass gathers topics of different conversations into one named area (D18)', async () => {
+  const find = async (q: string) => ((await (await fetch(`${base}/api/search?q=${encodeURIComponent(q)}`)).json()) as { id: string; name: string }[]).find((c) => c.name === q)!.id;
+  const res = await fetch(`${base}/api/groups`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name: 'Vita domestica', conceptIds: [await find('Piante da appartamento'), await find('Cucina')] }),
+  });
+  assert.equal(res.status, 200);
+  const page = await browser.newPage({ viewport: { width: 1400, height: 820 } });
+  await page.goto(`${base}/#personale`);
+  await page.getByTestId('concept-count').waitFor();
+  await page.waitForTimeout(500);
+  const [plants, cooking, hub, software] = await probe(page, (k) => ['Piante da appartamento', 'Cucina', 'Vita domestica', 'Microservizi 3'].map((l) => k.community(l)));
+  assert.match(plants ?? '', /^s:/, 'grouped concepts take the area of their superclass');
+  assert.equal(plants, cooking);
+  assert.equal(plants, hub, 'the superclass itself sits in its area');
+  assert.notEqual(plants, software);
+  assert.ok((await probe(page, (k) => k.bubbles())).some((b) => b.name === 'Vita domestica'), 'the area is named after the superclass');
+  await page.screenshot({ path: join(out, '13-superclasse.png') });
+  await page.close();
+});

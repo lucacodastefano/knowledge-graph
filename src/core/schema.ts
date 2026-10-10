@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS concept_links (
   from_concept_id TEXT NOT NULL REFERENCES concepts(id) ON DELETE CASCADE,
   to_concept_id TEXT NOT NULL REFERENCES concepts(id) ON DELETE CASCADE,
   kind TEXT NOT NULL,
+  label TEXT,
   PRIMARY KEY (from_concept_id, to_concept_id, kind)
 );
 

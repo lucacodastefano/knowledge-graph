@@ -24,7 +24,7 @@ const json = (r: unknown) => JSON.parse((r as { content: { text: string }[] }).c
 test('exposes the tracking tools, the instructions prompt and server instructions', async () => {
   const client = await connect();
   const tools = (await client.listTools()).tools.map((t) => t.name).sort();
-  assert.deepEqual(tools, ['kc_focus', 'kc_link', 'kc_move', 'kc_profile', 'kc_recall', 'kc_remove', 'kc_rename', 'kc_start', 'kc_track', 'kc_tree']);
+  assert.deepEqual(tools, ['kc_focus', 'kc_link', 'kc_move', 'kc_profile', 'kc_recall', 'kc_relate', 'kc_remove', 'kc_rename', 'kc_start', 'kc_track', 'kc_tree']);
   assert.equal((await client.listPrompts()).prompts[0].name, 'kc_instructions');
   assert.match(client.getInstructions() ?? '', /kc_track/);
   // Node texts are the answer's own sentences, not a summary of it.

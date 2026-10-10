@@ -186,3 +186,13 @@ button.icon:hover { color: var(--text); }
 .visit:hover .react-flow__handle.left, .visit:hover .react-flow__handle.right { opacity: 0.9; width: 12px; height: 12px; background: var(--accent); }
 .react-flow__edge.relation .react-flow__edge-path { stroke: var(--accent); stroke-width: 2; stroke-dasharray: 2 5; stroke-linecap: round; cursor: pointer; }
 .overlay-bar .notice { margin-left: 8px; font-size: 13px; cursor: pointer; }
+
+.relation-label { position: absolute; display: flex; gap: 4px; align-items: center; pointer-events: all; font-size: 12px; color: var(--accent); background: var(--surface); padding: 1px 6px; border-radius: 8px; }
+.relation-label button { cursor: pointer; border: none; border-radius: 50%; width: 20px; height: 20px; line-height: 20px; padding: 0; font-size: 12px; }
+.relation-label .relation-remove { background: #dc2626; color: #fff; }
+.relation-label .relation-edit { background: var(--border); color: var(--text); }
+
+.suggestions { position: relative; display: inline-block; }
+.suggestions-pop { position: absolute; top: 100%; right: 0; z-index: 10; width: 320px; max-height: 60vh; overflow: auto; margin-top: 6px; padding: 8px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 4px 16px rgb(0 0 0 / 0.2); }
+.suggestion { padding: 6px 0; border-bottom: 1px solid var(--border); }
+.suggestion:last-child { border-bottom: none; }

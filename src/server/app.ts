@@ -142,11 +142,46 @@ export async function buildApp({ tracker, webRoot, logger = false, onShutdown }:
     },
     async (req) => tracker.editVisit(req.params.id, req.body),
   );
-  const relationBody = { type: 'object', required: ['from', 'to'], properties: { from: { type: 'string' }, to: { type: 'string' } } };
-  app.post<{ Body: { from: string; to: string } }>('/api/relations', { schema: { body: relationBody } }, async (req, reply) => {
-    tracker.setRelation(req.body.from, req.body.to, true);
+  const relationBody = {
+    type: 'object',
+    required: ['from', 'to'],
+    properties: { from: { type: 'string' }, to: { type: 'string' }, label: { type: ['string', 'null'] } },
+  };
+  app.post<{ Body: { from: string; to: string; label?: string | null } }>('/api/relations', { schema: { body: relationBody } }, async (req, reply) => {
+    tracker.setRelation(req.body.from, req.body.to, true, req.body.label);
     return reply.code(204).send();
   });
+  // Superclasses (D18): "Raggruppa in…", the suggestions and their accept / ignore.
+  app.get('/api/suggestions', async () => new Reader(repo).suggestions());
+  app.post<{ Body: { key: string } }>(
+    '/api/suggestions/ignore',
+    { schema: { body: { type: 'object', required: ['key'], properties: { key: { type: 'string' } } } } },
+    async (req, reply) => {
+      tracker.ignoreSuggestion(req.body.key);
+      return reply.code(204).send();
+    },
+  );
+  app.post<{ Body: { name: string; conceptIds: string[] } }>(
+    '/api/groups',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          required: ['name', 'conceptIds'],
+          properties: { name: { type: 'string' }, conceptIds: { type: 'array', items: { type: 'string' } } },
+        },
+      },
+    },
+    async (req) => tracker.group(req.body.name, req.body.conceptIds),
+  );
+  app.patch<{ Params: { id: string }; Body: { superclassId: string | null } }>(
+    '/api/concepts/:id/superclass',
+    { schema: { body: { type: 'object', required: ['superclassId'], properties: { superclassId: { type: ['string', 'null'] } } } } },
+    async (req, reply) => {
+      tracker.setSuperclass(req.params.id, req.body.superclassId);
+      return reply.code(204).send();
+    },
+  );
   app.post<{ Body: { from: string; to: string } }>('/api/relations/remove', { schema: { body: relationBody } }, async (req, reply) => {
     tracker.setRelation(req.body.from, req.body.to, false);
     return reply.code(204).send();

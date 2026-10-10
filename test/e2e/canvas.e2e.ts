@@ -402,10 +402,37 @@ test('XMind gestures: drag a node onto another to move it with its children, pul
   assert.equal(t.relations.length, 1);
   await page.screenshot({ path: join(out, '12-gesti-xmind.png') });
 
-  // Clicking the relation removes it.
-  page.once('dialog', (d) => void d.accept());
-  await page.locator('.react-flow__edge.relation').first().click({ force: true });
+  // Touching nodes never moves the view.
+  const viewport = () => page.locator('.react-flow__viewport').getAttribute('style');
+  const before = await viewport();
+  await titled(page, 'Ramo due').click();
+  await page.waitForTimeout(500);
+  assert.equal(await viewport(), before, 'a click does not zoom to another node');
+
+  // Click the relation: a red ✕ appears; Canc removes it too; Ctrl+Z brings it back, Ctrl+Y removes it again.
+  // A point on the dotted line itself, away from the nodes at its ends.
+  const mid = await page.locator('.react-flow__edge.relation .react-flow__edge-path').first().evaluate((el) => {
+    const path = el as SVGPathElement;
+    const pt = path.getPointAtLength(path.getTotalLength() * 0.25);
+    const m = path.getScreenCTM()!;
+    return { x: pt.x * m.a + m.e, y: pt.y * m.d + m.f };
+  });
+  await page.mouse.click(mid.x, mid.y);
+  await page.getByRole('button', { name: 'Rimuovi la relazione' }).waitFor();
+  await page.keyboard.press('Delete');
   await page.waitForFunction(() => !document.querySelector('.react-flow__edge.relation'));
   assert.equal((await state()).relations.length, 0);
+  await page.keyboard.press('Control+z');
+  await page.locator('.react-flow__edge.relation').waitFor();
+  await page.keyboard.press('Control+y');
+  await page.waitForFunction(() => !document.querySelector('.react-flow__edge.relation'));
+  // Undo also walks back the move: "Ramo uno" returns under "Radice gesti".
+  await page.keyboard.press('Control+z');
+  await page.keyboard.press('Control+z');
+  await page.waitForFunction(async ([base, id]) => {
+    const t = await (await fetch(`${base}/api/conversations/${id}/tree`)).json();
+    const byTitle = (n: string) => t.visits.find((v: { title: string }) => v.title === n);
+    return byTitle('Ramo uno').parentVisitId === byTitle('Radice gesti').id;
+  }, [base, conv.id]);
   await page.close();
 });

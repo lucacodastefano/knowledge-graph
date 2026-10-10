@@ -203,6 +203,22 @@ export function createMcpServer(tracker: Tracker, state: McpSessionState): McpSe
   );
 
   server.registerTool(
+    'kc_relate',
+    {
+      description:
+        'Group a concept under a superclass (one per concept; created if new) or relate it to another concept, with an optional label. Concepts must already be on the canvas.',
+      inputSchema: {
+        concept: z.string().describe('Concept name'),
+        superclass: z.string().optional().describe('Kind-of / part-of group, e.g. "IT architecture"'),
+        related_to: z.string().optional().describe('Another concept'),
+        label: z.string().optional().describe('Short verb for related_to, e.g. "governs"'),
+      },
+    },
+    ({ concept, superclass, related_to, label }) =>
+      guarded(() => ok({ done: tracker.relateByName({ concept, superclass, relatedTo: related_to, label }) })),
+  );
+
+  server.registerTool(
     'kc_tree',
     {
       description: 'Outline of a conversation (default: this one, else the latest) with node ids.',

@@ -78,7 +78,10 @@ export interface ConceptPage extends Concept {
   /** Sources of every visit of the concept, each once, newest first. */
   sources: ConceptSource[];
   /** Concepts joined to this one by a free relation drawn on the canvas. */
-  related: ConceptMatch[];
+  related: (ConceptMatch & { label?: string })[];
+  /** The one superclass this concept sits under ("is a kind of"), and the concepts it groups. */
+  superclass: ConceptMatch | null;
+  members: ConceptMatch[];
 }
 
 /** Canvas settings that change what the server exposes to the model. */
@@ -103,6 +106,8 @@ export interface GraphConcept extends Concept {
   sourceCount: number;
   /** Conversations where it appears, the one with most visits first. */
   conversationIds: string[];
+  /** The one superclass above it, if any: groups colour and place the personal graph. */
+  superclassId: string | null;
 }
 
 export interface GraphEdge {
@@ -112,6 +117,7 @@ export interface GraphEdge {
   weight: number;
   /** A free relation drawn by the user between two different concepts. */
   relation?: boolean;
+  label?: string;
 }
 
 /** The personal graph (D2): every concept ever explored, linked by the drill-downs that connected them. */
@@ -126,6 +132,7 @@ export interface PersonalGraph {
 export interface ConceptRelation {
   from: string;
   to: string;
+  label?: string;
 }
 
 export interface ConversationTree {
@@ -133,4 +140,14 @@ export interface ConversationTree {
   visits: Visit[];
   /** Free relations between concepts that both appear in this conversation. */
   relations: ConceptRelation[];
+}
+
+/** A probable grouping the canvas offers with one click (zero tokens): concepts sharing a word, or joining an existing superclass. */
+export interface GroupSuggestion {
+  key: string;
+  /** Proposed superclass name (editable). */
+  name: string;
+  concepts: ConceptMatch[];
+  /** Set when the concepts would join an existing superclass. */
+  into?: ConceptMatch;
 }

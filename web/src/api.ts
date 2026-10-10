@@ -7,12 +7,13 @@ import type {
   Conversation,
   ConversationTree,
   PersonalGraph,
+  GroupSuggestion,
   Settings,
   Visit,
 } from '../../src/core/types.ts';
 import type { TrackerEvent, VisitEdit } from '../../src/core/tracker.ts';
 
-export type { Concept, ConceptOccurrence, ConceptPage, ConceptSection, ConceptSource, Conversation, ConversationTree, PersonalGraph, Settings, TrackerEvent, Visit, VisitEdit };
+export type { GroupSuggestion, Concept, ConceptOccurrence, ConceptPage, ConceptSection, ConceptSource, Conversation, ConversationTree, PersonalGraph, Settings, TrackerEvent, Visit, VisitEdit };
 
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(path);
@@ -58,7 +59,11 @@ export const api = {
   deleteConcept: (id: string) => send<void>('DELETE', `/api/concepts/${id}`),
   editVisit: (id: string, edit: VisitEdit) => send<Visit>('PATCH', `/api/visits/${id}`, edit),
   deleteVisit: (id: string) => send<void>('DELETE', `/api/visits/${id}`),
-  relate: (from: string, to: string) => send<void>('POST', '/api/relations', { from, to }),
+  relate: (from: string, to: string, label?: string | null) => send<void>('POST', '/api/relations', { from, to, label }),
+  setSuperclass: (id: string, superclassId: string | null) => send<void>('PATCH', `/api/concepts/${id}/superclass`, { superclassId }),
+  group: (name: string, conceptIds: string[]) => send<Concept>('POST', '/api/groups', { name, conceptIds }),
+  suggestions: () => get<GroupSuggestion[]>('/api/suggestions'),
+  ignoreSuggestion: (key: string) => send<void>('POST', '/api/suggestions/ignore', { key }),
   unrelate: (from: string, to: string) => send<void>('POST', '/api/relations/remove', { from, to }),
   removeSource: (visitId: string, sourceId: string) => send<void>('DELETE', `/api/visits/${visitId}/sources/${sourceId}`),
 };
