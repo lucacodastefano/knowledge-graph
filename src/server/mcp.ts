@@ -38,7 +38,7 @@ export function createMcpServer(tracker: Tracker, state: McpSessionState): McpSe
   server.registerTool(
     'kc_start',
     {
-      description: 'Start a new conversation on the canvas, or resume one by id.',
+      description: 'Start the canvas conversation (once per chat; a new topic is kc_track with parent "root"), or resume one by id.',
       inputSchema: { title: z.string().optional(), resume: z.string().optional() },
     },
     ({ title, resume }) =>
@@ -60,7 +60,7 @@ export function createMcpServer(tracker: Tracker, state: McpSessionState): McpSe
               title: z.string().describe('Concept name, 1-5 words'),
               summary: z.string().describe('1-3 sentences of what you explained'),
               parent: z.string().optional().describe('"current" (default), "root", a node id, or "#n"'),
-              excerpt: z.string().optional(),
+              excerpt: z.string().optional().describe('Rarely: a formula or code line to keep verbatim'),
               conceptId: z.string().optional().describe('Known concept id to reuse'),
             }),
           )
@@ -101,7 +101,7 @@ export function createMcpServer(tracker: Tracker, state: McpSessionState): McpSe
   server.registerTool(
     'kc_recall',
     {
-      description: 'What the user already explored about a topic: concepts, past summaries, dates. Use before explaining.',
+      description: 'What the user already explored about a topic: concepts, past summaries, dates. Use when a topic first comes up.',
       inputSchema: { query: z.string().describe('Topic or concept name') },
     },
     ({ query }) => guarded(() => ok(reader.recall(query))),
