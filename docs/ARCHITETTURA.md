@@ -61,7 +61,7 @@ Alternativa scartata: ogni client avvia il suo server stdio e tutti scrivono sul
 conversations(id, title, client, started_at, last_activity_at)
 concepts(id, name, name_norm UNIQUE, name_key, created_at, last_seen_at, visit_count)  -- name_key: quasi-duplicati
 visits(id, conversation_id, concept_id, parent_visit_id NULL, title, summary, excerpt NULL, detail NULL, seq, created_at)
-concept_links(from_concept_id, to_concept_id, kind)      -- correlato, parte-di, ...
+concept_links(from_concept_id, to_concept_id, kind)      -- kind "related" = relazione libera tracciata sul canvas (tra concetti diversi, POST /api/relations)
 fts_concepts(name, summaries)                            -- FTS5 per ricerca e somiglianza
 revisions(target_kind, target_id, field, old_value, created_at)  -- valori precedenti a ogni modifica (D16), senza UI
 sources(id, url UNIQUE, domain, first_seen)  -- fonti citate, una per URL normalizzato (niente utm_*, #frammento, / finale)

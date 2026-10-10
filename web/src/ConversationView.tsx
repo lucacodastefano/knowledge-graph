@@ -9,9 +9,11 @@ import {
   useReactFlow,
   type Edge,
   type EdgeProps,
+  ConnectionMode,
+  type Connection,
   type NodeChange,
 } from '@xyflow/react';
-import { api, type Conversation, type ConversationTree } from './api.ts';
+import { api, explain, type Conversation, type ConversationTree } from './api.ts';
 import type { Found, LiveEvent } from './App.tsx';
 import {
   alsoIn,
@@ -68,6 +70,7 @@ function Tree({ live, found, onOpenConcept }: Props) {
   const [nodes, setNodes] = useState<VisitNodeType[]>([]);
   const [edges, setEdges] = useState<Edge<EdgeData>[]>([]);
   const [fresh, setFresh] = useState<Set<string>>(new Set());
+  const [notice, setNotice] = useState<string | null>(null);
   const [kind, setKind] = useState<LayoutKind>(savedLayout);
   const laidOut = useRef<LayoutKind>(kind);
   /** The whole tree is framed on a new conversation or layout; later updates only move to the current node. */
@@ -106,6 +109,41 @@ function Tree({ live, found, onOpenConcept }: Props) {
     return () => removeEventListener('keydown', onKey);
   }, []);
   const flow = useReactFlow();
+  const fail = useCallback((e: unknown) => setNotice(explain((e as Error).message)), []);
+  /** Back to the laid-out positions after a drag that moved nothing. */
+  const relayout = useCallback(() => setTree((t) => (t ? { ...t } : t)), []);
+  // Dropping a node on another one moves it (with its children) under that node; elsewhere it snaps back.
+  const onDragStop = useCallback(
+    (_: unknown, node: VisitNodeType) => {
+      const target = flow.getIntersectingNodes(node).find((n) => n.id !== node.id);
+      if (!target || target.id === node.data.visit.parentVisitId) return relayout();
+      setNotice(null);
+      api.editVisit(node.id, { parentVisitId: target.id }).then(relayout, (e: unknown) => {
+        fail(e);
+        relayout();
+      });
+    },
+    [flow, relayout, fail],
+  );
+  // Pulling a line from one node to another relates their concepts (a different idea, unlike "Unisci a…").
+  const onConnect = useCallback(
+    (c: Connection) => {
+      const from = tree?.visits.find((v) => v.id === c.source);
+      const to = tree?.visits.find((v) => v.id === c.target);
+      if (!from || !to) return;
+      setNotice(null);
+      api.relate(from.conceptId, to.conceptId).catch(fail);
+    },
+    [tree, fail],
+  );
+  const onEdgeClick = useCallback(
+    (_: unknown, edge: Edge<EdgeData>) => {
+      if (!edge.className?.includes('relation') || !edge.data) return;
+      const { from, to } = edge.data as { from: string; to: string };
+      if (window.confirm('Rimuovere questa relazione?')) api.unrelate(from, to).catch(fail);
+    },
+    [fail],
+  );
   // Keeps React Flow's measured sizes in our state: without them every rebuild resets nodes to
   // unmeasured (hidden), and a rebuild racing the resize observer can leave them hidden for good.
   const onNodesChange = useCallback(
@@ -189,7 +227,28 @@ function Tree({ live, found, onOpenConcept }: Props) {
           },
         }));
       });
-      setEdges(buildEdges(tree.visits, kind, placement));
+      // Free relations between concepts (XMind-style lines): drawn between the first node of each concept.
+      const first = new Map<string, string>();
+      for (const v of tree.visits) if (!first.has(v.conceptId)) first.set(v.conceptId, v.id);
+      const relEdges: Edge<EdgeData>[] = [];
+      for (const r of tree.relations) {
+        const a = first.get(r.from);
+        const b = first.get(r.to);
+        if (!a || !b) continue;
+        const leftToRight = (pos.get(a)?.x ?? 0) <= (pos.get(b)?.x ?? 0);
+        relEdges.push({
+          id: `r-${r.from}-${r.to}`,
+          source: a,
+          target: b,
+          sourceHandle: leftToRight ? 's-right' : 's-left',
+          targetHandle: leftToRight ? 't-left' : 't-right',
+          type: 'default',
+          className: 'relation',
+          interactionWidth: 20,
+          data: { from: r.from, to: r.to },
+        });
+      }
+      setEdges([...buildEdges(tree.visits, kind, placement), ...relEdges]);
       pendingFit.current = fitAll.current ? 'all' : 'current';
       fitAll.current = false;
     });
@@ -278,6 +337,11 @@ function Tree({ live, found, onOpenConcept }: Props) {
             </option>
           ))}
         </select>
+        {notice && (
+          <span className="notice error" role="alert" onClick={() => setNotice(null)}>
+            {notice}
+          </span>
+        )}
       </div>
       {tree && tree.visits.length > 0 ? (
         <ReactFlow
@@ -289,8 +353,12 @@ function Tree({ live, found, onOpenConcept }: Props) {
           deleteKeyCode={null}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
-          nodesDraggable={false}
-          nodesConnectable={false}
+          nodesDraggable
+          nodesConnectable
+          connectionMode={ConnectionMode.Loose}
+          onNodeDragStop={onDragStop}
+          onConnect={onConnect}
+          onEdgeClick={onEdgeClick}
           elementsSelectable={false}
           proOptions={{ hideAttribution: true }}
           minZoom={0.1}

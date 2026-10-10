@@ -38,6 +38,7 @@ async function send<T>(method: 'PATCH' | 'POST' | 'DELETE', path: string, body?:
 export function explain(message: string): string {
   const exists = /^"(.+)" already exists/.exec(message);
   if (exists) return `Esiste già «${exists[1]}»: usa «Unisci a…» per fondere i due concetti.`;
+  if (/related to itself/.test(message)) return 'Sono lo stesso concetto: per fonderli usa «Unisci a…».';
   if (/descendants/.test(message)) return 'Un nodo non può finire sotto sé stesso o un suo discendente.';
   if (/not found/.test(message)) return 'Non esiste più: forse è stato già modificato.';
   if (/Empty/.test(message)) return 'Il nome non può essere vuoto.';
@@ -57,6 +58,8 @@ export const api = {
   deleteConcept: (id: string) => send<void>('DELETE', `/api/concepts/${id}`),
   editVisit: (id: string, edit: VisitEdit) => send<Visit>('PATCH', `/api/visits/${id}`, edit),
   deleteVisit: (id: string) => send<void>('DELETE', `/api/visits/${id}`),
+  relate: (from: string, to: string) => send<void>('POST', '/api/relations', { from, to }),
+  unrelate: (from: string, to: string) => send<void>('POST', '/api/relations/remove', { from, to }),
   removeSource: (visitId: string, sourceId: string) => send<void>('DELETE', `/api/visits/${visitId}/sources/${sourceId}`),
 };
 

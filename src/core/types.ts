@@ -77,6 +77,8 @@ export interface ConceptPage extends Concept {
   visits: ConceptOccurrence[];
   /** Sources of every visit of the concept, each once, newest first. */
   sources: ConceptSource[];
+  /** Concepts joined to this one by a free relation drawn on the canvas. */
+  related: ConceptMatch[];
 }
 
 /** Canvas settings that change what the server exposes to the model. */
@@ -108,6 +110,8 @@ export interface GraphEdge {
   target: string;
   /** How many times the user went from source to target. */
   weight: number;
+  /** A free relation drawn by the user between two different concepts. */
+  relation?: boolean;
 }
 
 /** The personal graph (D2): every concept ever explored, linked by the drill-downs that connected them. */
@@ -118,7 +122,15 @@ export interface PersonalGraph {
   conversations: { id: string; title: string }[];
 }
 
+/** A free relation between two different concepts (not the same idea: that is "Unisci a…"). */
+export interface ConceptRelation {
+  from: string;
+  to: string;
+}
+
 export interface ConversationTree {
   conversation: Conversation;
   visits: Visit[];
+  /** Free relations between concepts that both appear in this conversation. */
+  relations: ConceptRelation[];
 }

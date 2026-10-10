@@ -367,7 +367,16 @@ export class SqliteRepository implements Repository {
       .prepare(`${VISIT_SELECT} WHERE v.conversation_id = ? ORDER BY v.seq`)
       .all(conversationId)
       .map(toVisit);
-    return { conversation, visits };
+    const relations = this.db
+      .prepare(
+        `SELECT l.from_concept_id AS f, l.to_concept_id AS t FROM concept_links l
+         WHERE l.kind = 'related'
+           AND EXISTS (SELECT 1 FROM visits v WHERE v.conversation_id = ?1 AND v.concept_id = l.from_concept_id)
+           AND EXISTS (SELECT 1 FROM visits v WHERE v.conversation_id = ?1 AND v.concept_id = l.to_concept_id)`,
+      )
+      .all(conversationId)
+      .map((r) => ({ from: r.f as string, to: r.t as string }));
+    return { conversation, visits, relations };
   }
 
   getPersonalGraph(): PersonalGraph {
@@ -402,18 +411,45 @@ export class SqliteRepository implements Repository {
     // Edges come from drill-downs (parent visit -> child visit) plus explicit concept links.
     const edges = this.db
       .prepare(
-        `SELECT source, target, SUM(w) AS weight FROM (
-           SELECT p.concept_id AS source, v.concept_id AS target, COUNT(*) AS w
+        `SELECT source, target, SUM(w) AS weight, MAX(rel) AS rel FROM (
+           SELECT p.concept_id AS source, v.concept_id AS target, COUNT(*) AS w, 0 AS rel
            FROM visits v JOIN visits p ON p.id = v.parent_visit_id
            WHERE p.concept_id <> v.concept_id
            GROUP BY 1, 2
            UNION ALL
-           SELECT from_concept_id, to_concept_id, 1 FROM concept_links
+           SELECT from_concept_id, to_concept_id, 1, 1 FROM concept_links
          ) GROUP BY source, target`,
       )
       .all()
-      .map((r) => ({ source: r.source as string, target: r.target as string, weight: Number(r.weight) }));
+      .map((r) => ({ source: r.source as string, target: r.target as string, weight: Number(r.weight), ...(r.rel ? { relation: true } : {}) }));
     return { concepts, edges, conversations };
+  }
+
+  addRelation(fromId: string, toId: string): boolean {
+    const exists = this.db
+      .prepare(`SELECT 1 FROM concept_links WHERE kind = 'related' AND ((from_concept_id = ?1 AND to_concept_id = ?2) OR (from_concept_id = ?2 AND to_concept_id = ?1))`)
+      .get(fromId, toId);
+    if (exists) return false;
+    this.db.prepare(`INSERT INTO concept_links (from_concept_id, to_concept_id, kind) VALUES (?, ?, 'related')`).run(fromId, toId);
+    return true;
+  }
+
+  removeRelation(aId: string, bId: string): boolean {
+    const r = this.db
+      .prepare(`DELETE FROM concept_links WHERE kind = 'related' AND ((from_concept_id = ?1 AND to_concept_id = ?2) OR (from_concept_id = ?2 AND to_concept_id = ?1))`)
+      .run(aId, bId);
+    return Number(r.changes) > 0;
+  }
+
+  listRelated(conceptId: string): ConceptMatch[] {
+    return this.db
+      .prepare(
+        `SELECT c.id, c.name FROM concept_links l
+         JOIN concepts c ON c.id = CASE WHEN l.from_concept_id = ?1 THEN l.to_concept_id ELSE l.from_concept_id END
+         WHERE l.kind = 'related' AND (l.from_concept_id = ?1 OR l.to_concept_id = ?1) ORDER BY c.name`,
+      )
+      .all(conceptId)
+      .map((r) => ({ id: r.id as string, name: r.name as string }));
   }
 
   addRevision(r: Omit<Revision, 'createdAt'>): void {

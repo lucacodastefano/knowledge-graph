@@ -142,6 +142,15 @@ export async function buildApp({ tracker, webRoot, logger = false, onShutdown }:
     },
     async (req) => tracker.editVisit(req.params.id, req.body),
   );
+  const relationBody = { type: 'object', required: ['from', 'to'], properties: { from: { type: 'string' }, to: { type: 'string' } } };
+  app.post<{ Body: { from: string; to: string } }>('/api/relations', { schema: { body: relationBody } }, async (req, reply) => {
+    tracker.setRelation(req.body.from, req.body.to, true);
+    return reply.code(204).send();
+  });
+  app.post<{ Body: { from: string; to: string } }>('/api/relations/remove', { schema: { body: relationBody } }, async (req, reply) => {
+    tracker.setRelation(req.body.from, req.body.to, false);
+    return reply.code(204).send();
+  });
   app.delete<{ Params: { id: string } }>('/api/visits/:id', async (req, reply) => {
     tracker.deleteVisit(req.params.id);
     return reply.code(204).send();

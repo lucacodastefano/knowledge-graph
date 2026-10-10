@@ -89,6 +89,7 @@ export class Reader {
       ...detail,
       // Sources of this node and of the other visits of the same concept, each once.
       sources: this.repo.listConceptSources(conceptId),
+      related: this.repo.listRelated(conceptId),
       visits: detail.visits.map((v) => {
         const all = visitsOf(v.conversationId);
         const sections = (parentId: string, depth: number): ConceptSection[] =>
