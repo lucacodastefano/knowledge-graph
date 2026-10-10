@@ -16,7 +16,7 @@ Requires [Node.js](https://nodejs.org) 22.18 or newer.
 npx @lucacodastefano/knowledge-graph
 ```
 
-> Not on npm yet? Use `npx github:lucacodastefano/knowledge-graph` wherever this page says `npx @lucacodastefano/knowledge-graph`: it builds the package from GitHub on first run.
+> Not on npm yet? Use `npx --allow-git=all github:lucacodastefano/knowledge-graph` wherever this page says `npx @lucacodastefano/knowledge-graph`: it builds the package from GitHub on first run.
 
 Open http://localhost:7777, then connect your model. For Claude Code:
 

@@ -10,7 +10,7 @@ You need Node.js 22.18 or newer (`node -v`).
 npx @lucacodastefano/knowledge-graph            # same as: npx @lucacodastefano/knowledge-graph serve
 ```
 
-Before the first npm release, run it straight from GitHub with `npx github:lucacodastefano/knowledge-graph` (the first run takes a minute: it installs and builds the package). Use the same form in the client configurations below.
+Before the first npm release, run it straight from GitHub with `npx --allow-git=all github:lucacodastefano/knowledge-graph` (`--allow-git=all` is needed on npm 11 and later, which refuse git packages by default) (the first run takes a minute: it installs and builds the package). Use the same form in the client configurations below.
 
 The daemon listens on `127.0.0.1:7777` only:
 
