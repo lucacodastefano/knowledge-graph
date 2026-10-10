@@ -47,6 +47,8 @@ main { position: relative; flex: 1; min-height: 0; }
 .visit .also { display: block; font-size: 11px; color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .visit.shared .visit-title { -webkit-line-clamp: 1; }
 .visit .also { max-width: 100%; }
+/* Number of sources the model cited for the node (details in Approfondisci). */
+.visit .source-badge { position: absolute; top: -7px; right: -7px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; font-size: 10px; line-height: 16px; text-align: center; color: #fff; background: var(--accent); }
 .sections h3 { margin: 10px 0 2px; font-size: 15px; }
 .sections h4 { margin: 8px 0 2px; font-size: 13px; }
 .sections .sections { padding-left: 12px; border-left: 2px solid var(--border); }
@@ -145,3 +147,36 @@ button.icon:hover { color: var(--text); }
 .react-flow__edge.related .react-flow__edge-path { stroke: var(--accent); stroke-width: 2; }
 .react-flow__edge.cross-link.related .react-flow__edge-path { stroke-width: 2.5; opacity: 1; }
 .overlay-bar select + select { margin-left: 8px; }
+
+/* Personal graph: colour slots (validated categorical order), toolbar, legend, zoom */
+:root {
+  --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a; --series-4: #eda100;
+  --series-5: #e87ba4; --series-6: #008300; --series-7: #6250d6; --series-8: #e34948;
+  --series-other: #b4b0a8;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500;
+    --series-5: #d55181; --series-6: #008300; --series-7: #9085e9; --series-8: #e66767;
+    --series-other: #5c5955;
+  }
+}
+.personal-view { position: absolute; inset: 0; display: flex; flex-direction: column; }
+.graph-area { position: relative; flex: 1; min-height: 0; }
+.graph-tools { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 6px 16px; background: var(--surface); border-bottom: 1px solid var(--border); }
+.graph-tools select { padding: 3px 6px; font: inherit; font-size: 13px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 6px; max-width: 240px; }
+.graph-tools .tool { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+.graph-tools button { padding: 3px 10px; font-size: 13px; }
+.legend { position: absolute; top: 12px; left: 16px; z-index: 5; max-width: min(280px, calc(100% - 32px)); max-height: calc(100% - 90px); display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 2px 8px rgb(0 0 0 / 0.06); }
+.legend ul { list-style: none; margin: 0; padding: 0 4px 4px; overflow-y: auto; }
+.legend button.legend-toggle { padding: 5px 10px; font-size: 12px; font-weight: 500; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; }
+.legend button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 3px 8px; font-size: 13px; text-align: left; color: var(--text); background: none; border: none; border-radius: 6px; }
+.legend button:hover { background: var(--accent-soft); }
+.legend button[aria-pressed=true] { background: var(--accent-soft); font-weight: 500; }
+.legend button.dimmed { opacity: 0.5; }
+.legend .legend-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.swatch { flex: none; width: 10px; height: 10px; border-radius: 50%; }
+.zoom-controls { position: absolute; left: 16px; bottom: 16px; z-index: 5; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.zoom-controls button { width: 32px; height: 30px; padding: 0; color: var(--text); background: none; border: none; border-radius: 0; font-size: 16px; }
+.zoom-controls button + button { border-top: 1px solid var(--border); }
+.zoom-controls button:hover { background: var(--accent-soft); }

@@ -126,6 +126,7 @@ The tree of the conversation: each node is a concept as it came up, children are
 
 - A **dashed link** joins two nodes of the same concept: the conversation came back to it, possibly from another branch. Such nodes also show **anche in: …** with the other places.
 - **Hover** a node for a moment: the node's text (the key sentences of the answer) appears beside it, with **Approfondisci** (open the concept panel). It closes as soon as you move to another node; **Esc** closes it too.
+- A small **number** in a node's corner counts the sources (web pages, documents) the model cited for it; open **Approfondisci** to see them.
 - **Relations at a glance**: pointing at a node highlights its parent, its children and the other nodes of the same concept (with the dashed links to them), and fades everything else. **Click** a node to keep the highlight while you move around; click it again, click an empty spot of the canvas or press **Esc** to clear it.
 - The menu at the top picks the conversation; **Segui l'ultima conversazione** (default) follows whichever conversation is active.
 - The second menu picks the layout, remembered by the browser: **Radiale** (default: the first topic in the middle, each level on a wider ring), **Mappa mentale** (the topic in the middle, branches to the right and to the left, split so both halves are about as tall; a branch changes side only when that clearly improves the balance) or **Albero** (left to right). The bottom-left button fits the whole tree on screen.
@@ -133,6 +134,11 @@ The tree of the conversation: each node is a concept as it came up, children are
 ### Grafo personale (personal graph)
 
 Every concept you ever explored, across conversations. Bigger nodes were visited more often; edges join concepts explored one after the other, thicker when it happened more than once. Click a node to open its panel. New concepts appear live without the layout jumping.
+
+- **Levels.** From afar each community (concepts that link mostly among themselves, found with Louvain) is a bubble named after its hub, with its concept count; concepts with no link at all sit together in **Concetti isolati**. Click a bubble or zoom in to see the single concepts. The layout keeps communities apart; **Riordina** recomputes communities and layout.
+- **Labels.** Only the bigger concepts and those near the pointer get a label, and labels never overlap each other or a peer's dot; hover a node to read any name.
+- **Colour.** **Colora per** colours by community or by conversation (a concept takes the colour of the conversation where it appears most). The legend (collapsible) lists the groups with their counts; click an entry to highlight that group.
+- **Filters.** By conversation, by period (last seen), **Nascondi isolati** and **Solo concetti con fonti** (only concepts whose answers cited at least one source). The counter shows how many concepts are left and the view fits them. The colouring, the isolated toggle and the legend state are remembered; the other filters are not.
 
 ### Concept panel
 

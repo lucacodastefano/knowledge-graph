@@ -87,6 +87,7 @@ test('the canvas starts blank and grows live while the model tracks concepts', a
   assert.match(await panel.innerText(), /sotto «Event sourcing»/);
   assert.match(await titled(page, /^Partizioni$/).first().innerText(), /anche in:/);
   // Sources cited by the model, normalized (no tracking parameters or fragment).
+  assert.equal(await page.locator('[data-testid=visit] .source-badge').count(), 1, 'one node cites a source');
   assert.equal(await panel.getByRole('region', { name: 'Fonti' }).getByRole('link', { name: 'kafka.apache.org/documentation' }).count(), 1);
   await page.screenshot({ path: join(out, '5-approfondisci.png') });
 });

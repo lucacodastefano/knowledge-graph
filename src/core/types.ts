@@ -99,6 +99,8 @@ export interface GraphConcept extends Concept {
   summary: string;
   /** Distinct sources over all its visits: for the "solo concetti con fonti" filter. */
   sourceCount: number;
+  /** Conversations where it appears, the one with most visits first. */
+  conversationIds: string[];
 }
 
 export interface GraphEdge {
@@ -112,6 +114,8 @@ export interface GraphEdge {
 export interface PersonalGraph {
   concepts: GraphConcept[];
   edges: GraphEdge[];
+  /** Conversations with at least one concept, most recent first. */
+  conversations: { id: string; title: string }[];
 }
 
 export interface ConversationTree {

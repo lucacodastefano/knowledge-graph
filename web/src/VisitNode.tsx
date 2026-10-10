@@ -38,6 +38,11 @@ export function VisitNode({ data }: NodeProps<VisitNodeType>) {
         <Handle key={`s-${h}`} id={`s-${h}`} type="source" position={POSITION[h]} className={h} />
       ))}
       <span className="visit-title">{visit.title}</span>
+      {visit.sourceCount > 0 && (
+        <span className="source-badge" title={visit.sourceCount === 1 ? '1 fonte' : `${visit.sourceCount} fonti`} aria-label="Fonti">
+          {visit.sourceCount}
+        </span>
+      )}
       {data.also.length > 0 && (
         <span className="also" title={`Anche in: ${data.also.join(', ')}`}>
           anche in: {data.also.join(', ')}
@@ -45,7 +50,7 @@ export function VisitNode({ data }: NodeProps<VisitNodeType>) {
       )}
       <NodeToolbar isVisible={hovered} position={side} offset={10}>
         <div className="tooltip passive" role="tooltip">
-          <p>{visit.summary || 'Nessun riassunto.'}</p>
+          <p>{visit.summary || 'Nessun testo dalla risposta.'}</p>
           <button
             type="button"
             onMouseEnter={() => data.onHover(visit.id)}
