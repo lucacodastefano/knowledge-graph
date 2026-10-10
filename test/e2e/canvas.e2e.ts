@@ -180,7 +180,7 @@ test('search finds a concept and the canvas corrects nodes and concepts (RF17, D
   const kafkaId = (await tree()).visits.find((v) => v.title === 'Apache Kafka')!.id;
   await panel.getByLabel('Sotto').selectOption(kafkaId);
   await panel.getByLabel('Nome del concetto').fill('Snapshot');
-  await panel.getByLabel('Riassunto').first().fill('Fotografia periodica dello stato.');
+  await panel.getByLabel('Testo dalla risposta').first().fill('Fotografia periodica dello stato.');
   await page.screenshot({ path: join(out, '9a-modifica-sul-posto.png') });
   await panel.getByRole('button', { name: 'Salva' }).click();
   await titled(page, /^Snapshot$/).waitFor();
