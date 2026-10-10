@@ -127,3 +127,7 @@ button.icon:hover { color: var(--text); }
 @media (prefers-color-scheme: dark) {
   .danger-text, button.danger-text { color: #f87171; }
 }
+
+/* Radial layout (WP7): edges meet at the node centre, drawn under the nodes */
+.visit .react-flow__handle.center { top: 50%; left: 50%; right: auto; transform: translate(-50%, -50%); }
+.overlay-bar select + select { margin-left: 8px; }

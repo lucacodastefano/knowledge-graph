@@ -61,6 +61,9 @@ test('the canvas starts blank and grows live while the model tracks concepts', a
   assert.ok((await page.locator('.react-flow__edge.cross-link').count()) >= 2, 'dashed cross-links for returning concepts');
   await page.screenshot({ path: join(out, '3-completo.png') });
 
+  // The radial layout spreads wider than the screen: fit the whole tree before hovering.
+  await page.locator('.react-flow__controls-fitview').click();
+  await page.waitForTimeout(300);
   const node = titled(page, 'Consumer group');
   await node.hover();
   const tooltip = page.getByRole('tooltip');
@@ -166,6 +169,8 @@ test('search finds a concept and the canvas corrects nodes and concepts (RF17, D
 
   // Edit a node from its "Approfondisci": move it, rename it and edit its summary, in one save.
   const open = async (title: string) => {
+    await page.locator('.react-flow__controls-fitview').click();
+    await page.waitForTimeout(300);
     await titled(page, title).hover();
     await page.getByRole('tooltip').getByRole('button', { name: 'Approfondisci' }).click();
     await panel.getByRole('heading', { name: title }).waitFor();
@@ -203,4 +208,30 @@ test('search finds a concept and the canvas corrects nodes and concepts (RF17, D
   // 11 concepts - Rebalancing (merged) - Proiezioni (deleted node) - Schema registry.
   await page.getByText('8 concetti').waitFor();
   await page.screenshot({ path: join(out, '10-grafo-corretto.png') });
+});
+
+test('three layouts, radial by default, no overlapping nodes, and the choice is remembered (WP7)', async () => {
+  const page = await browser.newPage({ viewport: { width: 1400, height: 820 } });
+  await page.goto(base);
+  const value = await page.locator('select[aria-label=Conversazione] option', { hasText: 'Kafka e architetture' }).getAttribute('value');
+  await page.selectOption('select[aria-label=Conversazione]', value!);
+  const select = page.getByLabel('Layout');
+  assert.equal(await select.inputValue(), 'radial');
+  const visits = page.locator('[data-testid=visit]');
+  await visits.nth(10).waitFor();
+  for (const kind of ['radial', 'mindmap', 'tree']) {
+    await select.selectOption(kind);
+    await page.waitForTimeout(800);
+    const boxes = await visits.evaluateAll((els) => els.map((e) => e.getBoundingClientRect().toJSON() as DOMRect));
+    for (const [i, a] of boxes.entries()) {
+      for (const b of boxes.slice(i + 1)) {
+        const overlap = a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1 && b.top < a.bottom - 1;
+        assert.ok(!overlap, `${kind}: nodes overlap`);
+      }
+    }
+    await page.screenshot({ path: join(out, `11-layout-${kind}.png`) });
+  }
+  await select.selectOption('mindmap');
+  await page.reload();
+  assert.equal(await page.getByLabel('Layout').inputValue(), 'mindmap');
 });

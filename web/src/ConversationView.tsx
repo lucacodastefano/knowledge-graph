@@ -11,7 +11,7 @@ import {
 } from '@xyflow/react';
 import { api, type Conversation, type ConversationTree } from './api.ts';
 import type { Found, LiveEvent } from './App.tsx';
-import { alsoIn, buildEdges, layout, type VisitNode as VisitNodeType } from './layout.ts';
+import { alsoIn, buildEdges, layout, type LayoutKind, type VisitNode as VisitNodeType } from './layout.ts';
 import { VisitNode } from './VisitNode.tsx';
 
 const nodeTypes = { visit: VisitNode };
@@ -20,6 +20,22 @@ const FRESH_MS = 1600;
 const OPEN_DELAY_MS = 400;
 const CLOSE_GRACE_MS = 150;
 const AUTO = '';
+const LAYOUTS: { kind: LayoutKind; label: string }[] = [
+  { kind: 'radial', label: 'Radiale' },
+  { kind: 'mindmap', label: 'Mappa mentale' },
+  { kind: 'tree', label: 'Albero' },
+];
+const LAYOUT_KEY = 'kg.layout';
+
+/** The chosen layout is remembered in this browser; storage may be unavailable, radial is the default (WP7). */
+function savedLayout(): LayoutKind {
+  try {
+    const v = localStorage.getItem(LAYOUT_KEY);
+    return LAYOUTS.some((l) => l.kind === v) ? (v as LayoutKind) : 'radial';
+  } catch {
+    return 'radial';
+  }
+}
 
 interface Props {
   live: LiveEvent | null;
@@ -35,6 +51,8 @@ function Tree({ live, found, onOpenConcept }: Props) {
   const [nodes, setNodes] = useState<VisitNodeType[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
   const [fresh, setFresh] = useState<Set<string>>(new Set());
+  const [kind, setKind] = useState<LayoutKind>(savedLayout);
+  const laidOut = useRef<LayoutKind>(kind);
   const [hovered, setHovered] = useState<string | null>(null);
   const hoverTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   // Entering a node closes any other tooltip at once and opens its own after a dwell; staying on the open
@@ -106,7 +124,9 @@ function Tree({ live, found, onOpenConcept }: Props) {
       setTimeout(() => setFresh(new Set()), FRESH_MS);
     }
     let cancelled = false;
-    void layout(tree.visits).then((pos) => {
+    const refit = firstLoad || laidOut.current !== kind;
+    laidOut.current = kind;
+    void layout(tree.visits, kind).then(({ position: pos, handles }) => {
       if (cancelled) return;
       const also = alsoIn(tree.visits);
       setNodes((prev) => {
@@ -123,22 +143,23 @@ function Tree({ live, found, onOpenConcept }: Props) {
             hovered: false,
             match: false,
             also: also.get(v.id) ?? [],
+            handles: handles.get(v.id) ?? 'lr',
             onHover,
             onOpen: onOpenConcept,
           },
         }));
       });
-      setEdges(buildEdges(tree.visits));
+      setEdges(buildEdges(tree.visits, kind));
       requestAnimationFrame(() => {
         const cur = tree.conversation.currentVisitId;
-        if (firstLoad) void flow.fitView({ padding: 0.2, maxZoom: 1.2 });
+        if (refit) void flow.fitView({ padding: 0.2, maxZoom: 1.2 });
         else if (cur) void flow.fitView({ nodes: [{ id: cur }], padding: 2, maxZoom: 1.2, duration: 400 });
       });
     });
     return () => {
       cancelled = true;
     };
-  }, [tree, flow, onHover, onOpenConcept]);
+  }, [tree, kind, flow, onHover, onOpenConcept]);
 
   // The concept picked in the search glows in the tree, and the view moves to it.
   const matchConcept = found?.conceptId ?? null;
@@ -167,6 +188,25 @@ function Tree({ live, found, onOpenConcept }: Props) {
           {conversations.map((c) => (
             <option key={c.id} value={c.id}>
               {c.title} · {new Date(c.startedAt).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })}
+            </option>
+          ))}
+        </select>
+        <select
+          value={kind}
+          aria-label="Layout"
+          onChange={(e) => {
+            const k = e.target.value as LayoutKind;
+            setKind(k);
+            try {
+              localStorage.setItem(LAYOUT_KEY, k);
+            } catch {
+              // Not remembered: the choice still applies to this page.
+            }
+          }}
+        >
+          {LAYOUTS.map((l) => (
+            <option key={l.kind} value={l.kind}>
+              {l.label}
             </option>
           ))}
         </select>
