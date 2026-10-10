@@ -2,6 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import { type Tracker, TrackerError } from '../core/tracker.ts';
+import { Reader } from '../core/reader.ts';
 import { TRACKING_INSTRUCTIONS } from './instructions.ts';
 
 /** Per MCP session: which conversation this client is writing to. */
@@ -11,6 +12,7 @@ export interface McpSessionState {
 }
 
 const ok = (data: unknown): CallToolResult => ({ content: [{ type: 'text', text: JSON.stringify(data) }] });
+const text = (data: string): CallToolResult => ({ content: [{ type: 'text', text: data }] });
 const fail = (message: string): CallToolResult => ({ content: [{ type: 'text', text: message }], isError: true });
 
 function guarded(fn: () => CallToolResult): CallToolResult {
@@ -92,6 +94,36 @@ export function createMcpServer(tracker: Tracker, state: McpSessionState): McpSe
         const v = tracker.link(conversationId(), node, conceptId);
         return ok({ node: v.id, conceptId: v.conceptId });
       }),
+  );
+
+  const reader = new Reader(tracker.repo);
+
+  server.registerTool(
+    'kc_recall',
+    {
+      description: 'What the user already explored about a topic: concepts, past summaries, dates. Use before explaining.',
+      inputSchema: { query: z.string().describe('Topic or concept name') },
+    },
+    ({ query }) => guarded(() => ok(reader.recall(query))),
+  );
+
+  server.registerTool(
+    'kc_tree',
+    {
+      description: 'Outline of a conversation (default: this one, else the latest) with node ids.',
+      inputSchema: {
+        conversation: z.string().optional().describe('Conversation id'),
+        summaries: z.boolean().optional().describe('Include node summaries'),
+      },
+    },
+    ({ conversation, summaries }) =>
+      guarded(() => text(reader.tree(conversation ?? state.conversationId, summaries ?? false))),
+  );
+
+  server.registerTool(
+    'kc_profile',
+    { description: "Overview of the user's knowledge: top and recent concepts, last conversations." },
+    () => guarded(() => ok(reader.profile())),
   );
 
   server.registerPrompt(
