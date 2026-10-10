@@ -59,14 +59,17 @@ Alternativa scartata: ogni client avvia il suo server stdio e tutti scrivono sul
 
 ```
 conversations(id, title, client, started_at, last_activity_at)
-concepts(id, name, name_norm UNIQUE, created_at, last_seen_at, visit_count)
-visits(id, conversation_id, concept_id, parent_visit_id NULL, title, summary, excerpt NULL, seq, created_at)
+concepts(id, name, name_norm UNIQUE, name_key, created_at, last_seen_at, visit_count)  -- name_key: quasi-duplicati
+visits(id, conversation_id, concept_id, parent_visit_id NULL, title, summary, excerpt NULL, detail NULL, seq, created_at)
 concept_links(from_concept_id, to_concept_id, kind)      -- correlato, parte-di, ...
 fts_concepts(name, summaries)                            -- FTS5 per ricerca e somiglianza
+revisions(target_kind, target_id, field, old_value, created_at)  -- valori precedenti a ogni modifica (D16), senza UI
+settings(key, value)                                     -- impostazioni del canvas, es. detail (D17)
 ```
 
 - **Albero della conversazione** = `visits` con `parent_visit_id`.
-- **Collegamento tratteggiato** (D1) = due visite della stessa conversazione con lo stesso `concept_id`.
+- **Collegamento tratteggiato** (D1) = due visite della stessa conversazione con lo stesso `concept_id`; sul nodo il badge "anche in" (D16).
+- **Approfondisci** = tutte le visite del concetto, ciascuna con il padre e i figli fino a 2 livelli come sezioni (D17).
 - **Grafo personale** = `concepts` + archi derivati dalle visite (genitore → figlio) + `concept_links`.
 - Il **riassunto di un concetto** è la lista dei riassunti delle sue visite, più recente prima. Nessun LLM lato server.
 

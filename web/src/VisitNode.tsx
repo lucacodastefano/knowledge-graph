@@ -1,14 +1,25 @@
+import { useRef, useState } from 'react';
 import { Handle, NodeToolbar, Position, type NodeProps } from '@xyflow/react';
 import type { VisitNode as VisitNodeType } from './layout.ts';
 
-/** A concept visit. Hover shows the short summary with an "Approfondisci" button (D7); only one tooltip is open at a time. */
+/**
+ * A concept visit. Hovering shows the short summary beside the node, on the side with more room, with an
+ * "Approfondisci" button (D7, WP6); only one tooltip is open at a time and it never blocks clicks on the canvas.
+ */
 export function VisitNode({ data }: NodeProps<VisitNodeType>) {
   const { visit, current, fresh, hovered, match } = data;
-  const show = () => data.onHover(visit.id);
+  const ref = useRef<HTMLDivElement>(null);
+  const [side, setSide] = useState<Position>(Position.Right);
+  const show = () => {
+    const box = ref.current?.getBoundingClientRect();
+    if (box) setSide(box.left + box.width / 2 > innerWidth / 2 ? Position.Left : Position.Right);
+    data.onHover(visit.id);
+  };
   const hide = () => data.onHover(null);
 
   return (
     <div
+      ref={ref}
       className={`visit${data.also.length ? ' shared' : ''}${current ? ' current' : ''}${fresh ? ' fresh' : ''}${match ? ' match' : ''}`}
       onMouseEnter={show}
       onMouseLeave={hide}
@@ -22,17 +33,17 @@ export function VisitNode({ data }: NodeProps<VisitNodeType>) {
         </span>
       )}
       <Handle type="source" position={Position.Right} />
-      <NodeToolbar isVisible={hovered} position={Position.Bottom} offset={8}>
-        <div className="tooltip" onMouseEnter={show} onMouseLeave={hide} role="tooltip">
+      <NodeToolbar isVisible={hovered} position={side} offset={10}>
+        <div className="tooltip passive" role="tooltip">
           <p>{visit.summary || 'Nessun riassunto.'}</p>
-          <div className="actions">
-            <button type="button" onClick={() => data.onOpen(visit.conceptId)}>
-              Approfondisci
-            </button>
-            <button type="button" className="secondary" onClick={() => data.onEdit(visit.id)}>
-              Modifica
-            </button>
-          </div>
+          <button
+            type="button"
+            onMouseEnter={() => data.onHover(visit.id)}
+            onMouseLeave={hide}
+            onClick={() => data.onOpen(visit.conceptId)}
+          >
+            Approfondisci
+          </button>
         </div>
       </NodeToolbar>
     </div>

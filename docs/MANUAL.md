@@ -124,8 +124,8 @@ The top bar has the search box and two tabs. The interface is in Italian.
 
 The tree of the conversation: each node is a concept as it came up, children are the drill-downs. The highlighted node is the *current* one, where the next topics will hang.
 
-- A **dashed link** joins two nodes of the same concept: the conversation came back to it.
-- **Hover** a node: short summary of what the model said, with **Approfondisci** (open the concept panel) and **Modifica** (edit the node).
+- A **dashed link** joins two nodes of the same concept: the conversation came back to it, possibly from another branch. Such nodes also show **anche in: …** with the other places.
+- **Hover** a node for a moment: a short summary appears beside it, with **Approfondisci** (open the concept panel). It closes as soon as you move to another node; **Esc** closes it too.
 - The menu at the top picks the conversation; **Segui l'ultima conversazione** (default) follows whichever conversation is active.
 
 ### Grafo personale (personal graph)
@@ -134,26 +134,19 @@ Every concept you ever explored, across conversations. Bigger nodes were visited
 
 ### Concept panel
 
-Opened from **Approfondisci**, from the personal graph or from search. It lists every visit of the concept (newest first) with its summary, conversation and date.
+Opened from **Approfondisci**, from the personal graph or from search. It lists every place the concept appears (newest first): conversation, the node it sits under, date and summary, followed by its sub-concepts as sections (two levels), which is where the real depth of an explanation lives.
+
+**Dettaglio approfondito** (checkbox in the top bar, off by default): when on, the model also writes 5-10 key points for a node when it goes deep on it, shown as a list in the panel. It costs some output tokens on those answers; when off, the model is not even told the option exists. The change applies from the next chat.
 
 ## 5. Fixing mistakes
 
 Models get titles wrong sometimes. Every correction is saved at once and shown live in every open canvas.
 
-From the **concept panel**:
+Everything happens in the **concept panel**. The pencil (**✎**) makes its texts editable in place: the concept name (nodes titled with the old name follow; a name that already belongs to another concept must be merged instead), every summary and key point, the section titles, and for each place **sotto** (move it under another node or to the root, never under its own descendants). **Elimina questo nodo** removes just that node. **Salva** applies everything, **Annulla** drops it. Every save keeps the previous texts in the database, for a future version history.
 
-| Button | Effect |
-|---|---|
-| **Rinomina** | Rename the concept; nodes titled with the old name follow. If the new name already belongs to another concept, merge them instead. |
-| **Unisci a…** | Merge this concept into another one (pick it by searching): all its visits move there. |
-| **Elimina** | Delete the concept and all its nodes from every conversation. |
+The **⋯** menu has **Unisci a…** (merge this concept into another one, picked by searching: all its places move there) and **Elimina concetto** (delete the concept and all its nodes from every conversation).
 
-From **Modifica** on a node (conversation view):
-
-- **Titolo**: rename just this node;
-- **Sotto**: move it under another node, or to the root of the conversation (never under one of its own descendants);
-- **Concetto**: link the node to a different existing concept;
-- **Elimina nodo**: delete just this node.
+You can also ask the model in the chat: "rename X", "remove X", "fix the hierarchy" (see §3).
 
 Deleting a node never loses its children: they move up one level. A concept left with no nodes disappears.
 

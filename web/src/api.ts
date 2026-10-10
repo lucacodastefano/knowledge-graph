@@ -1,5 +1,6 @@
 import type {
   Concept,
+  ConceptOccurrence,
   ConceptPage,
   ConceptSection,
   Conversation,
@@ -10,7 +11,7 @@ import type {
 } from '../../src/core/types.ts';
 import type { TrackerEvent, VisitEdit } from '../../src/core/tracker.ts';
 
-export type { Concept, ConceptPage, ConceptSection, Conversation, ConversationTree, PersonalGraph, Settings, TrackerEvent, Visit, VisitEdit };
+export type { Concept, ConceptOccurrence, ConceptPage, ConceptSection, Conversation, ConversationTree, PersonalGraph, Settings, TrackerEvent, Visit, VisitEdit };
 
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(path);

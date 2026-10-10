@@ -119,7 +119,13 @@ export async function buildApp({ tracker, webRoot, logger = false }: AppOptions)
       schema: {
         body: {
           type: 'object',
-          properties: { title: { type: 'string' }, parentVisitId: { type: ['string', 'null'] }, conceptId: { type: 'string' } },
+          properties: {
+            title: { type: 'string' },
+            summary: { type: 'string' },
+            detail: { type: ['string', 'null'] },
+            parentVisitId: { type: ['string', 'null'] },
+            conceptId: { type: 'string' },
+          },
         },
       },
     },

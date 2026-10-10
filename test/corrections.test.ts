@@ -100,3 +100,16 @@ test('REST: corrections and search over HTTP, with clear errors', async () => {
   assert.deepEqual(events.map((e) => e.type), ['visit.updated', 'concept.merged', 'visit.deleted', 'concept.deleted']);
   await app.close();
 });
+
+test('edits keep the previous values in revisions (D16)', () => {
+  const tracker = new Tracker(new SqliteRepository(':memory:'));
+  const conv = tracker.startConversation('Rev', null);
+  const [n] = tracker.track(conv.id, [{ title: 'Kafka', summary: 'vecchio', parent: 'root' }]);
+  tracker.editVisit(n.id, { summary: 'nuovo', detail: '- a\n- b' });
+  tracker.track(conv.id, [{ title: 'Kafka', summary: 'dal modello', parent: 'root' }]);
+  tracker.renameConcept(n.conceptId, 'Apache Kafka');
+  const visit = tracker.repo.listRevisions('visit', n.id).map((r) => [r.field, r.oldValue]);
+  assert.deepEqual(visit, [['summary', 'vecchio'], ['detail', null], ['summary', 'nuovo']]);
+  assert.deepEqual(tracker.repo.listRevisions('concept', n.conceptId).map((r) => r.oldValue), ['Kafka']);
+  assert.equal(tracker.repo.getVisit(n.id)!.detail, '- a\n- b', 're-tracking without detail keeps it');
+});
