@@ -1,16 +1,47 @@
 {
-  "name": "knowledge-graph",
+  "name": "@lucacodastefano/knowledge-graph",
   "version": "0.1.0",
   "description": "A canvas that grows a concept graph while you chat with an LLM, fed through MCP.",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "knowledge-graph",
+    "concept-map",
+    "claude",
+    "llm",
+    "canvas"
+  ],
+  "homepage": "https://github.com/lucacodastefano/knowledge-graph#readme",
+  "bugs": "https://github.com/lucacodastefano/knowledge-graph/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lucacodastefano/knowledge-graph.git"
+  },
+  "license": "MIT",
+  "author": "Luca Codastefano",
+  "type": "module",
+  "bin": {
+    "knowledge-graph": "dist/server/cli.js"
+  },
+  "files": [
+    "dist/",
+    "web/dist/",
+    "skills/",
+    "docs/"
+  ],
+  "engines": {
+    "node": ">=22.18"
+  },
   "scripts": {
     "start": "node --disable-warning=ExperimentalWarning src/server/cli.ts serve",
     "test": "node --disable-warning=ExperimentalWarning --test \"test/**/*.test.ts\"",
     "typecheck": "tsc && tsc -p web",
     "dev:web": "vite --config web/vite.config.ts",
     "build:web": "vite build --config web/vite.config.ts",
-    "test:e2e": "npm run build:web && node --disable-warning=ExperimentalWarning --test test/e2e/*.e2e.ts"
+    "test:e2e": "npm run build:web && node --disable-warning=ExperimentalWarning --test test/e2e/*.e2e.ts",
+    "build": "tsc -p tsconfig.build.json && npm run build:web",
+    "prepare": "npm run build"
   },
-  "license": "MIT",
   "dependencies": {
     "@fastify/static": "^10.1.6",
     "@fastify/websocket": "^11.3.4",
@@ -34,12 +65,5 @@
     "sigma": "^3.0.3",
     "typescript": "^7.0.2",
     "vite": "^8.3.4"
-  },
-  "type": "module",
-  "engines": {
-    "node": ">=22.18"
-  },
-  "bin": {
-    "knowledge-graph": "src/server/cli.ts"
   }
 }

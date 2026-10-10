@@ -1,6 +1,6 @@
 # Architettura di knowledge-graph
 
-> Stato: architettura approvata il 2026-10-10 (D11). Sono implementati `kc_start`, `kc_track`, `kc_focus`, `kc_link`, gli strumenti di lettura `kc_recall`, `kc_tree`, `kc_profile`, la skill per Claude Code e la vista conversazione; il resto segue il piano al §9. Le decisioni di prodotto sono in DECISIONI.md del progetto.
+> Stato: architettura approvata il 2026-10-10 (D11). Sono implementati `kc_start`, `kc_track`, `kc_focus`, `kc_link`, gli strumenti di lettura `kc_recall`, `kc_tree`, `kc_profile`, la skill per Claude Code, la vista conversazione, il grafo personale, le correzioni manuali con la ricerca e il pacchetto npm: il piano al §9 è completo. Il manuale per chi usa il prodotto è [MANUAL.md](MANUAL.md). Le decisioni di prodotto sono in DECISIONI.md del progetto.
 
 ## 1. Vincoli che guidano le scelte
 
@@ -51,6 +51,8 @@ Alternativa scartata: ogni client avvia il suo server stdio e tutti scrivono sul
 | Vista personale | **Sigma.js** (WebGL) + layout force | 10k nodi fluidi (RNF7) | Cytoscape.js (unica libreria per entrambe, ma lenta oltre qualche migliaio) |
 | Tempo reale | **WebSocket**, eventi dal dominio | Latenza < 1 s (RNF4) | SSE |
 | Distribuzione | **pacchetto npm**: `npx knowledge-graph` | Un comando (RNF2) | Binario singolo, Docker |
+
+**Pacchetto**: Node rifiuta il type stripping dentro `node_modules`, quindi il pacchetto pubblicato contiene JavaScript compilato. `npm run build` (lanciato da `prepare`, quindi anche a ogni `npm install` e nelle installazioni da GitHub) produce `dist/` con `tsc -p tsconfig.build.json` (`rewriteRelativeImportExtensions` riscrive gli import `.ts` in `.js`) e `web/dist/` con Vite; il comando `knowledge-graph` punta a `dist/server/cli.js`. In sviluppo si continua a eseguire `src/` direttamente. La CI installa il pacchetto impacchettato in una cartella vuota e verifica che il demone parta.
 | Licenza | **MIT** | Permissiva, standard | Apache 2.0 |
 
 ## 4. Modello dati
