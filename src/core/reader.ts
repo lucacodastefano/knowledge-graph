@@ -15,6 +15,8 @@ export interface RecalledConcept {
   notes: string[];
   /** Concepts explored right before or after it. */
   near: string[];
+  /** Known sources (URLs), newest first; only when there are some. */
+  sources?: string[];
 }
 
 export interface Profile {
@@ -31,6 +33,8 @@ const SECTION_DEPTH = 2;
 const NOTES_PER_CONCEPT = 3;
 const NEAR_PER_CONCEPT = 5;
 const NOTE_MAX = 300;
+/** Sources returned by kc_recall per concept: enough to reuse, few tokens. */
+const RECALL_SOURCES = 3;
 const PROFILE_LIMIT = 10;
 const PROFILE_CONVERSATIONS = 5;
 const SEARCH_LIMIT = 20;
@@ -59,6 +63,7 @@ export class Reader {
       const notes = [...new Set(detail.visits.map((v) => v.summary).filter(Boolean))]
         .slice(0, NOTES_PER_CONCEPT)
         .map((s) => clip(s, NOTE_MAX));
+      const sources = this.repo.listConceptSources(c.id).slice(0, RECALL_SOURCES).map((s) => s.url);
       return {
         id: c.id,
         name: c.name,
@@ -66,6 +71,7 @@ export class Reader {
         last: day(c.lastSeenAt),
         notes,
         near: this.repo.neighbourConcepts(c.id, NEAR_PER_CONCEPT).map((n) => n.name),
+        ...(sources.length > 0 ? { sources } : {}),
       };
     });
   }
@@ -81,6 +87,8 @@ export class Reader {
     };
     return {
       ...detail,
+      // Sources of this node and of the other visits of the same concept, each once.
+      sources: this.repo.listConceptSources(conceptId),
       visits: detail.visits.map((v) => {
         const all = visitsOf(v.conversationId);
         const sections = (parentId: string, depth: number): ConceptSection[] =>

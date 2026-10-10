@@ -139,6 +139,8 @@ Opened from **Approfondisci**, from the personal graph or from search. It lists 
 
 **Dettaglio approfondito** (checkbox in the top bar, off by default): when on, the model also keeps the 5-10 key points of its answer, worded as in the answer, for a node it goes deep on, shown as a list in the panel. It costs some output tokens on those answers; when off, the model is not even told the option exists. The change applies at once, also to chats already open and without restarting the client: the daemon re-announces its tools and tells the model in the result of its next `kc_start` or `kc_track`.
 
+**Fonti**: when an answer relies on web search results or documents, the model attaches their links to the nodes, and the panel lists them once per page (without tracking parameters). In edit mode each source has a ✕ to remove a wrong one.
+
 ## 5. Fixing mistakes
 
 Models get titles wrong sometimes. Every correction is saved at once and shown live in every open canvas.

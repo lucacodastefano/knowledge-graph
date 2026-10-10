@@ -3,6 +3,7 @@ import type { Repository } from './repository.ts';
 import type { Concept, ConceptMatch, Conversation, Settings, Visit } from './types.ts';
 import { normalizeName } from './normalize.ts';
 import { restatesParent } from './similarity.ts';
+import { normalizeSources } from './sources.ts';
 
 export class TrackerError extends Error {}
 
@@ -19,6 +20,8 @@ export interface TrackNodeInput {
   detail?: string;
   /** Link directly to a known concept instead of matching by name. */
   conceptId?: string;
+  /** URLs of web results or documents the answer on this node relies on; invalid ones are ignored. */
+  sources?: string[];
 }
 
 export interface TrackNodeResult {
@@ -178,6 +181,8 @@ export class Tracker {
         if (twin) {
           this.keep('visit', twin.id, 'summary', twin.summary, summary);
           this.repo.setVisitSummary(twin.id, summary, excerpt, detail ?? twin.detail);
+          // Re-tracking adds the new sources to the ones already there.
+          this.repo.addVisitSources(twin.id, normalizeSources(node.sources));
           updatedVisits.push(this.repo.getVisit(twin.id)!);
           current = twin.id;
           out[index] = { id: twin.id, conceptId: concept!.id, knownConcept, revisit: true, updated: true, similar: [] };
@@ -187,7 +192,9 @@ export class Tracker {
         const revisit = visits.some((v) => v.conceptId === concept!.id);
         concept ??= this.repo.createConcept({ name: title, nameNorm: normalizeName(title) });
 
-        const visit = this.repo.createVisit({ conversationId, conceptId: concept.id, parentVisitId, title, summary, excerpt, detail });
+        const { id: visitId } = this.repo.createVisit({ conversationId, conceptId: concept.id, parentVisitId, title, summary, excerpt, detail });
+        this.repo.addVisitSources(visitId, normalizeSources(node.sources));
+        const visit = this.repo.getVisit(visitId)!;
         created.push({ visit, concept: this.repo.getConcept(concept.id)! });
         current = visit.id;
         out[index] = {
@@ -433,6 +440,16 @@ export class Tracker {
       }
     }
     this.repo.setVisitParent(visit.id, parentVisitId);
+  }
+
+  /** Removes a wrong source from a node (canvas correction); the source disappears when nothing else cites it. */
+  removeVisitSource(visitId: string, sourceId: string): Visit {
+    this.requireVisit(visitId);
+    const removed = this.repo.transaction(() => this.repo.removeVisitSource(visitId, sourceId));
+    if (!removed) throw new TrackerError(`Source ${sourceId} not found on node ${visitId}`);
+    const visit = this.repo.getVisit(visitId)!;
+    this.emit({ type: 'visit.updated', visit });
+    return visit;
   }
 
   /** Deletes one node; its children move up to its parent and an unused concept is dropped. */

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { api, explain, type ConceptOccurrence, type ConceptPage, type ConceptSection, type Visit } from './api.ts';
+import { api, explain, type ConceptOccurrence, type ConceptPage, type ConceptSection, type ConceptSource, type Visit } from './api.ts';
 import { ConceptSearch } from './ConceptSearch.tsx';
 
 const fmt = (iso: string) => new Date(iso).toLocaleString('it-IT', { dateStyle: 'medium', timeStyle: 'short' });
@@ -218,6 +218,17 @@ export function DetailPanel({ conceptId, version, onClose, onOpen }: Props) {
               />
             ))}
           </ol>
+          <Sources
+            sources={page.sources}
+            editing={draft !== null}
+            onRemove={(s) =>
+              // The concept page lists a source once: remove it from every node of this concept that cites it.
+              Promise.all(s.visitIds.map((id) => api.removeSource(id, s.id))).then(
+                () => setError(null),
+                (e: Error) => setError(explain(e.message)),
+              )
+            }
+          />
           {draft && (
             <div className="save-bar">
               <button type="button" disabled={saving} onClick={() => void save()}>
@@ -397,5 +408,51 @@ function Sections({ sections, level, draft, onChange }: SectionsProps) {
         );
       })}
     </div>
+  );
+}
+
+/** "host/path" of a source, as shown in the panel: no scheme, no query (the full URL is in the tooltip). */
+function sourceLabel(s: ConceptSource): string {
+  try {
+    const { pathname } = new URL(s.url);
+    return pathname === '/' ? s.domain : `${s.domain}${pathname}`;
+  } catch {
+    return s.url;
+  }
+}
+
+interface SourcesProps {
+  sources: ConceptSource[];
+  editing: boolean;
+  onRemove: (source: ConceptSource) => void;
+}
+
+/** "Fonti": the pages the model cited for this concept, in every conversation; removable while editing. */
+function Sources({ sources, editing, onRemove }: SourcesProps) {
+  if (sources.length === 0) return null;
+  return (
+    <section className="sources" aria-label="Fonti">
+      <h3>Fonti</h3>
+      <ul>
+        {sources.map((s) => (
+          <li key={s.id}>
+            <a href={s.url} target="_blank" rel="noopener noreferrer" title={s.url}>
+              {sourceLabel(s)}
+            </a>
+            {editing && (
+              <button
+                type="button"
+                className="ghost icon small"
+                aria-label={`Rimuovi fonte ${s.domain}`}
+                title="Rimuovi fonte"
+                onClick={() => onRemove(s)}
+              >
+                ✕
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

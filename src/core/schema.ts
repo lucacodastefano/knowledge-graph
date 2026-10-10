@@ -48,6 +48,21 @@ CREATE TABLE IF NOT EXISTS revisions (
 );
 CREATE INDEX IF NOT EXISTS revisions_target ON revisions(target_kind, target_id);
 
+-- Pages and documents the model cited (kc_track sources), once per normalized URL, linked to the nodes they support.
+CREATE TABLE IF NOT EXISTS sources (
+  id TEXT PRIMARY KEY,
+  url TEXT NOT NULL UNIQUE,
+  domain TEXT NOT NULL,
+  first_seen TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS visit_sources (
+  visit_id TEXT NOT NULL REFERENCES visits(id) ON DELETE CASCADE,
+  source_id TEXT NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+  PRIMARY KEY (visit_id, source_id)
+);
+CREATE INDEX IF NOT EXISTS visit_sources_source ON visit_sources(source_id);
+
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
