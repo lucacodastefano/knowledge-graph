@@ -37,6 +37,17 @@ CREATE TABLE IF NOT EXISTS concept_links (
   PRIMARY KEY (from_concept_id, to_concept_id, kind)
 );
 
+-- Previous values of every manual or model edit (D16): history for a future versioning UI.
+CREATE TABLE IF NOT EXISTS revisions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  target_kind TEXT NOT NULL,
+  target_id TEXT NOT NULL,
+  field TEXT NOT NULL,
+  old_value TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS revisions_target ON revisions(target_kind, target_id);
+
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL

@@ -40,6 +40,8 @@ export interface ConceptDetail extends Concept {
 
 /** A sub-concept shown as a section of "Approfondisci" (D17): what was explained under a node. */
 export interface ConceptSection {
+  /** The visit shown as this section. */
+  id: string;
   title: string;
   summary: string;
   detail: string | null;
@@ -62,6 +64,15 @@ export interface ConceptPage extends Concept {
 export interface Settings {
   /** D17: the model may write a `detail` field (costs output tokens). Applies from the next chat. */
   detail: boolean;
+}
+
+/** A previous value kept before an edit (D16); no UI yet. */
+export interface Revision {
+  targetKind: 'concept' | 'visit';
+  targetId: string;
+  field: string;
+  oldValue: string | null;
+  createdAt: string;
 }
 
 export interface GraphConcept extends Concept {

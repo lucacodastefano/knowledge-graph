@@ -5,6 +5,7 @@ import type {
   Conversation,
   ConversationTree,
   PersonalGraph,
+  Revision,
   Visit,
 } from './types.ts';
 
@@ -50,6 +51,9 @@ export interface Repository {
   countVisitsOfConcept(conceptId: string): number;
   getTree(conversationId: string): ConversationTree | undefined;
   getPersonalGraph(): PersonalGraph;
+
+  addRevision(revision: Omit<Revision, 'createdAt'>): void;
+  listRevisions(targetKind: Revision['targetKind'], targetId: string): Revision[];
 
   getSetting(key: string): string | undefined;
   setSetting(key: string, value: string): void;

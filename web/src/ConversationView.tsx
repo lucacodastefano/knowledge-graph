@@ -13,10 +13,12 @@ import { api, type Conversation, type ConversationTree } from './api.ts';
 import type { Found, LiveEvent } from './App.tsx';
 import { alsoIn, buildEdges, layout, type VisitNode as VisitNodeType } from './layout.ts';
 import { VisitNode } from './VisitNode.tsx';
-import { VisitPanel } from './VisitPanel.tsx';
 
 const nodeTypes = { visit: VisitNode };
 const FRESH_MS = 1600;
+/** WP6: the tooltip opens after a short dwell and closes at once, with a grace period to reach its button. */
+const OPEN_DELAY_MS = 400;
+const CLOSE_GRACE_MS = 150;
 const AUTO = '';
 
 interface Props {
@@ -34,12 +36,27 @@ function Tree({ live, found, onOpenConcept }: Props) {
   const [edges, setEdges] = useState<Edge[]>([]);
   const [fresh, setFresh] = useState<Set<string>>(new Set());
   const [hovered, setHovered] = useState<string | null>(null);
-  const [editing, setEditing] = useState<string | null>(null);
   const hoverTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  // Entering a node closes any other tooltip at once and opens its own after a dwell; staying on the open
+  // tooltip's button keeps it; leaving closes it after a short grace period.
   const onHover = useCallback((id: string | null) => {
     clearTimeout(hoverTimer.current);
-    if (id) setHovered(id);
-    else hoverTimer.current = setTimeout(() => setHovered(null), 180);
+    if (id === null) {
+      hoverTimer.current = setTimeout(() => setHovered(null), CLOSE_GRACE_MS);
+      return;
+    }
+    setHovered((prev) => (prev === id ? prev : null));
+    hoverTimer.current = setTimeout(() => setHovered(id), OPEN_DELAY_MS);
+  }, []);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        clearTimeout(hoverTimer.current);
+        setHovered(null);
+      }
+    };
+    addEventListener('keydown', onKey);
+    return () => removeEventListener('keydown', onKey);
   }, []);
   const flow = useReactFlow();
   // Keeps React Flow's measured sizes in our state: without them every rebuild resets nodes to
@@ -108,7 +125,6 @@ function Tree({ live, found, onOpenConcept }: Props) {
             also: also.get(v.id) ?? [],
             onHover,
             onOpen: onOpenConcept,
-            onEdit: setEditing,
           },
         }));
       });
@@ -142,7 +158,6 @@ function Tree({ live, found, onOpenConcept }: Props) {
       }),
     [nodes, fresh, hovered, matchConcept],
   );
-  const editedVisit = tree?.visits.find((v) => v.id === editing);
 
   return (
     <>
@@ -177,7 +192,6 @@ function Tree({ live, found, onOpenConcept }: Props) {
           <p className="muted">Inizia a chattare con un modello collegato via MCP: i concetti compariranno qui.</p>
         </div>
       )}
-      {editedVisit && tree && <VisitPanel visit={editedVisit} visits={tree.visits} onClose={() => setEditing(null)} />}
     </>
   );
 }

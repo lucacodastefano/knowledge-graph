@@ -17,7 +17,6 @@ export interface VisitNodeData extends Record<string, unknown> {
   also: string[];
   onHover: (visitId: string | null) => void;
   onOpen: (conceptId: string) => void;
-  onEdit: (visitId: string) => void;
 }
 
 /** Tree edges are solid; visits of the same concept are joined by dashed cross-links (D1). */

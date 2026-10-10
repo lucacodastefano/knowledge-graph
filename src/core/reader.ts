@@ -88,7 +88,7 @@ export class Reader {
             ? []
             : all
                 .filter((c) => c.parentVisitId === parentId)
-                .map((c) => ({ title: c.title, summary: c.summary, detail: c.detail, children: sections(c.id, depth - 1) }));
+                .map((c) => ({ id: c.id, title: c.title, summary: c.summary, detail: c.detail, children: sections(c.id, depth - 1) }));
         return {
           ...v,
           parentTitle: all.find((p) => p.id === v.parentVisitId)?.title ?? null,

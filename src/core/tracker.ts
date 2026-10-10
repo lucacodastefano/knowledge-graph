@@ -47,6 +47,9 @@ export type TrackerEvent =
 
 export interface VisitEdit {
   title?: string;
+  summary?: string;
+  /** Key points (D17); null clears them. */
+  detail?: string | null;
   /** New parent: a visit of the same conversation, or null for the root. */
   parentVisitId?: string | null;
   conceptId?: string;
@@ -62,6 +65,11 @@ export class Tracker {
 
   constructor(repo: Repository) {
     this.repo = repo;
+  }
+
+  /** Keeps the previous value of an edited field (D16: history for a future versioning UI). */
+  private keep(targetKind: 'concept' | 'visit', targetId: string, field: string, oldValue: string | null, newValue: string | null) {
+    if (oldValue !== newValue) this.repo.addRevision({ targetKind, targetId, field, oldValue });
   }
 
   private emit(e: TrackerEvent) {
@@ -117,6 +125,7 @@ export class Tracker {
         // Same concept under the same parent: refresh that node instead of duplicating it (D15).
         const twin = visits.find((v) => v.conceptId === concept!.id && v.parentVisitId === parentVisitId);
         if (twin) {
+          this.keep('visit', twin.id, 'summary', twin.summary, summary);
           this.repo.setVisitSummary(twin.id, summary, excerpt, detail ?? twin.detail);
           updatedVisits.push(this.repo.getVisit(twin.id)!);
           current = twin.id;
@@ -298,6 +307,7 @@ export class Tracker {
     const oldNorm = normalizeName(concept.name);
     const renamed: Visit[] = [];
     const updated = this.repo.transaction(() => {
+      this.keep('concept', conceptId, 'name', concept.name, trimmed);
       this.repo.renameConcept(conceptId, trimmed, norm);
       for (const v of this.repo.getConceptDetail(conceptId)!.visits) {
         if (normalizeName(v.title) === oldNorm && v.title !== trimmed) {
@@ -344,7 +354,15 @@ export class Tracker {
       if (edit.title !== undefined) {
         const title = edit.title.trim();
         if (!title) throw new TrackerError('Empty title');
+        this.keep('visit', visitId, 'title', visit.title, title);
         this.repo.setVisitTitle(visitId, title);
+      }
+      if (edit.summary !== undefined || edit.detail !== undefined) {
+        const summary = edit.summary?.trim() ?? visit.summary;
+        const detail = edit.detail === undefined ? visit.detail : edit.detail?.trim() || null;
+        this.keep('visit', visitId, 'summary', visit.summary, summary);
+        this.keep('visit', visitId, 'detail', visit.detail, detail);
+        this.repo.setVisitSummary(visitId, summary, visit.excerpt, detail);
       }
       if (edit.parentVisitId !== undefined) this.moveVisit(visit, edit.parentVisitId);
       if (edit.conceptId !== undefined && edit.conceptId !== visit.conceptId) {

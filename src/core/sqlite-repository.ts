@@ -8,6 +8,7 @@ import type {
   Conversation,
   ConversationTree,
   PersonalGraph,
+  Revision,
   Visit,
 } from './types.ts';
 import { SCHEMA } from './schema.ts';
@@ -345,6 +346,25 @@ export class SqliteRepository implements Repository {
       .all()
       .map((r) => ({ source: r.source as string, target: r.target as string, weight: Number(r.weight) }));
     return { concepts, edges };
+  }
+
+  addRevision(r: Omit<Revision, 'createdAt'>): void {
+    this.db
+      .prepare('INSERT INTO revisions (target_kind, target_id, field, old_value, created_at) VALUES (?, ?, ?, ?, ?)')
+      .run(r.targetKind, r.targetId, r.field, r.oldValue, now());
+  }
+
+  listRevisions(targetKind: Revision['targetKind'], targetId: string): Revision[] {
+    return this.db
+      .prepare('SELECT * FROM revisions WHERE target_kind = ? AND target_id = ? ORDER BY id')
+      .all(targetKind, targetId)
+      .map((r) => ({
+        targetKind: r.target_kind as Revision['targetKind'],
+        targetId: r.target_id as string,
+        field: r.field as string,
+        oldValue: (r.old_value as string | null) ?? null,
+        createdAt: r.created_at as string,
+      }));
   }
 
   getSetting(key: string): string | undefined {
