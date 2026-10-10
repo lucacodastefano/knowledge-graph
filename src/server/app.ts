@@ -5,7 +5,8 @@ import websocket from '@fastify/websocket';
 import fastifyStatic from '@fastify/static';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
-import type { Tracker, TrackerEvent } from '../core/tracker.ts';
+import { type Tracker, TrackerError, type TrackerEvent, type VisitEdit } from '../core/tracker.ts';
+import { Reader } from '../core/reader.ts';
 import { createMcpServer, type McpSessionState } from './mcp.ts';
 
 export interface AppOptions {
@@ -29,6 +30,12 @@ export function isAllowedOrigin(origin: string | undefined): boolean {
 export async function buildApp({ tracker, webRoot, logger = false }: AppOptions): Promise<FastifyInstance> {
   const app = Fastify({ logger });
   await app.register(websocket);
+
+  // Domain errors (unknown id, invalid edit) are the caller's fault.
+  app.setErrorHandler((err, _req, reply) => {
+    if (err instanceof TrackerError) return reply.code(/not found/.test(err.message) ? 404 : 409).send({ error: err.message });
+    return reply.send(err);
+  });
 
   app.addHook('onRequest', async (req, reply) => {
     if (!isAllowedOrigin(req.headers.origin)) return reply.code(403).send({ error: 'Origin not allowed' });
@@ -80,6 +87,40 @@ export async function buildApp({ tracker, webRoot, logger = false }: AppOptions)
   app.get<{ Params: { id: string } }>('/api/concepts/:id', async (req, reply) => {
     const detail = repo.getConceptDetail(req.params.id);
     return detail ?? reply.code(404).send({ error: 'Not found' });
+  });
+
+  app.get<{ Querystring: { q?: string } }>('/api/search', async (req) => new Reader(repo).search(req.query.q ?? ''));
+
+  // --- Manual corrections (D8): every change is broadcast on /ws like the model's ones ---
+  app.patch<{ Params: { id: string }; Body: { name: string } }>(
+    '/api/concepts/:id',
+    { schema: { body: { type: 'object', required: ['name'], properties: { name: { type: 'string' } } } } },
+    async (req) => tracker.renameConcept(req.params.id, req.body.name),
+  );
+  app.post<{ Params: { id: string }; Body: { into: string } }>(
+    '/api/concepts/:id/merge',
+    { schema: { body: { type: 'object', required: ['into'], properties: { into: { type: 'string' } } } } },
+    async (req) => tracker.mergeConcepts(req.params.id, req.body.into),
+  );
+  app.delete<{ Params: { id: string } }>('/api/concepts/:id', async (req, reply) => {
+    tracker.deleteConcept(req.params.id);
+    return reply.code(204).send();
+  });
+  app.patch<{ Params: { id: string }; Body: VisitEdit }>(
+    '/api/visits/:id',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          properties: { title: { type: 'string' }, parentVisitId: { type: ['string', 'null'] }, conceptId: { type: 'string' } },
+        },
+      },
+    },
+    async (req) => tracker.editVisit(req.params.id, req.body),
+  );
+  app.delete<{ Params: { id: string } }>('/api/visits/:id', async (req, reply) => {
+    tracker.deleteVisit(req.params.id);
+    return reply.code(204).send();
   });
 
   // --- Live updates ---

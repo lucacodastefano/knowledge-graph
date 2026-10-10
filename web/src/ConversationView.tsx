@@ -10,9 +10,10 @@ import {
   type NodeChange,
 } from '@xyflow/react';
 import { api, type Conversation, type ConversationTree } from './api.ts';
-import type { LiveEvent } from './App.tsx';
+import type { Found, LiveEvent } from './App.tsx';
 import { buildEdges, layout, type VisitNode as VisitNodeType } from './layout.ts';
 import { VisitNode } from './VisitNode.tsx';
+import { VisitPanel } from './VisitPanel.tsx';
 
 const nodeTypes = { visit: VisitNode };
 const FRESH_MS = 1600;
@@ -20,11 +21,12 @@ const AUTO = '';
 
 interface Props {
   live: LiveEvent | null;
+  found: Found | null;
   onOpenConcept: (conceptId: string) => void;
 }
 
 /** The conversation as a navigation tree (D1). */
-function Tree({ live, onOpenConcept }: Props) {
+function Tree({ live, found, onOpenConcept }: Props) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [pinned, setPinned] = useState<string>(AUTO);
   const [tree, setTree] = useState<ConversationTree | null>(null);
@@ -32,6 +34,7 @@ function Tree({ live, onOpenConcept }: Props) {
   const [edges, setEdges] = useState<Edge[]>([]);
   const [fresh, setFresh] = useState<Set<string>>(new Set());
   const [hovered, setHovered] = useState<string | null>(null);
+  const [editing, setEditing] = useState<string | null>(null);
   const hoverTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const onHover = useCallback((id: string | null) => {
     clearTimeout(hoverTimer.current);
@@ -67,7 +70,8 @@ function Tree({ live, onOpenConcept }: Props) {
     void loadConversations();
     const e = live.event;
     const conv = 'conversationId' in e ? e.conversationId : 'visit' in e ? e.visit.conversationId : null;
-    if (conv === activeId) loadTree();
+    // Concept corrections can touch any conversation.
+    if (conv === activeId || e.type.startsWith('concept.')) loadTree();
   }, [live]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Rebuild nodes and layout whenever the tree changes; new nodes glow for a moment.
@@ -99,8 +103,10 @@ function Tree({ live, onOpenConcept }: Props) {
             current: v.id === tree.conversation.currentVisitId,
             fresh: false,
             hovered: false,
+            match: false,
             onHover,
             onOpen: onOpenConcept,
+            onEdit: setEditing,
           },
         }));
       });
@@ -116,15 +122,25 @@ function Tree({ live, onOpenConcept }: Props) {
     };
   }, [tree, flow, onHover, onOpenConcept]);
 
+  // The concept picked in the search glows in the tree, and the view moves to it.
+  const matchConcept = found?.conceptId ?? null;
+  useEffect(() => {
+    if (!found || !tree) return;
+    const ids = tree.visits.filter((v) => v.conceptId === found.conceptId).map((v) => ({ id: v.id }));
+    if (ids.length) void flow.fitView({ nodes: ids, padding: 1, maxZoom: 1.2, duration: 400 });
+  }, [found]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const shown = useMemo(
     () =>
-      nodes.map((n) =>
-        fresh.has(n.id) || hovered === n.id
-          ? { ...n, data: { ...n.data, fresh: fresh.has(n.id), hovered: hovered === n.id } }
-          : n,
-      ),
-    [nodes, fresh, hovered],
+      nodes.map((n) => {
+        const match = n.data.visit.conceptId === matchConcept;
+        return fresh.has(n.id) || hovered === n.id || match
+          ? { ...n, data: { ...n.data, fresh: fresh.has(n.id), hovered: hovered === n.id, match } }
+          : n;
+      }),
+    [nodes, fresh, hovered, matchConcept],
   );
+  const editedVisit = tree?.visits.find((v) => v.id === editing);
 
   return (
     <>
@@ -159,6 +175,7 @@ function Tree({ live, onOpenConcept }: Props) {
           <p className="muted">Inizia a chattare con un modello collegato via MCP: i concetti compariranno qui.</p>
         </div>
       )}
+      {editedVisit && tree && <VisitPanel visit={editedVisit} visits={tree.visits} onClose={() => setEditing(null)} />}
     </>
   );
 }

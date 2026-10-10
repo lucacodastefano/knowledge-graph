@@ -3,10 +3,11 @@ import Graph from 'graphology';
 import forceAtlas2 from 'graphology-layout-forceatlas2';
 import Sigma from 'sigma';
 import { api, type PersonalGraph } from './api.ts';
-import type { LiveEvent } from './App.tsx';
+import type { Found, LiveEvent } from './App.tsx';
 
 interface Props {
   live: LiveEvent | null;
+  found: Found | null;
   onOpenConcept: (conceptId: string) => void;
 }
 
@@ -70,11 +71,12 @@ function merge(graph: Graph<NodeAttrs>, data: PersonalGraph, colors: { node: str
 }
 
 /** Every concept ever explored, across conversations (D2), as a force-directed WebGL graph. */
-export function PersonalView({ live, onOpenConcept }: Props) {
+export function PersonalView({ live, found, onOpenConcept }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const graphRef = useRef(new Graph<NodeAttrs>());
   const sigmaRef = useRef<Sigma<NodeAttrs> | null>(null);
   const hoverRef = useRef<string | null>(null);
+  const foundRef = useRef<string | null>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const [hover, setHover] = useState<Hover | null>(null);
   const [count, setCount] = useState<number | null>(null);
@@ -90,7 +92,8 @@ export function PersonalView({ live, onOpenConcept }: Props) {
       zIndex: true,
       nodeReducer: (node, data) => {
         const h = hoverRef.current;
-        if (!h || node === h || graph.areNeighbors(node, h)) return { ...data, highlighted: node === h };
+        const highlighted = node === h || node === foundRef.current;
+        if (!h || node === h || graph.areNeighbors(node, h)) return { ...data, highlighted };
         return { ...data, color: cssVar('--border'), label: '' };
       },
       edgeReducer: (edge, data) => {
@@ -148,6 +151,11 @@ export function PersonalView({ live, onOpenConcept }: Props) {
       const graph = graphRef.current;
       const first = graph.order === 0;
       const added = merge(graph, data, { node: cssVar('--node'), recent: cssVar('--accent') });
+      // The searched concept was deleted or merged: zoom back out instead of staring at an empty spot.
+      if (foundRef.current && !graph.hasNode(foundRef.current)) {
+        foundRef.current = null;
+        void sigmaRef.current?.getCamera().animatedReset({ duration: 300 });
+      }
       if (first || added > 0) {
         const settings = forceAtlas2.inferSettings(graph);
         const iterations = first ? (graph.order > 2000 ? 40 : 200) : 30;
@@ -159,6 +167,16 @@ export function PersonalView({ live, onOpenConcept }: Props) {
       cancelled = true;
     };
   }, [live]);
+
+  // The concept picked in the search is highlighted and centred.
+  useEffect(() => {
+    const renderer = sigmaRef.current;
+    foundRef.current = found?.conceptId ?? null;
+    if (!renderer || !found) return;
+    renderer.refresh({ skipIndexation: true });
+    const d = renderer.getNodeDisplayData(found.conceptId);
+    if (d) void renderer.getCamera().animate({ x: d.x, y: d.y, ratio: 0.4 }, { duration: 400 });
+  }, [found]);
 
   const hovered = hover && graphRef.current.hasNode(hover.id) ? graphRef.current.getNodeAttributes(hover.id) : null;
 
