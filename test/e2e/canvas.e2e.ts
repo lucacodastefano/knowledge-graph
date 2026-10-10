@@ -18,8 +18,9 @@ import { buildApp } from '../../src/server/app.ts';
 const out = process.env.E2E_OUT ?? join(import.meta.dirname, 'out');
 mkdirSync(out, { recursive: true });
 
+const tracker = new Tracker(new SqliteRepository(join(tmpdir(), `kg-e2e-${process.pid}.db`)));
 const app = await buildApp({
-  tracker: new Tracker(new SqliteRepository(join(tmpdir(), `kg-e2e-${process.pid}.db`))),
+  tracker,
   webRoot: join(import.meta.dirname, '..', '..', 'web', 'dist'),
 });
 const base = await app.listen({ host: '127.0.0.1', port: 0 });
@@ -343,4 +344,68 @@ test('mind map: balanced halves, edges on the facing side as branches move, and 
   await page.locator('.visit.focus').waitFor();
   await page.keyboard.press('Escape');
   await page.waitForFunction(() => !document.querySelector('.visit.focus'));
+});
+
+test('XMind gestures: drag a node onto another to move it with its children, pull a line to relate two concepts', async () => {
+  const conv = tracker.startConversation('Gesti XMind', null);
+  tracker.track(conv.id, [
+    { title: 'Radice gesti', summary: 'r' },
+    { title: 'Ramo uno', summary: 'a', parent: '#0' },
+    { title: 'Figlio del ramo', summary: 'f', parent: '#1' },
+    { title: 'Ramo due', summary: 'b', parent: '#0' },
+  ]);
+  const page = await browser.newPage({ viewport: { width: 1400, height: 820 } });
+  await page.goto(base);
+  await page.locator('[data-testid=visit]').nth(3).waitFor();
+  await page.waitForTimeout(600);
+  const state = async () =>
+    (await (await fetch(`${base}/api/conversations/${conv.id}/tree`)).json()) as {
+      visits: { id: string; title: string; conceptId: string; parentVisitId: string | null }[];
+      relations: unknown[];
+    };
+  const centre = async (title: string) => {
+    const box = (await titled(page, title).boundingBox())!;
+    return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  };
+
+  // Drag "Ramo uno" (with its child) onto "Ramo due".
+  const from = await centre('Ramo uno');
+  const to = await centre('Ramo due');
+  await page.mouse.move(from.x, from.y + 10);
+  await page.mouse.down();
+  await page.mouse.move((from.x + to.x) / 2, (from.y + to.y) / 2, { steps: 8 });
+  await page.mouse.move(to.x, to.y, { steps: 8 });
+  await page.mouse.up();
+  await page.waitForFunction(async ([base, id]) => {
+    const t = await (await fetch(`${base}/api/conversations/${id}/tree`)).json();
+    const byTitle = (n: string) => t.visits.find((v: { title: string }) => v.title === n);
+    return byTitle('Ramo uno').parentVisitId === byTitle('Ramo due').id;
+  }, [base, conv.id]);
+  let t = await state();
+  const uno = t.visits.find((v) => v.title === 'Ramo uno')!;
+  assert.equal(t.visits.find((v) => v.title === 'Figlio del ramo')!.parentVisitId, uno.id, 'the child travels with its node');
+  await page.waitForTimeout(800);
+
+  // Pull a line from "Radice gesti" to "Figlio del ramo": a free relation, drawn in the tree.
+  await titled(page, 'Radice gesti').hover();
+  const handles = titled(page, 'Radice gesti').locator('.react-flow__handle.source');
+  const target = await centre('Figlio del ramo');
+  const src = await centre('Radice gesti');
+  const side = target.x >= src.x ? 'right' : 'left';
+  const hb = (await handles.locator(`xpath=self::*[contains(@class,"${side}")]`).boundingBox())!;
+  await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(target.x, target.y, { steps: 12 });
+  await page.mouse.up();
+  await page.locator('.react-flow__edge.relation').waitFor();
+  t = await state();
+  assert.equal(t.relations.length, 1);
+  await page.screenshot({ path: join(out, '12-gesti-xmind.png') });
+
+  // Clicking the relation removes it.
+  page.once('dialog', (d) => void d.accept());
+  await page.locator('.react-flow__edge.relation').first().click({ force: true });
+  await page.waitForFunction(() => !document.querySelector('.react-flow__edge.relation'));
+  assert.equal((await state()).relations.length, 0);
+  await page.close();
 });

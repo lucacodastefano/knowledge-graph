@@ -218,6 +218,29 @@ export function DetailPanel({ conceptId, version, onClose, onOpen }: Props) {
               />
             ))}
           </ol>
+          {page.related.length > 0 && (
+            <section className="related" aria-label="Relazioni">
+              <h3>Relazioni</h3>
+              <ul>
+                {page.related.map((r) => (
+                  <li key={r.id}>
+                    <button type="button" className="link" onClick={() => onOpen(r.id)}>
+                      {r.name}
+                    </button>{' '}
+                    <button
+                      type="button"
+                      className="ghost icon"
+                      aria-label={`Rimuovi la relazione con ${r.name}`}
+                      title="Rimuovi la relazione"
+                      onClick={() => void run(api.unrelate(conceptId, r.id))}
+                    >
+                      ✕
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
           <Sources
             sources={page.sources}
             editing={draft !== null}

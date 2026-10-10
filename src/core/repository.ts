@@ -61,6 +61,12 @@ export interface Repository {
   /** Sources of every visit of a concept, each once with the visits citing it, newest first. */
   listConceptSources(conceptId: string): ConceptSource[];
 
+  /** Adds a free relation between two concepts; false if they are already related (either direction). */
+  addRelation(fromId: string, toId: string): boolean;
+  /** Removes the relation between two concepts, whichever direction it was drawn; false if there was none. */
+  removeRelation(aId: string, bId: string): boolean;
+  listRelated(conceptId: string): ConceptMatch[];
+
   addRevision(revision: Omit<Revision, 'createdAt'>): void;
   listRevisions(targetKind: Revision['targetKind'], targetId: string): Revision[];
 

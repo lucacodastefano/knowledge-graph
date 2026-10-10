@@ -180,3 +180,9 @@ button.icon:hover { color: var(--text); }
 .zoom-controls button { width: 32px; height: 30px; padding: 0; color: var(--text); background: none; border: none; border-radius: 0; font-size: 16px; }
 .zoom-controls button + button { border-top: 1px solid var(--border); }
 .zoom-controls button:hover { background: var(--accent-soft); }
+
+/* XMind-style gestures: side handles appear on hover to pull a relation; the centre handle only anchors edges. */
+.visit .react-flow__handle.center { pointer-events: none; }
+.visit:hover .react-flow__handle.left, .visit:hover .react-flow__handle.right { opacity: 0.9; width: 12px; height: 12px; background: var(--accent); }
+.react-flow__edge.relation .react-flow__edge-path { stroke: var(--accent); stroke-width: 2; stroke-dasharray: 2 5; stroke-linecap: round; cursor: pointer; }
+.overlay-bar .notice { margin-left: 8px; font-size: 13px; cursor: pointer; }

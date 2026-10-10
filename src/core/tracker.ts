@@ -47,6 +47,7 @@ export type TrackerEvent =
   | { type: 'concept.renamed'; concept: Concept }
   | { type: 'concept.merged'; fromId: string; into: Concept }
   | { type: 'concept.deleted'; conceptId: string }
+  | { type: 'concept.related'; from: string; to: string; related: boolean }
   | { type: 'settings.changed'; settings: Settings };
 
 export interface VisitEdit {
@@ -440,6 +441,16 @@ export class Tracker {
       }
     }
     this.repo.setVisitParent(visit.id, parentVisitId);
+  }
+
+  /** Draws (or, with related=false, removes) a free relation between two different concepts. */
+  setRelation(fromId: string, toId: string, related: boolean): void {
+    if (fromId === toId) throw new TrackerError('A concept cannot be related to itself: use merge for the same idea');
+    this.requireConcept(fromId);
+    this.requireConcept(toId);
+    const changed = this.repo.transaction(() => (related ? this.repo.addRelation(fromId, toId) : this.repo.removeRelation(fromId, toId)));
+    if (!changed && !related) throw new TrackerError('Relation not found');
+    if (changed) this.emit({ type: 'concept.related', from: fromId, to: toId, related });
   }
 
   /** Removes a wrong source from a node (canvas correction); the source disappears when nothing else cites it. */

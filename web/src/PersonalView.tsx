@@ -136,7 +136,7 @@ function merge(graph: Graph<NodeAttrs>, data: PersonalGraph, relayout: boolean, 
   graph.clearEdges();
   for (const e of data.edges) {
     if (graph.hasNode(e.source) && graph.hasNode(e.target) && e.source !== e.target) {
-      graph.mergeEdge(e.source, e.target, { size: Math.min(0.6 + 0.4 * e.weight, 3) });
+      graph.mergeEdge(e.source, e.target, { size: Math.min(0.6 + 0.4 * e.weight, 3), relation: !!e.relation });
     }
   }
 
@@ -206,6 +206,8 @@ function merge(graph: Graph<NodeAttrs>, data: PersonalGraph, relayout: boolean, 
 }
 
 /** Every concept ever explored, across conversations (D2), as a WebGL graph grouped by topic. */
+const RELATION_COLOR = '#f59e0b';
+
 export function PersonalView({ live, found, onOpenConcept }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const graphRef = useRef(new Graph<NodeAttrs>());
@@ -349,6 +351,8 @@ export function PersonalView({ live, found, onOpenConcept }: Props) {
           const b = graph.getNodeAttributes(t);
           if (groupOf(s, a).key !== v.focus || groupOf(t, b).key !== v.focus) return { ...data, hidden: true };
         }
+        // Free relations drawn by the user keep their own colour, also across topics.
+        if (graph.getEdgeAttribute(edge, 'relation')) return { ...data, color: RELATION_COLOR, size: Math.max(data.size as number, 1.6) };
         // Links across topics stay faint, so the communities read as separate groups.
         if (graph.getNodeAttribute(s, 'community') !== graph.getNodeAttribute(t, 'community')) return { ...data, color: faded };
         return data;
