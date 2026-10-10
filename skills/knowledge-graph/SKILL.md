@@ -21,7 +21,7 @@ The knowledge-graph MCP server maps the concepts the user explores with you on a
      tracking it again under the same parent updates it instead of duplicating it.
    - `summary`: 1-3 sentences of what you explain, so the user can recall it later.
    - `parent` (required): the title of the node it belongs under, from the tree that `kc_start` and `kc_track` return;
-     `"root"` for an unrelated topic; `"#0"`, `"#1"`... to hang a node under an earlier node of the same call.
+     `"root"` for an unrelated topic; `"#0"`, `"#1"`... (or its title) to hang a node under another node of the same call, in any order.
    - `excerpt`: leave it out unless a formula or code line is worth keeping verbatim.
 3. When the conversation goes back to a node already on the canvas, call `kc_focus` with its title instead of tracking it again.
 4. If `kc_track` returns `similar` concepts and one is clearly the same idea, call `kc_link` to merge.
@@ -40,4 +40,6 @@ Never create nodes about the graph, the tools or the conversation itself; do not
 
 ## Style
 
-Never mention the canvas or these tool calls in your answers (no "I recorded this in the graph") unless the user asks. Keep tool arguments short: they cost tokens.
+Tracking is invisible to the user: never announce, promise or confirm it, before or after the answer (no "I recorded this in the graph",
+no "I will track every answer"), and never mention the canvas or these tools unless the user asks. If `kc_track` returns an error, nothing
+was recorded: fix it and call `kc_track` again before answering. Keep tool arguments short: they cost tokens.

@@ -9,12 +9,15 @@ import { type Tracker, TrackerError, type TrackerEvent, type VisitEdit } from '.
 import { Reader } from '../core/reader.ts';
 import type { Settings } from '../core/types.ts';
 import { createMcpServer, type McpSessionState } from './mcp.ts';
+import { VERSION } from '../version.ts';
 
 export interface AppOptions {
   tracker: Tracker;
   /** Built canvas (web/dist); served at / when present. */
   webRoot?: string;
   logger?: boolean;
+  /** Graceful stop, exposed as POST /api/shutdown (local origins only, like every route). */
+  onShutdown?: () => void;
 }
 
 /** Only local pages may talk to the daemon (DNS-rebinding protection). Clients without Origin (CLIs) are allowed. */
@@ -28,7 +31,7 @@ export function isAllowedOrigin(origin: string | undefined): boolean {
   }
 }
 
-export async function buildApp({ tracker, webRoot, logger = false }: AppOptions): Promise<FastifyInstance> {
+export async function buildApp({ tracker, webRoot, logger = false, onShutdown }: AppOptions): Promise<FastifyInstance> {
   const app = Fastify({ logger });
   await app.register(websocket);
 
@@ -78,7 +81,15 @@ export async function buildApp({ tracker, webRoot, logger = false }: AppOptions)
 
   // --- REST for the canvas ---
   const repo = tracker.repo;
-  app.get('/api/health', async () => ({ ok: true }));
+  // The stdio bridge compares the version with its own and replaces an older daemon (stopping it via shutdown or pid).
+  app.get('/api/health', async () => ({ ok: true, version: VERSION, pid: process.pid }));
+  if (onShutdown) {
+    app.post('/api/shutdown', async (_req, reply) => {
+      reply.code(202).send({ ok: true });
+      setImmediate(onShutdown);
+      return reply;
+    });
+  }
   app.get('/api/conversations', async () => repo.listConversations());
   app.get<{ Params: { id: string } }>('/api/conversations/:id/tree', async (req, reply) => {
     const tree = repo.getTree(req.params.id);

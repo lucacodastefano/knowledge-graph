@@ -126,3 +126,48 @@ test('same concept under the same parent updates the node; on another branch it 
   assert.equal(elsewhere.revisit, true);
   assert.equal(tracker.repo.getTree(conv.id)!.visits.length, 3);
 });
+
+test('parents may come later in the same batch, by title or "#n"; results keep the caller order', () => {
+  const { tracker, conv } = setup();
+  const res = tracker.track(conv.id, [
+    { title: 'Offset', summary: 's', parent: 'Consumer group' },
+    { title: 'Rebalance', summary: 's', parent: '#2' },
+    { title: 'Consumer group', summary: 's', parent: 'Kafka' },
+    { title: 'Kafka', summary: 's', parent: 'root' },
+  ]);
+  const byId = new Map(tracker.repo.getTree(conv.id)!.visits.map((v) => [v.id, v]));
+  assert.deepEqual(res.map((r) => byId.get(r.id)!.title), ['Offset', 'Rebalance', 'Consumer group', 'Kafka']);
+  assert.equal(byId.get(res[0].id)!.parentVisitId, res[2].id);
+  assert.equal(byId.get(res[1].id)!.parentVisitId, res[2].id);
+  assert.equal(byId.get(res[2].id)!.parentVisitId, res[3].id);
+  assert.equal(byId.get(res[3].id)!.parentVisitId, null);
+  assert.equal(tracker.repo.getTree(conv.id)!.conversation.currentVisitId, res[3].id);
+});
+
+test('a parent cycle or any other error in a batch is refused and nothing is written', () => {
+  const { tracker, conv } = setup();
+  tracker.track(conv.id, [{ title: 'Kafka', summary: 's', parent: 'root' }]);
+  const before = tracker.repo.getTree(conv.id)!.visits.length;
+  const concepts = tracker.repo.countConcepts();
+  assert.throws(
+    () =>
+      tracker.track(conv.id, [
+        { title: 'Topic', summary: 's', parent: 'Kafka' },
+        { title: 'A', summary: 's', parent: 'B' },
+        { title: 'B', summary: 's', parent: '#1' },
+      ]),
+    /Parent cycle in this call: #1 "A" under #2 "B" under #1 "A"/,
+  );
+  assert.throws(() => tracker.track(conv.id, [{ title: 'C', summary: 's', parent: '#0' }]), /not another node/);
+  // A later error (unknown parent) rolls back the nodes already added by the same call.
+  assert.throws(
+    () =>
+      tracker.track(conv.id, [
+        { title: 'Topic', summary: 's', parent: 'Kafka' },
+        { title: 'D', summary: 's', parent: 'Missing' },
+      ]),
+    TrackerError,
+  );
+  assert.equal(tracker.repo.getTree(conv.id)!.visits.length, before);
+  assert.equal(tracker.repo.countConcepts(), concepts);
+});

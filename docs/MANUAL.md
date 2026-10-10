@@ -30,7 +30,7 @@ knowledge-graph
 | Command | What it does |
 |---|---|
 | `knowledge-graph` or `knowledge-graph serve` | Start the daemon (canvas + MCP) |
-| `knowledge-graph stdio` | stdio bridge for clients without HTTP support; starts the daemon in the background if it is not running |
+| `knowledge-graph stdio` | stdio bridge for clients without HTTP support; starts the daemon in the background if it is not running, and replaces a running daemon of an older version (e.g. after an update) |
 | `knowledge-graph install-skill` | Copy the Claude Code skill into `~/.claude/skills/knowledge-graph` (honours `CLAUDE_CONFIG_DIR`) |
 | `knowledge-graph help` / `version` | Usage / installed version |
 
@@ -72,7 +72,7 @@ Restart Claude Desktop. The bridge starts the daemon if needed, so you can open 
 
 Claude Desktop loads MCP tools only when a chat seems to need them, so on its own it may not start tracking. Add this line once to your personal preferences (Settings → General → "What personal preferences should Claude consider in responses?"):
 
-> In every conversation keep the knowledge graph up to date without mentioning it: kc_start at the first real topic, then kc_track before each answer that explains a concept.
+> Use the knowledge-graph tools silently in every conversation: kc_start at the first real topic, then kc_track before writing each answer that explains a concept. Never tell me about them.
 
 Without it, writing "track this conversation" at the start of a chat works too.
 
@@ -137,7 +137,7 @@ Every concept you ever explored, across conversations. Bigger nodes were visited
 
 Opened from **Approfondisci**, from the personal graph or from search. It lists every place the concept appears (newest first): conversation, the node it sits under, date and summary, followed by its sub-concepts as sections (two levels), which is where the real depth of an explanation lives.
 
-**Dettaglio approfondito** (checkbox in the top bar, off by default): when on, the model also writes 5-10 key points for a node when it goes deep on it, shown as a list in the panel. It costs some output tokens on those answers; when off, the model is not even told the option exists. The change applies from the next chat.
+**Dettaglio approfondito** (checkbox in the top bar, off by default): when on, the model also writes 5-10 key points for a node when it goes deep on it, shown as a list in the panel. It costs some output tokens on those answers; when off, the model is not even told the option exists. The change applies at once, also to chats already open and without restarting the client: the daemon re-announces its tools and tells the model in the result of its next `kc_start` or `kc_track`.
 
 ## 5. Fixing mistakes
 
@@ -170,4 +170,6 @@ Type in the search box at the top (**Cerca concetti**). Results come in this ord
 | Stdio client times out on first start | `npx` was downloading the package; restart the client once. Or install globally and use `"command": "knowledge-graph", "args": ["stdio"]`. |
 | Canvas stays empty while chatting | Check the client lists the `kc_*` tools; ask the model to "track this"; for Claude Code install the skill. |
 | Wrong or duplicated concepts | Fix them from the canvas (section 5). |
+| Old behaviour after an update | The stdio bridge replaces an older daemon by itself when the client restarts. A daemon you started by hand (`serve`) must be stopped by hand (Ctrl+C). |
+| The model says "I recorded this in the graph" | It should not: update to the latest version and use the preferences line in section 2. |
 | `node:sqlite` / syntax errors on start | Node is too old: install Node 22.18 or newer. |

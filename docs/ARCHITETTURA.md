@@ -35,7 +35,7 @@ flowchart LR
   BROWSER <-- "WebSocket" --> API
 ```
 
-**Perché un demone unico** e non un server MCP stdio lanciato da ogni client: più client (Claude Code in due terminali, Desktop) e il canvas devono vedere **lo stesso grafo, in tempo reale**. Un processo unico che possiede il database e notifica il browser è il modo più semplice. Per i client che parlano solo stdio c'è un bridge minimo che inoltra al demone (avviandolo se non gira).
+**Perché un demone unico** e non un server MCP stdio lanciato da ogni client: più client (Claude Code in due terminali, Desktop) e il canvas devono vedere **lo stesso grafo, in tempo reale**. Un processo unico che possiede il database e notifica il browser è il modo più semplice. Per i client che parlano solo stdio c'è un bridge minimo che inoltra al demone (avviandolo se non gira). Il bridge confronta la propria versione con quella di `/api/health` (`{ok, version, pid}`): un demone più vecchio (o senza versione, di prima di questo controllo) viene fermato con `POST /api/shutdown` (arresto ordinato; in mancanza, segnale al pid, trovato con `lsof`/`netstat` per i demoni vecchi) e sostituito; uno più nuovo resta.
 
 Alternativa scartata: ogni client avvia il suo server stdio e tutti scrivono sullo stesso file SQLite, con il canvas che osserva il file. Funziona, ma il tempo reale diventa polling e la logica si duplica.
 
@@ -78,11 +78,11 @@ settings(key, value)                                     -- impostazioni del can
 | Strumento | Fa | Requisiti |
 |---|---|---|
 | `kc_start(title?)` | Apre o riprende la conversazione, restituisce id e albero compatto | RF1 |
-| `kc_track(nodes[])` | **Batch**, chiamato **prima** di scrivere la risposta: crea una o più visite `{title, summary, parent, excerpt?}`. `parent` è obbligatorio (D15): titolo di un nodo della conversazione (ultima visita con quel titolo), `"root"` o `"#n"`. Stesso concetto sotto lo stesso padre aggiorna il riassunto invece di duplicare; in un altro ramo vale D1. Un figlio che riformula il padre (stesse parole, "Aspetti di X", "X" sotto "X e Y" che si prende tutto il ramo) viene rifiutato (D16). Restituisce gli id, al massimo 3 concetti simili per nodo (prima i quasi-duplicati: plurali, articoli, ordine delle parole, colonna `concepts.name_key`) e l'albero compatto della conversazione (solo titoli) | RF2, RF3, RF5, RF6 |
+| `kc_track(nodes[])` | **Batch**, chiamato **prima** di scrivere la risposta: crea una o più visite `{title, summary, parent, excerpt?}`. `parent` è obbligatorio (D15): titolo di un nodo della conversazione (ultima visita con quel titolo), `"root"`, oppure titolo o `"#n"` di un altro nodo della stessa chiamata, in qualsiasi ordine (il batch si elabora prima i padri, ordinamento topologico; un ciclo di padri è un errore). Il batch è atomico: con un errore non si scrive nulla e il risultato lo dice, chiedendo di richiamare `kc_track`. Stesso concetto sotto lo stesso padre aggiorna il riassunto invece di duplicare; in un altro ramo vale D1. Un figlio che riformula il padre (stesse parole, "Aspetti di X", "X" sotto "X e Y" che si prende tutto il ramo) viene rifiutato (D16). Restituisce gli id, al massimo 3 concetti simili per nodo (prima i quasi-duplicati: plurali, articoli, ordine delle parole, colonna `concepts.name_key`) e l'albero compatto della conversazione (solo titoli) | RF2, RF3, RF5, RF6 |
 | `kc_focus(node_id)` | Torna su un nodo esistente (diventa il corrente) | RF4 |
 | `kc_link(visit_id, concept_id)` | Conferma che una visita è un concetto già noto (unisce) | RF6 |
 | `kc_move(node, parent)` | Sposta un nodo (con i figli) sotto un altro nodo o alla radice, indicati per titolo o id; non unisce concetti | RF18 |
-| (opzione) `detail` in `kc_track` | 5-10 punti chiave quando la risposta approfondisce un nodo; esposto con la sua regola solo se l'impostazione del canvas "Dettaglio approfondito" è accesa (tabella `settings`, letta all'apertura di ogni sessione MCP) | D17 |
+| (opzione) `detail` in `kc_track` | 5-10 punti chiave quando la risposta approfondisce un nodo; esposto con la sua regola solo se l'impostazione del canvas "Dettaglio approfondito" è accesa (tabella `settings`). Vale subito: le istruzioni del server sono fisse per sessione (Claude Desktop, via bridge, ne apre una sola per tutta la vita dell'app), quindi al cambio ogni sessione aperta registra di nuovo `kc_track` (notifica `tools/list_changed`, inoltrata dal bridge) e il risultato del successivo `kc_start`/`kc_track` porta una riga con la regola o con "spento". Da spento nessun costo in token; un `detail` inviato da spento viene ignorato | D17 |
 | `kc_rename(node, title)` | Rinomina un nodo; un titolo già usato da un altro concetto lo collega a quel concetto (D1) | D16 |
 | `kc_remove(node)` | Elimina un nodo; i figli salgono al suo padre | D16 |
 | `kc_recall(query)` | "Cosa sa già Luca di X?": concetti, riassunti, date | RF8 |
@@ -98,7 +98,7 @@ Più un **prompt MCP** `kc_instructions` con le regole di tracciamento scritte i
 
 ## 6. Flussi chiave
 
-1. **Tracciamento**: Luca chiede → il modello chiama una sola volta `kc_track` **prima** di scrivere la risposta (se la chiama dopo, Claude Desktop ripete la risposta), poi risponde → il demone salva, aggancia i concetti, emette un evento → il canvas disegna i nodi.
+1. **Tracciamento**: Luca chiede → il modello chiama una sola volta `kc_track` **prima** di scrivere la risposta (se la chiama dopo, Claude Desktop ripete la risposta), poi risponde senza mai annunciare la registrazione (lo ricordano le istruzioni, una nota breve nel risultato di `kc_start` e una in quello di `kc_track`) → il demone salva, aggancia i concetti, emette un evento → il canvas disegna i nodi.
 2. **Hover**: il canvas ha già titolo e riassunto breve in memoria → tooltip immediato → "Approfondisci" chiama `/api/concepts/:id` → pannello con tutte le visite.
 3. **Richiamo**: il modello, prima di spiegare un tema, chiama `kc_recall` → sa cosa Luca ha già visto e lo dà per noto.
 4. **Grafo personale**: la scheda "Grafo personale" chiama `/api/graph` (tutti i concetti con conteggio visite + archi pesati derivati dalle visite e da `concept_links`) → Sigma.js con layout ForceAtlas2; a ogni evento live ricarica e unisce i dati tenendo le posizioni dei nodi noti, così il disegno non salta.

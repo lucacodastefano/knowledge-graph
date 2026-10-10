@@ -62,7 +62,7 @@ export interface ConceptPage extends Concept {
 
 /** Canvas settings that change what the server exposes to the model. */
 export interface Settings {
-  /** D17: the model may write a `detail` field (costs output tokens). Applies from the next chat. */
+  /** D17: the model may write a `detail` field (costs output tokens). Applies at once, also to open chats. */
   detail: boolean;
 }
 
