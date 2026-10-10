@@ -1,0 +1,6 @@
+node_modules/
+dist/
+web/dist/
+*.db
+*.db-*
+test/e2e/out/
