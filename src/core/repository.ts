@@ -1,4 +1,12 @@
-import type { Concept, ConceptDetail, ConceptMatch, Conversation, ConversationTree, Visit } from './types.ts';
+import type {
+  Concept,
+  ConceptDetail,
+  ConceptMatch,
+  Conversation,
+  ConversationTree,
+  PersonalGraph,
+  Visit,
+} from './types.ts';
 
 /**
  * Storage boundary. Everything above this interface is storage-agnostic, so the
@@ -22,6 +30,7 @@ export interface Repository {
   setVisitConcept(visitId: string, conceptId: string): void;
   countVisitsOfConcept(conceptId: string): number;
   getTree(conversationId: string): ConversationTree | undefined;
+  getPersonalGraph(): PersonalGraph;
 
   transaction<T>(fn: () => T): T;
   close(): void;

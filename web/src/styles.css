@@ -7,6 +7,7 @@
   --accent: #c2410c;
   --accent-soft: #fde7d9;
   --edge: #a8a49b;
+  --node: #57534e;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
@@ -19,6 +20,7 @@
     --accent: #fb923c;
     --accent-soft: #3b2417;
     --edge: #6b6862;
+    --node: #d6d3d1;
     color-scheme: dark;
   }
 }
@@ -28,7 +30,14 @@ body { background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -ap
 
 .app { display: flex; flex-direction: column; height: 100%; }
 .bar { display: flex; align-items: center; gap: 12px; padding: 8px 16px; border-bottom: 1px solid var(--border); background: var(--surface); }
-.bar select { margin-left: auto; max-width: 50vw; padding: 4px 8px; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; }
+.tabs { display: flex; gap: 4px; margin-left: auto; }
+.tabs a { padding: 4px 12px; border-radius: 6px; color: var(--muted); text-decoration: none; }
+.tabs a.active { background: var(--accent-soft); color: var(--text); font-weight: 500; }
+.overlay-bar { position: absolute; top: 12px; left: 16px; z-index: 5; }
+.overlay-bar select { max-width: min(480px, 70vw); padding: 4px 8px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 6px; }
+.sigma { position: absolute; inset: 0; }
+.tooltip.floating { position: absolute; z-index: 6; transform: translateX(-50%); }
+.tooltip strong { display: block; margin-bottom: 4px; }
 .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
 .dot.on { background: #16a34a; }
 main { position: relative; flex: 1; min-height: 0; }

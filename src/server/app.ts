@@ -76,6 +76,7 @@ export async function buildApp({ tracker, webRoot, logger = false }: AppOptions)
     const tree = repo.getTree(req.params.id);
     return tree ?? reply.code(404).send({ error: 'Not found' });
   });
+  app.get('/api/graph', async () => repo.getPersonalGraph());
   app.get<{ Params: { id: string } }>('/api/concepts/:id', async (req, reply) => {
     const detail = repo.getConceptDetail(req.params.id);
     return detail ?? reply.code(404).send({ error: 'Not found' });

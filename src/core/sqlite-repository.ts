@@ -1,7 +1,15 @@
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
 import type { Repository } from './repository.ts';
-import type { Concept, ConceptDetail, ConceptMatch, Conversation, ConversationTree, Visit } from './types.ts';
+import type {
+  Concept,
+  ConceptDetail,
+  ConceptMatch,
+  Conversation,
+  ConversationTree,
+  PersonalGraph,
+  Visit,
+} from './types.ts';
 import { SCHEMA } from './schema.ts';
 
 type Row = Record<string, unknown>;
@@ -178,6 +186,33 @@ export class SqliteRepository implements Repository {
       .all(conversationId)
       .map(toVisit);
     return { conversation, visits };
+  }
+
+  getPersonalGraph(): PersonalGraph {
+    const concepts = this.db
+      .prepare(
+        `SELECT c.*, COUNT(v.id) AS visit_count,
+           (SELECT v2.summary FROM visits v2 WHERE v2.concept_id = c.id ORDER BY v2.created_at DESC, v2.seq DESC LIMIT 1) AS summary
+         FROM concepts c JOIN visits v ON v.concept_id = c.id
+         GROUP BY c.id`,
+      )
+      .all()
+      .map((r) => ({ ...toConcept(r), summary: (r.summary as string) ?? '' }));
+    // Edges come from drill-downs (parent visit -> child visit) plus explicit concept links.
+    const edges = this.db
+      .prepare(
+        `SELECT source, target, SUM(w) AS weight FROM (
+           SELECT p.concept_id AS source, v.concept_id AS target, COUNT(*) AS w
+           FROM visits v JOIN visits p ON p.id = v.parent_visit_id
+           WHERE p.concept_id <> v.concept_id
+           GROUP BY 1, 2
+           UNION ALL
+           SELECT from_concept_id, to_concept_id, 1 FROM concept_links
+         ) GROUP BY source, target`,
+      )
+      .all()
+      .map((r) => ({ source: r.source as string, target: r.target as string, weight: Number(r.weight) }));
+    return { concepts, edges };
   }
 
   transaction<T>(fn: () => T): T {
