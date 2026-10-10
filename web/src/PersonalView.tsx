@@ -11,6 +11,8 @@ interface Props {
   live: LiveEvent | null;
   found: Found | null;
   onOpenConcept: (conceptId: string) => void;
+  /** A click on empty canvas: the app closes the detail panel. */
+  onBackgroundClick?: () => void;
 }
 
 interface NodeAttrs {
@@ -233,7 +235,9 @@ function merge(graph: Graph<NodeAttrs>, data: PersonalGraph, relayout: boolean, 
 /** Every concept ever explored, across conversations (D2), as a WebGL graph grouped by topic. */
 const RELATION_COLOR = '#f59e0b';
 
-export function PersonalView({ live, found, onOpenConcept }: Props) {
+export function PersonalView({ live, found, onOpenConcept, onBackgroundClick }: Props) {
+  const backgroundClick = useRef(onBackgroundClick);
+  backgroundClick.current = onBackgroundClick;
   const container = useRef<HTMLDivElement>(null);
   const graphRef = useRef(new Graph<NodeAttrs>());
   const sigmaRef = useRef<Sigma<NodeAttrs> | null>(null);
@@ -560,6 +564,7 @@ export function PersonalView({ live, found, onOpenConcept }: Props) {
     renderer.on('clickStage', ({ event }) => {
       const b = bubbleAt(event.x, event.y);
       if (b) zoomToBubble(b);
+      else backgroundClick.current?.();
     });
     renderer.on('moveBody', ({ event }) => {
       view.current.pointer = { x: event.x, y: event.y };
@@ -920,7 +925,11 @@ export function PersonalView({ live, found, onOpenConcept }: Props) {
           <div
             className="tooltip floating"
             role="tooltip"
-            style={{ left: hover.x, top: hover.y + 14 }}
+            style={{
+              // Kept inside the canvas so it never makes the page scroll.
+              left: Math.min(Math.max(hover.x, 150), Math.max(150, (container.current?.clientWidth ?? 0) - 150)),
+              top: Math.min(hover.y + 14, Math.max(0, (container.current?.clientHeight ?? 0) - 170)),
+            }}
             onMouseEnter={() => clearTimeout(closeTimer.current)}
             onMouseLeave={() => {
               hoverRef.current = null;
