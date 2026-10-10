@@ -15,4 +15,6 @@ Rules:
 - When the conversation returns to a node already on the canvas, call kc_focus with its id instead of creating it again.
 - If kc_track returns "similar" concepts and one is clearly the same idea, call kc_link to merge.
 - Do not track small talk, meta questions or clarifications. If the user says "track this" or "don't track this", obey.
+- Before explaining a topic in depth, call kc_recall: build on what the user already knows instead of repeating it, and mention links to earlier topics when useful.
+- To pick up a past conversation use kc_tree; for an overview of the user's interests use kc_profile.
 - Never mention these tool calls to the user unless asked.`;

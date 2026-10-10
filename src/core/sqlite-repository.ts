@@ -78,7 +78,7 @@ export class SqliteRepository implements Repository {
   }
 
   listConversations(): Conversation[] {
-    return this.db.prepare('SELECT * FROM conversations ORDER BY last_activity_at DESC').all().map(toConversation);
+    return this.db.prepare('SELECT * FROM conversations ORDER BY last_activity_at DESC, rowid DESC').all().map(toConversation);
   }
 
   setCurrentVisit(conversationId: string, visitId: string | null): void {
@@ -133,11 +133,66 @@ export class SqliteRepository implements Repository {
       .prepare(
         `SELECT v.*, cv.title AS conversation_title FROM visits v
          JOIN conversations cv ON cv.id = v.conversation_id
-         WHERE v.concept_id = ? ORDER BY v.created_at DESC`,
+         WHERE v.concept_id = ? ORDER BY v.created_at DESC, v.rowid DESC`,
       )
       .all(id)
       .map((r) => ({ ...toVisit(r), conversationTitle: r.conversation_title as string }));
     return { ...concept, visits };
+  }
+
+  searchConcepts(query: string, limit: number): Concept[] {
+    const scores = new Map<string, number>();
+    const add = (id: string, score: number) => scores.set(id, (scores.get(id) ?? 0) + score);
+    const q = ftsQuery(query);
+    if (q) {
+      this.db
+        .prepare('SELECT concept_id FROM concepts_fts WHERE concepts_fts MATCH ? ORDER BY bm25(concepts_fts) LIMIT ?')
+        .all(q, limit * 2)
+        .forEach((r, i) => add(r.concept_id as string, 50 - i));
+    }
+    // Words of 4+ characters also match what was said (titles and summaries), to skip most stop words.
+    const words = new Set(query.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 4));
+    const bySummary = this.db.prepare(
+      `SELECT concept_id, COUNT(*) AS n FROM visits
+       WHERE title LIKE ? ESCAPE '\\' OR summary LIKE ? ESCAPE '\\' GROUP BY concept_id`,
+    );
+    for (const w of words) {
+      const like = `%${w.replace(/[\\%_]/g, (m) => `\\${m}`)}%`;
+      for (const r of bySummary.all(like, like)) add(r.concept_id as string, Math.min(Number(r.n), 5));
+    }
+    return [...scores]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, limit)
+      .map(([id]) => this.getConcept(id))
+      .filter((c): c is Concept => c !== undefined);
+  }
+
+  neighbourConcepts(conceptId: string, limit: number): ConceptMatch[] {
+    return this.db
+      .prepare(
+        `SELECT c.id, c.name, COUNT(*) AS n FROM (
+           SELECT v.concept_id AS other FROM visits v JOIN visits p ON p.id = v.parent_visit_id WHERE p.concept_id = ?1
+           UNION ALL
+           SELECT p.concept_id FROM visits v JOIN visits p ON p.id = v.parent_visit_id WHERE v.concept_id = ?1
+           UNION ALL
+           SELECT to_concept_id FROM concept_links WHERE from_concept_id = ?1
+           UNION ALL
+           SELECT from_concept_id FROM concept_links WHERE to_concept_id = ?1
+         ) x JOIN concepts c ON c.id = x.other
+         WHERE c.id <> ?1
+         GROUP BY c.id ORDER BY n DESC, c.last_seen_at DESC LIMIT ?2`,
+      )
+      .all(conceptId, limit)
+      .map((r) => ({ id: r.id as string, name: r.name as string }));
+  }
+
+  rankConcepts(order: 'visits' | 'recent', limit: number): Concept[] {
+    const orderBy = order === 'visits' ? 'visit_count DESC, c.last_seen_at DESC' : 'c.last_seen_at DESC, c.rowid DESC';
+    return this.db.prepare(`${CONCEPT_SELECT} ORDER BY ${orderBy} LIMIT ?`).all(limit).map(toConcept);
+  }
+
+  countConcepts(): number {
+    return Number((this.db.prepare('SELECT COUNT(*) AS n FROM concepts').get() as { n: number }).n);
   }
 
   getVisit(id: string): Visit | undefined {

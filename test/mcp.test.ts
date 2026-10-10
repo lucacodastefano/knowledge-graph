@@ -1,4 +1,5 @@
 import { test, after } from 'node:test';
+import { readFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
@@ -22,9 +23,11 @@ const json = (r: unknown) => JSON.parse((r as { content: { text: string }[] }).c
 test('exposes the tracking tools, the instructions prompt and server instructions', async () => {
   const client = await connect();
   const tools = (await client.listTools()).tools.map((t) => t.name).sort();
-  assert.deepEqual(tools, ['kc_focus', 'kc_link', 'kc_start', 'kc_track']);
+  assert.deepEqual(tools, ['kc_focus', 'kc_link', 'kc_profile', 'kc_recall', 'kc_start', 'kc_track', 'kc_tree']);
   assert.equal((await client.listPrompts()).prompts[0].name, 'kc_instructions');
   assert.match(client.getInstructions() ?? '', /kc_track/);
+  const skill = readFileSync(new URL('../skills/knowledge-graph/SKILL.md', import.meta.url), 'utf8');
+  for (const tool of tools) assert.ok(skill.includes(`\`${tool}\``), `skill should cover ${tool}`);
   await client.close();
 });
 
@@ -64,6 +67,25 @@ test('tracking without kc_start opens a conversation automatically', async () =>
   const res = await client.callTool({ name: 'kc_track', arguments: { nodes: [{ title: 'Solo', summary: 's' }] } });
   assert.equal(res.isError, undefined);
   assert.equal(tracker.repo.listConversations().length, before + 1);
+  await client.close();
+});
+
+test('read tools answer from the graph without writing to it', async () => {
+  const client = await connect();
+  await client.callTool({ name: 'kc_start', arguments: { title: 'Rust' } });
+  await client.callTool({ name: 'kc_track', arguments: { nodes: [{ title: 'Borrow checker', summary: 'Regole di prestito.' }] } });
+  const before = tracker.repo.countConcepts();
+
+  const [recalled] = json(await client.callTool({ name: 'kc_recall', arguments: { query: 'borrow checker' } }));
+  assert.equal(recalled.name, 'Borrow checker');
+  assert.deepEqual(recalled.notes, ['Regole di prestito.']);
+
+  const tree = await client.callTool({ name: 'kc_tree', arguments: {} });
+  assert.match((tree as { content: { text: string }[] }).content[0].text, /^Rust .*\n- Borrow checker \[.+\] \*current$/);
+
+  const profile = json(await client.callTool({ name: 'kc_profile', arguments: {} }));
+  assert.ok(profile.recent.includes('Borrow checker'));
+  assert.equal(tracker.repo.countConcepts(), before);
   await client.close();
 });
 
