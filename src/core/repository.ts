@@ -27,6 +27,8 @@ export interface Repository {
   reassignConcept(fromId: string, toId: string): void;
   /** Concepts whose name contains the fragment (any length, unlike full-text search), shortest first. */
   findConceptsByName(fragment: string, limit: number): Concept[];
+  /** Other concepts whose name has the same significant words (plurals, articles and order folded). */
+  findConceptsByKey(name: string, excludeId: string): ConceptMatch[];
   similarConcepts(name: string, excludeId: string, limit: number): ConceptMatch[];
   getConceptDetail(id: string): ConceptDetail | undefined;
   /** Concepts matching a free-text query on names, visit titles and summaries, best first. */

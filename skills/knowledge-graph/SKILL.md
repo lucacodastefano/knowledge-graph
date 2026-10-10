@@ -10,11 +10,13 @@ The knowledge-graph MCP server maps the concepts the user explores with you on a
 
 ## Writing: one call per answer
 
-1. Call `kc_start` once per chat, when the first real topic comes up, with a short title. Never call it again
+1. Call `kc_start` once per chat, when the first real topic comes up, titled with that topic (not "session" or the user's name). Never call it again
    for a new topic: that is a `kc_track` with `parent: "root"`.
    To continue an earlier conversation pass `resume` with its id (find it with `kc_profile`).
 2. When your answer will introduce or deepen a concept, call `kc_track` **once**, **before** writing the answer, with all its new nodes; then write the answer once. `kc_start` alone needs no `kc_track`.
    One node per concept you explain: its parts are its children, different aspects of one topic are siblings under it.
+   Track concepts, not your answer: when you go deeper into a node already on the canvas, its parts go directly under it.
+   Never add a node that restates it ("Aspects of X", "Overview of X", "X" under "X and Y"): the server refuses it.
    - `title`: the concept name, 1-5 words, in the user's language, never a sentence. Same concept = same title;
      tracking it again under the same parent updates it instead of duplicating it.
    - `summary`: 1-3 sentences of what you explain, so the user can recall it later.
@@ -23,7 +25,9 @@ The knowledge-graph MCP server maps the concepts the user explores with you on a
    - `excerpt`: leave it out unless a formula or code line is worth keeping verbatim.
 3. When the conversation goes back to a node already on the canvas, call `kc_focus` with its title instead of tracking it again.
 4. If `kc_track` returns `similar` concepts and one is clearly the same idea, call `kc_link` to merge.
-5. To hang an existing node under another one ("attach it to X"), call `kc_move` with the node and its new parent (or `"root"`). `kc_link` only merges two names of the same concept.
+5. When the user asks to change the canvas (move, rename, merge, remove, "fix the hierarchy"), use only the editing tools, never `kc_track`:
+   `kc_move` hangs a node (with its children) under another one or `"root"`; `kc_rename` renames it; `kc_link` merges two names of the same
+   concept; `kc_remove` deletes a node and moves its children up, so removing a wrapper node fixes its branch in one call.
 
 Never create nodes about the graph, the tools or the conversation itself; do not track small talk, meta questions or clarifications. "Track this" / "don't track this" from the user always wins.
 
@@ -36,4 +40,4 @@ Never create nodes about the graph, the tools or the conversation itself; do not
 
 ## Style
 
-Never mention these tool calls to the user unless they ask. Keep tool arguments short: they cost tokens.
+Never mention the canvas or these tool calls in your answers (no "I recorded this in the graph") unless the user asks. Keep tool arguments short: they cost tokens.

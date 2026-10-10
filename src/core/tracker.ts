@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events';
 import type { Repository } from './repository.ts';
 import type { Concept, ConceptMatch, Conversation, Visit } from './types.ts';
 import { normalizeName } from './normalize.ts';
+import { restatesParent } from './similarity.ts';
 
 export class TrackerError extends Error {}
 
@@ -96,6 +97,7 @@ export class Tracker {
         const title = node.title.trim();
         if (!title) throw new TrackerError(`Node #${index} has an empty title`);
         const parentVisitId = this.resolveParent(conversationId, node.parent, current, out, index);
+        if (parentVisitId !== null) this.rejectWrapper(nodes, index, this.repo.getVisit(parentVisitId)!.title);
 
         let concept: Concept | undefined;
         if (node.conceptId) {
@@ -130,7 +132,7 @@ export class Tracker {
           conceptId: concept.id,
           knownConcept,
           revisit,
-          similar: knownConcept ? [] : this.repo.similarConcepts(title, concept.id, SIMILAR_LIMIT),
+          similar: knownConcept ? [] : this.similar(title, concept.id),
         });
       });
 
@@ -142,6 +144,26 @@ export class Tracker {
     for (const visit of updatedVisits) this.emit({ type: 'visit.updated', visit });
     this.emit({ type: 'focus.changed', conversationId, visitId: results.at(-1)!.id });
     return results;
+  }
+
+  /** A node that only restates its parent is refused, so its parts go straight under the parent (anti-wrapper). */
+  private rejectWrapper(nodes: TrackNodeInput[], index: number, parentTitle: string) {
+    const node = nodes[index];
+    const parentOf = (n: TrackNodeInput) => normalizeName(n.parent ?? '');
+    const own = nodes.some((n) => n.parent?.trim() === `#${index}` || parentOf(n) === normalizeName(node.title));
+    const siblings = nodes.some((n, j) => j !== index && parentOf(n) === parentOf(node));
+    if (!restatesParent(node.title, parentTitle, own && !siblings)) return;
+    throw new TrackerError(
+      `"${node.title.trim()}" restates its parent "${parentTitle}": put its parts directly under "${parentTitle}" (track "${parentTitle}" again to update its summary)`,
+    );
+  }
+
+  /** Possible duplicates of a new concept: same words in another form first, then full-text neighbours. */
+  similar(name: string, excludeId: string): ConceptMatch[] {
+    const found = new Map<string, ConceptMatch>();
+    for (const c of this.repo.findConceptsByKey(name, excludeId)) found.set(c.id, c);
+    for (const c of this.repo.similarConcepts(name, excludeId, SIMILAR_LIMIT)) found.set(c.id, c);
+    return [...found.values()].slice(0, SIMILAR_LIMIT);
   }
 
   private resolveParent(
@@ -182,6 +204,30 @@ export class Tracker {
     const node = this.resolveNode(conversationId, nodeRef);
     const parent = parentRef.trim() === 'root' ? null : this.resolveNode(conversationId, parentRef).id;
     return this.editVisit(node.id, { parentVisitId: parent });
+  }
+
+  /**
+   * Renames a node (kc_rename). The new title decides its concept: an existing concept with that name is shared
+   * (D1), otherwise the node's own concept is renamed when nothing else uses it, or a new one is created.
+   */
+  rename(conversationId: string, nodeRef: string, title: string): Visit {
+    const node = this.resolveNode(conversationId, nodeRef);
+    const trimmed = title.trim();
+    if (!trimmed) throw new TrackerError('Empty title');
+    const norm = normalizeName(trimmed);
+    const existing = this.repo.findConceptByNorm(norm);
+    if (existing) return this.editVisit(node.id, { title: trimmed, conceptId: existing.id });
+    if (this.repo.countVisitsOfConcept(node.conceptId) === 1) {
+      this.renameConcept(node.conceptId, trimmed);
+      return this.editVisit(node.id, { title: trimmed });
+    }
+    const concept = this.repo.createConcept({ name: trimmed, nameNorm: norm });
+    return this.editVisit(node.id, { title: trimmed, conceptId: concept.id });
+  }
+
+  /** Removes a node (kc_remove); its children move up to its parent. */
+  remove(conversationId: string, nodeRef: string): void {
+    this.deleteVisit(this.resolveNode(conversationId, nodeRef).id);
   }
 
   focus(conversationId: string, visitId: string | null): void {

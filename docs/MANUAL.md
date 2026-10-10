@@ -72,7 +72,7 @@ Restart Claude Desktop. The bridge starts the daemon if needed, so you can open 
 
 Claude Desktop loads MCP tools only when a chat seems to need them, so on its own it may not start tracking. Add this line once to your personal preferences (Settings → General → "What personal preferences should Claude consider in responses?"):
 
-> In every conversation use the knowledge-graph tools: call kc_start at the first real topic, then kc_track before each answer that explains a concept.
+> In every conversation keep the knowledge graph up to date without mentioning it: kc_start at the first real topic, then kc_track before each answer that explains a concept.
 
 Without it, writing "track this conversation" at the start of a chat works too.
 
@@ -109,6 +109,7 @@ Just chat. Before each answer that explains something new, the model adds its co
 - "track this" / "don't track this";
 - "let's go back to *X*": the model moves the current node back to *X* and the next topics hang under it;
 - "attach *X* under *Y*": the model moves node *X* (with its children) under *Y* (`kc_move`); merging two names of the same concept is a different tool (`kc_link`);
+- "rename *X* to *Z*", "remove *X*", "fix the hierarchy": the model only edits the canvas (`kc_rename`, `kc_remove`, `kc_link`, `kc_move`) and adds no new concepts; removing a node moves its children up to its parent.
 - "what have I already studied about *Y*?": the model reads your graph (`kc_recall`) before answering;
 - "pick up where we left off": the model reads the outline of the last conversation (`kc_tree`) and continues from the current node;
 - "what have I been studying lately?": overview of your graph (`kc_profile`).

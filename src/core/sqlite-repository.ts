@@ -11,6 +11,7 @@ import type {
   Visit,
 } from './types.ts';
 import { SCHEMA } from './schema.ts';
+import { similarityKey } from './similarity.ts';
 
 type Row = Record<string, unknown>;
 
@@ -69,6 +70,7 @@ export class SqliteRepository implements Repository {
     this.db = new DatabaseSync(path);
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
     this.db.exec(SCHEMA);
+    this.migrate();
     this.checkpoint();
   }
 
@@ -115,8 +117,8 @@ export class SqliteRepository implements Repository {
     const id = randomUUID();
     const t = now();
     this.db
-      .prepare('INSERT INTO concepts (id, name, name_norm, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?)')
-      .run(id, input.name, input.nameNorm, t, t);
+      .prepare('INSERT INTO concepts (id, name, name_norm, name_key, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(id, input.name, input.nameNorm, similarityKey(input.name), t, t);
     this.db.prepare('INSERT INTO concepts_fts (concept_id, name) VALUES (?, ?)').run(id, input.name);
     return this.getConcept(id)!;
   }
@@ -127,7 +129,7 @@ export class SqliteRepository implements Repository {
   }
 
   renameConcept(id: string, name: string, nameNorm: string): void {
-    this.db.prepare('UPDATE concepts SET name = ?, name_norm = ? WHERE id = ?').run(name, nameNorm, id);
+    this.db.prepare('UPDATE concepts SET name = ?, name_norm = ?, name_key = ? WHERE id = ?').run(name, nameNorm, similarityKey(name), id);
     this.db.prepare('UPDATE concepts_fts SET name = ? WHERE concept_id = ?').run(name, id);
   }
 
@@ -149,6 +151,27 @@ export class SqliteRepository implements Repository {
       .prepare(`${CONCEPT_SELECT} WHERE c.name LIKE ? ESCAPE '\\' ORDER BY length(c.name), c.last_seen_at DESC LIMIT ?`)
       .all(like, limit)
       .map(toConcept);
+  }
+
+  /** Columns added after the first release; databases created earlier get them on open. */
+  private migrate() {
+    const has = (table: string, column: string) =>
+      this.db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === column);
+    if (!has('concepts', 'name_key')) {
+      this.db.exec('ALTER TABLE concepts ADD COLUMN name_key TEXT');
+      const set = this.db.prepare('UPDATE concepts SET name_key = ? WHERE id = ?');
+      for (const r of this.db.prepare('SELECT id, name FROM concepts').all()) set.run(similarityKey(r.name as string), r.id as string);
+    }
+    this.db.exec('CREATE INDEX IF NOT EXISTS concepts_key ON concepts(name_key)');
+  }
+
+  findConceptsByKey(name: string, excludeId: string): ConceptMatch[] {
+    const key = similarityKey(name);
+    if (!key) return [];
+    return this.db
+      .prepare('SELECT id, name FROM concepts WHERE name_key = ? AND id <> ?')
+      .all(key, excludeId)
+      .map((r) => ({ id: r.id as string, name: r.name as string }));
   }
 
   similarConcepts(name: string, excludeId: string, limit: number): ConceptMatch[] {
