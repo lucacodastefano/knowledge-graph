@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { ToolListChangedNotificationSchema } from '@modelcontextprotocol/sdk/types.js';
 import { SqliteRepository } from '../src/core/sqlite-repository.ts';
 import { Tracker } from '../src/core/tracker.ts';
 import { buildApp, isAllowedOrigin } from '../src/server/app.ts';
@@ -26,6 +27,10 @@ test('exposes the tracking tools, the instructions prompt and server instruction
   assert.deepEqual(tools, ['kc_focus', 'kc_link', 'kc_move', 'kc_profile', 'kc_recall', 'kc_remove', 'kc_rename', 'kc_start', 'kc_track', 'kc_tree']);
   assert.equal((await client.listPrompts()).prompts[0].name, 'kc_instructions');
   assert.match(client.getInstructions() ?? '', /kc_track/);
+  // Node texts are the answer's own sentences, not a summary of it.
+  assert.match(client.getInstructions() ?? '', /not a summary.*exactly as you will write them; then use them verbatim/);
+  const track = JSON.stringify((await client.listTools()).tools.find((t) => t.name === 'kc_track')!.inputSchema);
+  assert.match(track, /word for word as you will write them/);
   const skill = readFileSync(new URL('../skills/knowledge-graph/SKILL.md', import.meta.url), 'utf8');
   for (const tool of tools) assert.ok(skill.includes(`\`${tool}\``), `skill should cover ${tool}`);
   await client.close();
@@ -107,7 +112,7 @@ test('only local origins are allowed', async () => {
 test('kc_track returns the tree and a reminder; parents and kc_move work by title, without merging', async () => {
   const client = await connect();
   const start = await client.callTool({ name: 'kc_start', arguments: { title: 'Piante' } });
-  assert.equal((start.content as { text: string }[])[1].text, 'Tree: empty');
+  assert.match((start.content as { text: string }[])[1].text, /^Tree: empty\n.*call kc_track first, then answer\. Silently/);
   await client.callTool({ name: 'kc_track', arguments: { nodes: [{ title: 'Annaffiatura', summary: 'Quanta acqua.', parent: 'root' }] } });
   const res = await client.callTool({
     name: 'kc_track',
@@ -115,7 +120,7 @@ test('kc_track returns the tree and a reminder; parents and kc_move work by titl
   });
   const extra = (res.content as { text: string }[])[1].text;
   assert.match(extra, /^Tree:\n- Annaffiatura\n- Acqua giusta\n/);
-  assert.match(extra, /do not repeat/);
+  assert.match(extra, /never mention this call/);
 
   const moved = await client.callTool({ name: 'kc_move', arguments: { node: 'Acqua giusta', parent: 'Annaffiatura' } });
   assert.match((moved.content as { text: string }[])[0].text, /- Annaffiatura\n {2}- Acqua giusta/);
@@ -199,4 +204,63 @@ test('detail is exposed only when the canvas turns it on, and Approfondisci show
     occ.sections.map((s: { title: string; children: { title: string }[] }) => [s.title, s.children.map((c) => c.title)]),
     [['Gate', ['Gate di design']], ['Deroghe', []]],
   );
+});
+
+test('kc_track accepts parents defined later in the call; any error says nothing was recorded', async () => {
+  const client = await connect();
+  try {
+    await client.callTool({ name: 'kc_start', arguments: { title: 'Reti' } });
+    const ok = await client.callTool({
+      name: 'kc_track',
+      arguments: { nodes: [{ title: 'Handshake', summary: 's', parent: 'TCP' }, { title: 'TCP', summary: 's', parent: 'root' }] },
+    });
+    assert.equal(ok.isError, undefined);
+    assert.match((ok.content as { text: string }[])[1].text, /- TCP\n {2}- Handshake/);
+
+    const cycle = await client.callTool({
+      name: 'kc_track',
+      arguments: { nodes: [{ title: 'UDP', summary: 's', parent: 'root' }, { title: 'A', summary: 's', parent: 'B' }, { title: 'B', summary: 's', parent: 'A' }] },
+    });
+    assert.equal(cycle.isError, true);
+    assert.match((cycle.content as { text: string }[])[0].text, /Parent cycle.*Nothing was recorded\. Fix this and call kc_track again/);
+    const tree = await client.callTool({ name: 'kc_tree', arguments: {} });
+    assert.doesNotMatch((tree.content as { text: string }[])[0].text, /UDP/);
+  } finally {
+    await client.close();
+  }
+});
+
+test('the detail setting reaches open sessions at once: tools/list_changed and a one-time note', async () => {
+  const patch = (detail: boolean) =>
+    fetch(new URL('/api/settings', base), { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ detail }) });
+  const client = await connect();
+  let changed = 0;
+  client.setNotificationHandler(ToolListChangedNotificationSchema, () => void changed++);
+  const texts = (r: unknown) => (r as { content: { text: string }[] }).content.map((c) => c.text).join('\n');
+  const track = (node: object) => client.callTool({ name: 'kc_track', arguments: { nodes: [{ summary: 's', parent: 'root', ...node }] } });
+  try {
+    await client.callTool({ name: 'kc_start', arguments: { title: 'Dettaglio live' } });
+    await new Promise((r) => setTimeout(r, 50)); // the notification stream opens after initialization
+    await patch(true);
+    await new Promise((r) => setTimeout(r, 100));
+    assert.equal(changed, 1);
+    const schema = JSON.stringify((await client.listTools()).tools.find((t) => t.name === 'kc_track')!.inputSchema);
+    assert.match(schema, /"detail":\{[^}]*key points of your answer, one per line, word for word/);
+
+    const first = await track({ title: 'Primo', detail: '- uno' });
+    assert.match(texts(first), /Detail setting is now on/);
+    const stored = tracker.repo.getVisit(json(first)[0].id)!;
+    assert.equal(stored.detail, '- uno');
+    assert.doesNotMatch(texts(await track({ title: 'Secondo' })), /Detail setting/);
+    // A new chat in the same session (Claude Desktop) learns it from kc_start.
+    assert.match(texts(await client.callTool({ name: 'kc_start', arguments: { title: 'Altra chat' } })), /Detail setting is now on/);
+
+    await patch(false);
+    const off = await track({ title: 'Terzo', detail: '- ignorato' });
+    assert.match(texts(off), /Detail setting is now off/);
+    assert.equal(tracker.repo.getVisit(json(off)[0].id)!.detail, null);
+  } finally {
+    await patch(false);
+    await client.close();
+  }
 });

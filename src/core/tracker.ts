@@ -43,7 +43,8 @@ export type TrackerEvent =
   | { type: 'visit.deleted'; visitId: string; conversationId: string; removedConceptId: string | null }
   | { type: 'concept.renamed'; concept: Concept }
   | { type: 'concept.merged'; fromId: string; into: Concept }
-  | { type: 'concept.deleted'; conceptId: string };
+  | { type: 'concept.deleted'; conceptId: string }
+  | { type: 'settings.changed'; settings: Settings };
 
 export interface VisitEdit {
   title?: string;
@@ -57,6 +58,48 @@ export interface VisitEdit {
 
 const SIMILAR_LIMIT = 3;
 
+/**
+ * Processing order of a kc_track batch: each node comes after the batch node it hangs under ("#n", or the title
+ * of another node of the batch, which as the latest node with that title wins over older ones). Otherwise the
+ * caller's order is kept. A cycle of parents inside the batch is an error.
+ */
+export function batchOrder(nodes: TrackNodeInput[]): { index: number; parentIndex: number | null }[] {
+  const parentIndex = nodes.map((node, index) => {
+    const p = node.parent?.trim() ?? '';
+    if (p.startsWith('#')) {
+      const ref = Number(p.slice(1));
+      if (!/^#\d+$/.test(p) || ref >= nodes.length || ref === index) {
+        throw new TrackerError(`Node #${index}: parent ${p} is not another node of this call`);
+      }
+      return ref;
+    }
+    const norm = normalizeName(p);
+    if (!norm || p === 'root' || p === 'current') return null;
+    const same = (j: number) => j !== index && normalizeName(nodes[j].title) === norm;
+    // The latest batch node with that title before this one, else the first one after it.
+    for (let j = index - 1; j >= 0; j--) if (same(j)) return j;
+    for (let j = index + 1; j < nodes.length; j++) if (same(j)) return j;
+    return null;
+  });
+
+  const order: { index: number; parentIndex: number | null }[] = [];
+  const state = nodes.map((): 'new' | 'visiting' | 'done' => 'new');
+  const place = (i: number, path: number[]): void => {
+    if (state[i] === 'done') return;
+    if (state[i] === 'visiting') {
+      const cycle = [...path.slice(path.indexOf(i)), i].map((j) => `#${j} "${nodes[j].title.trim()}"`);
+      throw new TrackerError(`Parent cycle in this call: ${cycle.join(' under ')}. Give one of them a parent outside the cycle`);
+    }
+    state[i] = 'visiting';
+    const p = parentIndex[i];
+    if (p !== null) place(p, [...path, i]);
+    state[i] = 'done';
+    order.push({ index: i, parentIndex: p });
+  };
+  nodes.forEach((_, i) => place(i, []));
+  return order;
+}
+
 /** Domain service: the only place where tracking rules live. Emits an event for every change. */
 export class Tracker {
   readonly events = new EventEmitter<{ change: [TrackerEvent] }>();
@@ -65,6 +108,8 @@ export class Tracker {
 
   constructor(repo: Repository) {
     this.repo = repo;
+    // One listener per open canvas socket and per MCP session: many are normal.
+    this.events.setMaxListeners(0);
   }
 
   /** Keeps the previous value of an edited field (D16: history for a future versioning UI). */
@@ -94,19 +139,25 @@ export class Tracker {
     return v;
   }
 
+  /**
+   * Adds a batch of nodes atomically: any error rolls back the whole batch. Parents may point to nodes defined
+   * later in the same batch (by title or "#n"): the batch is processed parents first.
+   */
   track(conversationId: string, nodes: TrackNodeInput[]): TrackNodeResult[] {
     if (nodes.length === 0) throw new TrackerError('No nodes given');
+    const order = batchOrder(nodes);
     const created: { visit: Visit; concept: Concept }[] = [];
     const updatedVisits: Visit[] = [];
 
     const results = this.repo.transaction(() => {
       let current = this.requireConversation(conversationId).currentVisitId;
-      const out: TrackNodeResult[] = [];
+      const out: TrackNodeResult[] = new Array(nodes.length);
 
-      nodes.forEach((node, index) => {
+      for (const { index, parentIndex } of order) {
+        const node = nodes[index];
         const title = node.title.trim();
         if (!title) throw new TrackerError(`Node #${index} has an empty title`);
-        const parentVisitId = this.resolveParent(conversationId, node.parent, current, out, index);
+        const parentVisitId = parentIndex !== null ? out[parentIndex].id : this.resolveParent(conversationId, node.parent, current);
         if (parentVisitId !== null) this.rejectWrapper(nodes, index, this.repo.getVisit(parentVisitId)!.title);
 
         let concept: Concept | undefined;
@@ -129,8 +180,8 @@ export class Tracker {
           this.repo.setVisitSummary(twin.id, summary, excerpt, detail ?? twin.detail);
           updatedVisits.push(this.repo.getVisit(twin.id)!);
           current = twin.id;
-          out.push({ id: twin.id, conceptId: concept!.id, knownConcept, revisit: true, updated: true, similar: [] });
-          return;
+          out[index] = { id: twin.id, conceptId: concept!.id, knownConcept, revisit: true, updated: true, similar: [] };
+          continue;
         }
 
         const revisit = visits.some((v) => v.conceptId === concept!.id);
@@ -139,16 +190,17 @@ export class Tracker {
         const visit = this.repo.createVisit({ conversationId, conceptId: concept.id, parentVisitId, title, summary, excerpt, detail });
         created.push({ visit, concept: this.repo.getConcept(concept.id)! });
         current = visit.id;
-        out.push({
+        out[index] = {
           id: visit.id,
           conceptId: concept.id,
           knownConcept,
           revisit,
           similar: knownConcept ? [] : this.similar(title, concept.id),
-        });
-      });
+        };
+      }
 
-      this.repo.setCurrentVisit(conversationId, current);
+      // The caller's last node is where the next topics hang.
+      this.repo.setCurrentVisit(conversationId, out.at(-1)!.id);
       return out;
     });
 
@@ -178,23 +230,11 @@ export class Tracker {
     return [...found.values()].slice(0, SIMILAR_LIMIT);
   }
 
-  private resolveParent(
-    conversationId: string,
-    parent: string | undefined,
-    current: string | null,
-    batch: TrackNodeResult[],
-    index: number,
-  ): string | null {
+  /** A parent outside the batch: "root", "current" (internal callers) or a node of the conversation. */
+  private resolveParent(conversationId: string, parent: string | undefined, current: string | null): string | null {
     const p = parent?.trim() || 'current';
     if (p === 'root') return null;
     if (p === 'current') return current;
-    if (p.startsWith('#')) {
-      const ref = Number(p.slice(1));
-      if (!Number.isInteger(ref) || ref < 0 || ref >= index) {
-        throw new TrackerError(`Node #${index}: parent ${p} must reference an earlier node of the same batch`);
-      }
-      return batch[ref].id;
-    }
     return this.resolveNode(conversationId, p).id;
   }
 
@@ -247,8 +287,12 @@ export class Tracker {
   }
 
   updateSettings(patch: Partial<Settings>): Settings {
+    const before = this.settings();
     if (patch.detail !== undefined) this.repo.setSetting('detail', patch.detail ? 'on' : 'off');
-    return this.settings();
+    const settings = this.settings();
+    // Live MCP sessions re-register their tools on this (D17: no restart of the client).
+    if (settings.detail !== before.detail) this.emit({ type: 'settings.changed', settings });
+    return settings;
   }
 
   focus(conversationId: string, visitId: string | null): void {

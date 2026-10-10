@@ -1,9 +1,10 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
-import { type TrackNodeInput, type Tracker, TrackerError } from '../core/tracker.ts';
+import { type TrackNodeInput, type Tracker, TrackerError, type TrackerEvent } from '../core/tracker.ts';
 import { Reader } from '../core/reader.ts';
-import { trackingInstructions } from './instructions.ts';
+import { DETAIL_RULE, trackingInstructions } from './instructions.ts';
+import { VERSION } from '../version.ts';
 
 /** Per MCP session: which conversation this client is writing to. */
 export interface McpSessionState {
@@ -13,25 +14,57 @@ export interface McpSessionState {
 
 const ok = (data: unknown): CallToolResult => ({ content: [{ type: 'text', text: JSON.stringify(data) }] });
 const text = (data: string): CallToolResult => ({ content: [{ type: 'text', text: data }] });
-/** Reminder after kc_track: some clients (Claude Desktop) otherwise repeat the answer after the tool call. */
-const TRACKED_NOTE = 'Recorded. Now write your answer once; do not repeat it or mention this call.';
+/**
+ * Reminder after kc_track: some clients (Claude Desktop) otherwise repeat the answer after the tool call, and
+ * models tend to announce the recording ("I recorded this in the graph").
+ */
+export const TRACKED_NOTE = 'Saved. Now write your answer once, as if no tool had been called: never mention this call, the graph or any recording.';
+/** Once per chat, at kc_start: models tended to track after answering and to announce that they would track. */
+export const START_NOTE = 'Before each answer that explains a concept, call kc_track first, then answer. Silently: never announce or confirm tracking.';
+/** A kc_track error: the batch is atomic, so the model must retry instead of claiming it was recorded. */
+export const TRACK_FAILED = 'Nothing was recorded. Fix this and call kc_track again before answering.';
+const DETAIL_OFF = 'Detail setting is now off: do not send "detail".';
 const fail = (message: string): CallToolResult => ({ content: [{ type: 'text', text: message }], isError: true });
 
-function guarded(fn: () => CallToolResult): CallToolResult {
+function guarded(fn: () => CallToolResult, onError = ''): CallToolResult {
   try {
     return fn();
   } catch (err) {
-    if (err instanceof TrackerError) return fail(err.message);
+    if (err instanceof TrackerError) return fail(onError ? `${err.message}. ${onError}` : err.message);
     throw err;
   }
 }
 
+const detailField = { detail: z.string().optional().describe('Only when going deep on this node: the 5-10 key points of your answer, one per line, word for word') };
+
+/**
+ * kc_track input. `detail` is advertised only when the canvas setting is on (D17: no tokens otherwise), but the node
+ * object is loose so a `detail` sent by a client with a stale tool list is never dropped by validation.
+ */
+const trackShape = (withDetail: boolean) => ({
+  nodes: z
+    .array(
+      z.looseObject({
+        title: z.string().describe('Concept name, 1-5 words'),
+        summary: z.string().describe('The 1-3 key sentences of your answer on it, word for word as you will write them'),
+        parent: z.string().describe('Title of the node it belongs under (from the tree, or another node of this call), "root", or "#n" for node n of this call'),
+        excerpt: z.string().optional().describe('Rarely: a formula or code line to keep verbatim'),
+        conceptId: z.string().optional().describe('Known concept id to reuse'),
+        ...(withDetail ? detailField : {}),
+      }),
+    )
+    .min(1),
+});
+
 export function createMcpServer(tracker: Tracker, state: McpSessionState): McpServer {
-  // D17: the detail field and its rule exist only when the canvas setting is on, read once per chat (session).
-  const withDetail = tracker.settings().detail;
-  const instructions = trackingInstructions(withDetail);
-  const server = new McpServer({ name: 'knowledge-graph', version: '0.1.0' }, { instructions });
-  const detailField = withDetail ? { detail: z.string().optional().describe('Only when going deep on this node: 5-10 key points, one per line') } : {};
+  // D17: the detail field and its rule are exposed only while the canvas setting is on. The server instructions are
+  // fixed when the session opens (Claude Desktop keeps one session for its whole life), so a later change re-registers
+  // kc_track (tools/list_changed) and is announced once in the next kc_start / kc_track result.
+  const instructionsDetail = tracker.settings().detail;
+  /** What the model of the current chat was told about detail. */
+  let toldDetail = instructionsDetail;
+  const detailNote = (on: boolean) => (on ? `Detail setting is now on:${DETAIL_RULE.slice(2)}` : DETAIL_OFF);
+  const server = new McpServer({ name: 'knowledge-graph', version: VERSION }, { instructions: trackingInstructions(instructionsDetail) });
 
   const reader = new Reader(tracker.repo);
 
@@ -50,39 +83,41 @@ export function createMcpServer(tracker: Tracker, state: McpSessionState): McpSe
       guarded(() => {
         const c = resume ? tracker.requireConversation(resume) : tracker.startConversation(title, state.client);
         state.conversationId = c.id;
+        // A new chat knows only the server instructions: tell it when the detail setting changed since.
+        const detail = tracker.settings().detail;
+        toldDetail = detail;
+        const notes = detail === instructionsDetail ? START_NOTE : `${START_NOTE}\n${detailNote(detail)}`;
         const result = ok({ conversation: c.id });
-        result.content.push({ type: 'text', text: reader.tree(c.id, false, true) });
+        result.content.push({ type: 'text', text: `${reader.tree(c.id, false, true)}\n${notes}` });
         return result;
       }),
   );
 
-  server.registerTool(
+  const kcTrack = server.registerTool(
     'kc_track',
     {
       description: 'Add the concept nodes of the answer you are about to write. One call per answer, before writing it.',
-      inputSchema: {
-        nodes: z
-          .array(
-            z.object({
-              title: z.string().describe('Concept name, 1-5 words'),
-              summary: z.string().describe('1-3 sentences of what you explained'),
-              parent: z.string().describe('Title of the node it belongs under (from the tree), "root", or "#n" for an earlier node of this call'),
-              excerpt: z.string().optional().describe('Rarely: a formula or code line to keep verbatim'),
-              conceptId: z.string().optional().describe('Known concept id to reuse'),
-              ...detailField,
-            }),
-          )
-          .min(1),
-      },
+      inputSchema: trackShape(instructionsDetail),
     },
     ({ nodes }) =>
       guarded(() => {
+        const detail = tracker.settings().detail;
+        const input = (nodes as TrackNodeInput[]).map((n) => (detail ? n : { ...n, detail: undefined }));
         const id = conversationId();
-        const result = ok(tracker.track(id, nodes as TrackNodeInput[]));
-        result.content.push({ type: 'text', text: `${reader.tree(id, false, true)}\n${TRACKED_NOTE}` });
+        const result = ok(tracker.track(id, input));
+        const notes = detail === toldDetail ? TRACKED_NOTE : `${detailNote(detail)}\n${TRACKED_NOTE}`;
+        toldDetail = detail;
+        result.content.push({ type: 'text', text: `${reader.tree(id, false, true)}\n${notes}` });
         return result;
-      }),
+      }, TRACK_FAILED),
   );
+
+  // The canvas toggled "Dettaglio approfondito": re-advertise kc_track at once (sends tools/list_changed).
+  const onChange = (e: TrackerEvent) => {
+    if (e.type === 'settings.changed') kcTrack.update({ paramsSchema: trackShape(e.settings.detail) });
+  };
+  tracker.events.on('change', onChange);
+  server.server.onclose = () => tracker.events.off('change', onChange);
 
   server.registerTool(
     'kc_focus',
@@ -172,7 +207,7 @@ export function createMcpServer(tracker: Tracker, state: McpSessionState): McpSe
       description: 'Outline of a conversation (default: this one, else the latest) with node ids.',
       inputSchema: {
         conversation: z.string().optional().describe('Conversation id'),
-        summaries: z.boolean().optional().describe('Include node summaries'),
+        summaries: z.boolean().optional().describe('Include node texts'),
       },
     },
     ({ conversation, summaries }) =>
@@ -188,7 +223,7 @@ export function createMcpServer(tracker: Tracker, state: McpSessionState): McpSe
   server.registerPrompt(
     'kc_instructions',
     { description: 'How to keep the knowledge-graph canvas up to date during a conversation.' },
-    () => ({ messages: [{ role: 'user', content: { type: 'text', text: instructions } }] }),
+    () => ({ messages: [{ role: 'user', content: { type: 'text', text: trackingInstructions(tracker.settings().detail) } }] }),
   );
 
   return server;

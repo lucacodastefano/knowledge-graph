@@ -98,7 +98,7 @@ function DetailSetting() {
   return (
     <label
       className="setting"
-      title="Quando il modello approfondisce un concetto scrive anche 5-10 punti chiave. Costa qualche token in più. Vale dalla chat successiva."
+      title="Quando il modello approfondisce un concetto salva anche i 5-10 punti chiave della risposta, con le sue parole. Costa qualche token in più. Vale subito, anche nelle chat già aperte."
     >
       <input type="checkbox" checked={on} onChange={(e) => void api.updateSettings({ detail: e.target.checked }).then((s) => setOn(s.detail))} />
       Dettaglio approfondito

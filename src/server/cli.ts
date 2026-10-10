@@ -35,15 +35,20 @@ async function serve() {
   mkdirSync(dirname(dbPath), { recursive: true });
   const repo = new SqliteRepository(dbPath);
   const tracker = new Tracker(repo);
-  const app = await buildApp({ tracker, webRoot });
-  await app.listen({ host: '127.0.0.1', port });
-  // Keep graph.db complete on disk: the WAL is folded in every few seconds and on shutdown.
-  setInterval(() => repo.checkpoint(), 10_000).unref();
+  let stopping = false;
   const stop = async () => {
+    if (stopping) return;
+    stopping = true;
+    // Long-lived MCP streams must not keep an old daemon alive when the bridge replaces it.
+    setTimeout(() => process.exit(0), 3000).unref();
     await app.close();
     repo.close();
     process.exit(0);
   };
+  const app = await buildApp({ tracker, webRoot, onShutdown: () => void stop() });
+  await app.listen({ host: '127.0.0.1', port });
+  // Keep graph.db complete on disk: the WAL is folded in every few seconds and on shutdown.
+  setInterval(() => repo.checkpoint(), 10_000).unref();
   for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) process.once(signal, () => void stop());
   console.error(`knowledge-graph: canvas http://localhost:${port}  MCP http://localhost:${port}/mcp  db ${dbPath}`);
 }

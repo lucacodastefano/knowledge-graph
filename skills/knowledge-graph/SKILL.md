@@ -15,13 +15,14 @@ The knowledge-graph MCP server maps the concepts the user explores with you on a
    To continue an earlier conversation pass `resume` with its id (find it with `kc_profile`).
 2. When your answer will introduce or deepen a concept, call `kc_track` **once**, **before** writing the answer, with all its new nodes; then write the answer once. `kc_start` alone needs no `kc_track`.
    One node per concept you explain: its parts are its children, different aspects of one topic are siblings under it.
-   Track concepts, not your answer: when you go deeper into a node already on the canvas, its parts go directly under it.
+   Nodes are concepts, not sections of your answer: when you go deeper into a node already on the canvas, its parts go directly under it.
    Never add a node that restates it ("Aspects of X", "Overview of X", "X" under "X and Y"): the server refuses it.
    - `title`: the concept name, 1-5 words, in the user's language, never a sentence. Same concept = same title;
      tracking it again under the same parent updates it instead of duplicating it.
-   - `summary`: 1-3 sentences of what you explain, so the user can recall it later.
+   - `summary`: not a summary but your own words: the 1-3 key sentences your answer will say about this concept, exactly as
+     you will write them; then use them verbatim in the answer, so the canvas keeps what you actually said.
    - `parent` (required): the title of the node it belongs under, from the tree that `kc_start` and `kc_track` return;
-     `"root"` for an unrelated topic; `"#0"`, `"#1"`... to hang a node under an earlier node of the same call.
+     `"root"` for an unrelated topic; `"#0"`, `"#1"`... (or its title) to hang a node under another node of the same call, in any order.
    - `excerpt`: leave it out unless a formula or code line is worth keeping verbatim.
 3. When the conversation goes back to a node already on the canvas, call `kc_focus` with its title instead of tracking it again.
 4. If `kc_track` returns `similar` concepts and one is clearly the same idea, call `kc_link` to merge.
@@ -40,4 +41,6 @@ Never create nodes about the graph, the tools or the conversation itself; do not
 
 ## Style
 
-Never mention the canvas or these tool calls in your answers (no "I recorded this in the graph") unless the user asks. Keep tool arguments short: they cost tokens.
+Tracking is invisible to the user: never announce, promise or confirm it, before or after the answer (no "I recorded this in the graph",
+no "I will track every answer"), and never mention the canvas or these tools unless the user asks. If `kc_track` returns an error, nothing
+was recorded: fix it and call `kc_track` again before answering. Keep tool arguments short: they cost tokens.

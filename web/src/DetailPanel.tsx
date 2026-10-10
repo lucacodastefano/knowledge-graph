@@ -319,7 +319,7 @@ interface TextsProps {
   onChange: (id: string, patch: Partial<NodeDraft>) => void;
 }
 
-/** Summary and key points, read-only or edited in place with the same look. */
+/** Node text (key sentences of the answer) and key points, read-only or edited in place with the same look. */
 function Texts({ id, summary, detail, draft, onChange }: TextsProps) {
   if (!draft) {
     return (
@@ -333,7 +333,7 @@ function Texts({ id, summary, detail, draft, onChange }: TextsProps) {
     <>
       <textarea
         className="editable"
-        aria-label="Riassunto"
+        aria-label="Testo dalla risposta"
         value={draft.summary}
         onChange={(e) => onChange(id, { summary: e.target.value })}
       />
