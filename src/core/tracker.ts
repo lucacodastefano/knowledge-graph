@@ -8,7 +8,10 @@ export class TrackerError extends Error {}
 export interface TrackNodeInput {
   title: string;
   summary: string;
-  /** "current" (default), "root", an existing visit id, or "#n" for the n-th node of the same batch. */
+  /**
+   * "root", the title of a node of this conversation (its latest visit), a visit id, or "#n" for the n-th node
+   * of the same batch. The MCP tool requires it (D15); internal callers may omit it for "current".
+   */
   parent?: string;
   excerpt?: string;
   /** Link directly to a known concept instead of matching by name. */
@@ -22,6 +25,8 @@ export interface TrackNodeResult {
   knownConcept: boolean;
   /** True when the concept was already visited earlier in this conversation (dashed cross-link). */
   revisit: boolean;
+  /** True when the same concept already sat under the same parent: its summary was updated, no new node (D15). */
+  updated?: boolean;
   /** Possible duplicates, only for brand-new concepts. */
   similar: ConceptMatch[];
 }
@@ -81,6 +86,7 @@ export class Tracker {
   track(conversationId: string, nodes: TrackNodeInput[]): TrackNodeResult[] {
     if (nodes.length === 0) throw new TrackerError('No nodes given');
     const created: { visit: Visit; concept: Concept }[] = [];
+    const updatedVisits: Visit[] = [];
 
     const results = this.repo.transaction(() => {
       let current = this.requireConversation(conversationId).currentVisitId;
@@ -99,18 +105,24 @@ export class Tracker {
           concept = this.repo.findConceptByNorm(normalizeName(title));
         }
         const knownConcept = concept !== undefined;
-        const revisit =
-          knownConcept && this.repo.getTree(conversationId)!.visits.some((v) => v.conceptId === concept!.id);
+        const visits = knownConcept ? this.repo.getTree(conversationId)!.visits : [];
+        const summary = node.summary.trim();
+        const excerpt = node.excerpt?.trim() || null;
+
+        // Same concept under the same parent: refresh that node instead of duplicating it (D15).
+        const twin = visits.find((v) => v.conceptId === concept!.id && v.parentVisitId === parentVisitId);
+        if (twin) {
+          this.repo.setVisitSummary(twin.id, summary, excerpt);
+          updatedVisits.push(this.repo.getVisit(twin.id)!);
+          current = twin.id;
+          out.push({ id: twin.id, conceptId: concept!.id, knownConcept, revisit: true, updated: true, similar: [] });
+          return;
+        }
+
+        const revisit = visits.some((v) => v.conceptId === concept!.id);
         concept ??= this.repo.createConcept({ name: title, nameNorm: normalizeName(title) });
 
-        const visit = this.repo.createVisit({
-          conversationId,
-          conceptId: concept.id,
-          parentVisitId,
-          title,
-          summary: node.summary.trim(),
-          excerpt: node.excerpt?.trim() || null,
-        });
+        const visit = this.repo.createVisit({ conversationId, conceptId: concept.id, parentVisitId, title, summary, excerpt });
         created.push({ visit, concept: this.repo.getConcept(concept.id)! });
         current = visit.id;
         out.push({
@@ -127,6 +139,7 @@ export class Tracker {
     });
 
     for (const c of created) this.emit({ type: 'visit.created', ...c });
+    for (const visit of updatedVisits) this.emit({ type: 'visit.updated', visit });
     this.emit({ type: 'focus.changed', conversationId, visitId: results.at(-1)!.id });
     return results;
   }
@@ -148,7 +161,27 @@ export class Tracker {
       }
       return batch[ref].id;
     }
-    return this.requireVisitIn(conversationId, p).id;
+    return this.resolveNode(conversationId, p).id;
+  }
+
+  /** A node of the conversation by id, or by title (latest visit with that title or concept name). */
+  resolveNode(conversationId: string, ref: string): Visit {
+    const visits = this.repo.getTree(conversationId)?.visits ?? [];
+    const byId = visits.find((v) => v.id === ref);
+    if (byId) return byId;
+    const norm = normalizeName(ref);
+    const byTitle = visits.findLast(
+      (v) => normalizeName(v.title) === norm || normalizeName(this.repo.getConcept(v.conceptId)?.name ?? '') === norm,
+    );
+    if (byTitle) return byTitle;
+    throw new TrackerError(`Node "${ref}" not found in this conversation: use a title from the tree, "root" or "#n"`);
+  }
+
+  /** Re-attaches a node (by id or title) under another one, or to the root (kc_move). */
+  move(conversationId: string, nodeRef: string, parentRef: string): Visit {
+    const node = this.resolveNode(conversationId, nodeRef);
+    const parent = parentRef.trim() === 'root' ? null : this.resolveNode(conversationId, parentRef).id;
+    return this.editVisit(node.id, { parentVisitId: parent });
   }
 
   focus(conversationId: string, visitId: string | null): void {

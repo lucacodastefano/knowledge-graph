@@ -23,7 +23,7 @@ const json = (r: unknown) => JSON.parse((r as { content: { text: string }[] }).c
 test('exposes the tracking tools, the instructions prompt and server instructions', async () => {
   const client = await connect();
   const tools = (await client.listTools()).tools.map((t) => t.name).sort();
-  assert.deepEqual(tools, ['kc_focus', 'kc_link', 'kc_profile', 'kc_recall', 'kc_start', 'kc_track', 'kc_tree']);
+  assert.deepEqual(tools, ['kc_focus', 'kc_link', 'kc_move', 'kc_profile', 'kc_recall', 'kc_start', 'kc_track', 'kc_tree']);
   assert.equal((await client.listPrompts()).prompts[0].name, 'kc_instructions');
   assert.match(client.getInstructions() ?? '', /kc_track/);
   const skill = readFileSync(new URL('../skills/knowledge-graph/SKILL.md', import.meta.url), 'utf8');
@@ -40,11 +40,11 @@ test('a tracked conversation is readable through the REST API and pushed on the 
 
   const { conversation } = json(await client.callTool({ name: 'kc_start', arguments: { title: 'Kafka' } }));
   const [root] = json(
-    await client.callTool({ name: 'kc_track', arguments: { nodes: [{ title: 'Kafka', summary: 'Log distribuito.' }] } }),
+    await client.callTool({ name: 'kc_track', arguments: { nodes: [{ title: 'Kafka', summary: 'Log distribuito.', parent: 'root' }] } }),
   );
   await client.callTool({
     name: 'kc_track',
-    arguments: { nodes: [{ title: 'Consumer group', summary: 'Consumo in parallelo.' }] },
+    arguments: { nodes: [{ title: 'Consumer group', summary: 'Consumo in parallelo.', parent: 'kafka' }] },
   });
 
   const tree = await (await fetch(new URL(`/api/conversations/${conversation}/tree`, base))).json();
@@ -64,7 +64,7 @@ test('a tracked conversation is readable through the REST API and pushed on the 
 test('tracking without kc_start opens a conversation automatically', async () => {
   const client = await connect();
   const before = tracker.repo.listConversations().length;
-  const res = await client.callTool({ name: 'kc_track', arguments: { nodes: [{ title: 'Solo', summary: 's' }] } });
+  const res = await client.callTool({ name: 'kc_track', arguments: { nodes: [{ title: 'Solo', summary: 's', parent: 'root' }] } });
   assert.equal(res.isError, undefined);
   assert.equal(tracker.repo.listConversations().length, before + 1);
   await client.close();
@@ -73,7 +73,7 @@ test('tracking without kc_start opens a conversation automatically', async () =>
 test('read tools answer from the graph without writing to it', async () => {
   const client = await connect();
   await client.callTool({ name: 'kc_start', arguments: { title: 'Rust' } });
-  await client.callTool({ name: 'kc_track', arguments: { nodes: [{ title: 'Borrow checker', summary: 'Regole di prestito.' }] } });
+  await client.callTool({ name: 'kc_track', arguments: { nodes: [{ title: 'Borrow checker', summary: 'Regole di prestito.', parent: 'root' }] } });
   const before = tracker.repo.countConcepts();
 
   const [recalled] = json(await client.callTool({ name: 'kc_recall', arguments: { query: 'borrow checker' } }));
@@ -102,4 +102,27 @@ test('only local origins are allowed', async () => {
   assert.equal(isAllowedOrigin('https://evil.example'), false);
   const res = await fetch(new URL('/api/conversations', base), { headers: { origin: 'https://evil.example' } });
   assert.equal(res.status, 403);
+});
+
+test('kc_track returns the tree and a reminder; parents and kc_move work by title, without merging', async () => {
+  const client = await connect();
+  const start = await client.callTool({ name: 'kc_start', arguments: { title: 'Piante' } });
+  assert.equal((start.content as { text: string }[])[1].text, 'Tree: empty');
+  await client.callTool({ name: 'kc_track', arguments: { nodes: [{ title: 'Annaffiatura', summary: 'Quanta acqua.', parent: 'root' }] } });
+  const res = await client.callTool({
+    name: 'kc_track',
+    arguments: { nodes: [{ title: 'Acqua giusta', summary: 'Né troppa né poca.', parent: 'root' }] },
+  });
+  const extra = (res.content as { text: string }[])[1].text;
+  assert.match(extra, /^Tree:\n- Annaffiatura\n- Acqua giusta\n/);
+  assert.match(extra, /do not repeat/);
+
+  const moved = await client.callTool({ name: 'kc_move', arguments: { node: 'Acqua giusta', parent: 'Annaffiatura' } });
+  assert.match((moved.content as { text: string }[])[0].text, /- Annaffiatura\n {2}- Acqua giusta/);
+  assert.equal(tracker.repo.listConversations().length > 0, true);
+  const cycle = await client.callTool({ name: 'kc_move', arguments: { node: 'Annaffiatura', parent: 'Acqua giusta' } });
+  assert.equal(cycle.isError, true);
+  const missing = await client.callTool({ name: 'kc_track', arguments: { nodes: [{ title: 'X', summary: 's', parent: 'Nope' }] } });
+  assert.equal(missing.isError, true);
+  await client.close();
 });

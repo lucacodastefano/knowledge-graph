@@ -33,9 +33,18 @@ async function serve() {
   const { Tracker } = await import('../core/tracker.ts');
   const { buildApp } = await import('./app.ts');
   mkdirSync(dirname(dbPath), { recursive: true });
-  const tracker = new Tracker(new SqliteRepository(dbPath));
+  const repo = new SqliteRepository(dbPath);
+  const tracker = new Tracker(repo);
   const app = await buildApp({ tracker, webRoot });
   await app.listen({ host: '127.0.0.1', port });
+  // Keep graph.db complete on disk: the WAL is folded in every few seconds and on shutdown.
+  setInterval(() => repo.checkpoint(), 10_000).unref();
+  const stop = async () => {
+    await app.close();
+    repo.close();
+    process.exit(0);
+  };
+  for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) process.once(signal, () => void stop());
   console.error(`knowledge-graph: canvas http://localhost:${port}  MCP http://localhost:${port}/mcp  db ${dbPath}`);
 }
 

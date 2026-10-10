@@ -26,20 +26,20 @@ const [kafka] = (await call('kc_track', {
 })) as Node[];
 await call('kc_track', {
   nodes: [
-    { title: 'Topic', summary: 'Categoria logica di eventi, divisa in partizioni.' },
+    { title: 'Topic', summary: 'Categoria logica di eventi, divisa in partizioni.', parent: 'Apache Kafka' },
     { title: 'Partizioni', summary: 'Unità di parallelismo e ordinamento: l\'ordine è garantito solo dentro una partizione.', parent: '#0' },
   ],
 });
 await call('kc_track', {
-  nodes: [{ title: 'Chiave di partizionamento', summary: 'La chiave del messaggio decide la partizione: stessa chiave, stessa partizione, ordine garantito.' }],
+  nodes: [{ title: 'Chiave di partizionamento', summary: 'La chiave del messaggio decide la partizione: stessa chiave, stessa partizione, ordine garantito.', parent: 'Partizioni' }],
 });
 await call('kc_focus', { node: kafka.id });
 const [cg] = (await call('kc_track', {
-  nodes: [{ title: 'Consumer group', summary: 'Consumer che si dividono le partizioni di un topic: ogni partizione è letta da un solo membro del gruppo.' }],
+  nodes: [{ title: 'Consumer group', summary: 'Consumer che si dividono le partizioni di un topic: ogni partizione è letta da un solo membro del gruppo.', parent: 'Apache Kafka' }],
 })) as Node[];
 await call('kc_track', {
   nodes: [
-    { title: 'Rebalancing', summary: 'Riassegnazione delle partizioni quando un consumer entra o esce dal gruppo.' },
+    { title: 'Rebalancing', summary: 'Riassegnazione delle partizioni quando un consumer entra o esce dal gruppo.', parent: 'Consumer group' },
     { title: 'Offset', summary: 'Posizione di lettura per partizione; il commit dell\'offset decide da dove si riparte.', parent: cg.id },
   ],
 });
@@ -48,7 +48,7 @@ const [es] = (await call('kc_track', {
 })) as Node[];
 await call('kc_track', {
   nodes: [
-    { title: 'Partizioni', summary: 'In event sourcing si partiziona per id dell\'aggregato, così gli eventi di un aggregato restano ordinati.', excerpt: 'key = aggregateId → stessa partizione → ordine garantito per aggregato' },
+    { title: 'Partizioni', summary: 'In event sourcing si partiziona per id dell\'aggregato, così gli eventi di un aggregato restano ordinati.', excerpt: 'key = aggregateId → stessa partizione → ordine garantito per aggregato', parent: 'Event sourcing' },
   ],
 });
 const [snap] = (await call('kc_track', {

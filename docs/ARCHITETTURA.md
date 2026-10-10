@@ -74,10 +74,11 @@ fts_concepts(name, summaries)                            -- FTS5 per ricerca e s
 
 | Strumento | Fa | Requisiti |
 |---|---|---|
-| `kc_start(title?)` | Apre o riprende la conversazione, restituisce id e nodo corrente | RF1 |
-| `kc_track(nodes[])` | **Batch**: crea una o più visite `{title, summary, parent: "current" \| id \| "root", excerpt?}`. Aggancia in automatico i concetti con nome uguale; restituisce gli id e al massimo 3 concetti simili per nodo | RF2, RF3, RF5, RF6 |
+| `kc_start(title?)` | Apre o riprende la conversazione, restituisce id e albero compatto | RF1 |
+| `kc_track(nodes[])` | **Batch**, chiamato **prima** di scrivere la risposta: crea una o più visite `{title, summary, parent, excerpt?}`. `parent` è obbligatorio (D15): titolo di un nodo della conversazione (ultima visita con quel titolo), `"root"` o `"#n"`. Stesso concetto sotto lo stesso padre aggiorna il riassunto invece di duplicare; in un altro ramo vale D1. Restituisce gli id, al massimo 3 concetti simili per nodo e l'albero compatto della conversazione (solo titoli) | RF2, RF3, RF5, RF6 |
 | `kc_focus(node_id)` | Torna su un nodo esistente (diventa il corrente) | RF4 |
 | `kc_link(visit_id, concept_id)` | Conferma che una visita è un concetto già noto (unisce) | RF6 |
+| `kc_move(node, parent)` | Sposta un nodo (con i figli) sotto un altro nodo o alla radice, indicati per titolo o id; non unisce concetti | RF18 |
 | `kc_recall(query)` | "Cosa sa già Luca di X?": concetti, riassunti, date | RF8 |
 | `kc_tree(conversation_id?)` | Albero compatto di una conversazione | RF9 |
 | `kc_profile()` | Temi più esplorati e recenti | RF10 |
@@ -91,7 +92,7 @@ Più un **prompt MCP** `kc_instructions` con le regole di tracciamento scritte i
 
 ## 6. Flussi chiave
 
-1. **Tracciamento**: Luca chiede → il modello risponde → a fine risposta una sola chiamata `kc_track` → il demone salva, aggancia i concetti, emette un evento → il canvas disegna i nodi.
+1. **Tracciamento**: Luca chiede → il modello chiama una sola volta `kc_track` **prima** di scrivere la risposta (se la chiama dopo, Claude Desktop ripete la risposta), poi risponde → il demone salva, aggancia i concetti, emette un evento → il canvas disegna i nodi.
 2. **Hover**: il canvas ha già titolo e riassunto breve in memoria → tooltip immediato → "Approfondisci" chiama `/api/concepts/:id` → pannello con tutte le visite.
 3. **Richiamo**: il modello, prima di spiegare un tema, chiama `kc_recall` → sa cosa Luca ha già visto e lo dà per noto.
 4. **Grafo personale**: la scheda "Grafo personale" chiama `/api/graph` (tutti i concetti con conteggio visite + archi pesati derivati dalle visite e da `concept_links`) → Sigma.js con layout ForceAtlas2; a ogni evento live ricarica e unisce i dati tenendo le posizioni dei nodi noti, così il disegno non salta.
@@ -100,6 +101,7 @@ Più un **prompt MCP** `kc_instructions` con le regole di tracciamento scritte i
 
 ## 7. Sicurezza e privacy
 
+- Persistenza: SQLite in WAL; il demone fa il checkpoint ogni 10 s e alla chiusura, così `graph.db` da solo è sempre un backup completo (RNF8).
 - Il demone ascolta solo su `127.0.0.1`; controllo dell'header `Origin` sull'endpoint MCP e sul WebSocket (protezione dal DNS rebinding, raccomandata dalle specifiche MCP).
 - Niente autenticazione nell'MVP, niente telemetria. I dati restano nel file SQLite; arrivano al modello solo quando lui li legge.
 

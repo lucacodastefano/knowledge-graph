@@ -99,7 +99,7 @@ test('the personal graph shows every concept, previews it on hover and grows liv
 
   const client = new Client({ name: 'e2e', version: '1' });
   await client.connect(new StreamableHTTPClientTransport(new URL('/mcp', base)));
-  await client.callTool({ name: 'kc_track', arguments: { nodes: [{ title: 'Schema registry', summary: 'Contratti degli eventi.' }] } });
+  await client.callTool({ name: 'kc_track', arguments: { nodes: [{ title: 'Schema registry', summary: 'Contratti degli eventi.', parent: 'root' }] } });
   await page.getByText('11 concetti').waitFor();
   await client.close();
 });

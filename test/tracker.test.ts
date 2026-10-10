@@ -41,7 +41,8 @@ test('"root" starts a new branch and "#n" references the same batch', () => {
 
 test('a returning concept reuses the concept and is flagged as revisit (D1)', () => {
   const { tracker, conv } = setup();
-  const [a] = tracker.track(conv.id, [{ title: 'Partizioni', summary: 'prima' }]);
+  tracker.track(conv.id, [{ title: 'Kafka', summary: 's', parent: 'root' }]);
+  const [a] = tracker.track(conv.id, [{ title: 'Partizioni', summary: 'prima', parent: 'Kafka' }]);
   const [b] = tracker.track(conv.id, [{ title: 'partizioni', summary: 'dopo', parent: 'root' }]);
   assert.notEqual(a.id, b.id);
   assert.equal(a.conceptId, b.conceptId);
@@ -109,4 +110,19 @@ test('every change is emitted as an event', () => {
     events.map((e) => e.type),
     ['visit.created', 'visit.created', 'focus.changed'],
   );
+});
+
+test('same concept under the same parent updates the node; on another branch it is a revisit (D15, D1)', () => {
+  const { tracker, conv } = setup();
+  tracker.track(conv.id, [{ title: 'Annaffiatura', summary: 's', parent: 'root' }]);
+  const [first] = tracker.track(conv.id, [{ title: 'Acqua giusta', summary: 'prima', parent: 'Annaffiatura' }]);
+  const [again] = tracker.track(conv.id, [{ title: 'acqua giusta', summary: 'dopo', parent: 'annaffiatura' }]);
+  assert.equal(again.id, first.id);
+  assert.equal(again.updated, true);
+  assert.equal(tracker.repo.getVisit(first.id)!.summary, 'dopo');
+
+  const [elsewhere] = tracker.track(conv.id, [{ title: 'Acqua giusta', summary: 'altro ramo', parent: 'root' }]);
+  assert.notEqual(elsewhere.id, first.id);
+  assert.equal(elsewhere.revisit, true);
+  assert.equal(tracker.repo.getTree(conv.id)!.visits.length, 3);
 });
