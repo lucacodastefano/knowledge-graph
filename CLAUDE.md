@@ -12,6 +12,7 @@ Decisions and architecture: `docs/ARCHITETTURA.md`. Talk to Luca in Italian; cod
 
 ## Commands
 - `npm start` daemon on :7777 (`KG_PORT`, `KG_DB` override); `npm run dev:web` canvas with hot reload.
+- `npm run build` compiles the publishable package (`dist/` + `web/dist/`; `prepack` runs it).
 - `npm run typecheck`, `npm test` (unit + MCP over HTTP), `npm run test:e2e` (builds the canvas, headless Chromium; set `CHROMIUM_PATH=/opt/pw-browsers/chromium` in the cloud sandbox).
 - While working run only the tests of the touched area; full suite once before the PR.
 
