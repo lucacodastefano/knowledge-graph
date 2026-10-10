@@ -48,7 +48,7 @@ const [es] = (await call('kc_track', {
 })) as Node[];
 await call('kc_track', {
   nodes: [
-    { title: 'Partizioni', summary: 'In event sourcing si partiziona per id dell\'aggregato, così gli eventi di un aggregato restano ordinati.', excerpt: 'key = aggregateId → stessa partizione → ordine garantito per aggregato', parent: 'Event sourcing' },
+    { title: 'Partizioni', summary: 'In event sourcing si partiziona per id dell\'aggregato, così gli eventi di un aggregato restano ordinati.', excerpt: 'key = aggregateId → stessa partizione → ordine garantito per aggregato', parent: 'Event sourcing', sources: ['https://kafka.apache.org/documentation/?utm_source=chat#intro'] },
   ],
 });
 const [snap] = (await call('kc_track', {

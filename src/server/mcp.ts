@@ -50,6 +50,7 @@ const trackShape = (withDetail: boolean) => ({
         parent: z.string().describe('Title of the node it belongs under (from the tree, or another node of this call), "root", or "#n" for node n of this call'),
         excerpt: z.string().optional().describe('Rarely: a formula or code line to keep verbatim'),
         conceptId: z.string().optional().describe('Known concept id to reuse'),
+        sources: z.array(z.string()).optional().describe('URLs of web results or documents this node relies on'),
         ...(withDetail ? detailField : {}),
       }),
     )

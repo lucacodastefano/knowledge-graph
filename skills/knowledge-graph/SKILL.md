@@ -24,6 +24,7 @@ The knowledge-graph MCP server maps the concepts the user explores with you on a
    - `parent` (required): the title of the node it belongs under, from the tree that `kc_start` and `kc_track` return;
      `"root"` for an unrelated topic; `"#0"`, `"#1"`... (or its title) to hang a node under another node of the same call, in any order.
    - `excerpt`: leave it out unless a formula or code line is worth keeping verbatim.
+   - `sources`: when your answer uses web search results or documents, put their URLs on the nodes they support (not on every node).
 3. When the conversation goes back to a node already on the canvas, call `kc_focus` with its title instead of tracking it again.
 4. If `kc_track` returns `similar` concepts and one is clearly the same idea, call `kc_link` to merge.
 5. When the user asks to change the canvas (move, rename, merge, remove, "fix the hierarchy"), use only the editing tools, never `kc_track`:
@@ -35,7 +36,7 @@ Never create nodes about the graph, the tools or the conversation itself; do not
 ## Reading: start from what the user knows
 
 - When a topic first comes up in the conversation (not on follow-ups), call `kc_recall` with the topic. If the user has seen it, build on their notes
-  instead of starting from zero, and point out links to earlier topics (`near`) when they help.
+  instead of starting from zero, and point out links to earlier topics (`near`) when they help. `sources` lists pages already cited on it.
 - When the user asks to pick up where they left off, call `kc_tree` (optionally with `summaries: true`) and continue from the `*current` node.
 - When the user asks what they have been studying, or you need context at the start of a session, call `kc_profile`.
 

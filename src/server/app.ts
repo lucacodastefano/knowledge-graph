@@ -146,6 +146,10 @@ export async function buildApp({ tracker, webRoot, logger = false, onShutdown }:
     tracker.deleteVisit(req.params.id);
     return reply.code(204).send();
   });
+  app.delete<{ Params: { id: string; sourceId: string } }>('/api/visits/:id/sources/:sourceId', async (req, reply) => {
+    tracker.removeVisitSource(req.params.id, req.params.sourceId);
+    return reply.code(204).send();
+  });
 
   // --- Live updates ---
   app.get('/ws', { websocket: true }, (socket) => {

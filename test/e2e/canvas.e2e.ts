@@ -86,6 +86,8 @@ test('the canvas starts blank and grows live while the model tracks concepts', a
   await panel.getByRole('heading', { name: 'Chiave di partizionamento' }).waitFor();
   assert.match(await panel.innerText(), /sotto «Event sourcing»/);
   assert.match(await titled(page, /^Partizioni$/).first().innerText(), /anche in:/);
+  // Sources cited by the model, normalized (no tracking parameters or fragment).
+  assert.equal(await panel.getByRole('region', { name: 'Fonti' }).getByRole('link', { name: 'kafka.apache.org/documentation' }).count(), 1);
   await page.screenshot({ path: join(out, '5-approfondisci.png') });
 });
 

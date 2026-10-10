@@ -64,6 +64,8 @@ visits(id, conversation_id, concept_id, parent_visit_id NULL, title, summary, ex
 concept_links(from_concept_id, to_concept_id, kind)      -- correlato, parte-di, ...
 fts_concepts(name, summaries)                            -- FTS5 per ricerca e somiglianza
 revisions(target_kind, target_id, field, old_value, created_at)  -- valori precedenti a ogni modifica (D16), senza UI
+sources(id, url UNIQUE, domain, first_seen)  -- fonti citate, una per URL normalizzato (niente utm_*, #frammento, / finale)
+visit_sources(visit_id, source_id)  -- quali nodi citano quale fonte; una fonte che nessuno cita più viene cancellata
 settings(key, value)                                     -- impostazioni del canvas, es. detail (D17)
 ```
 
@@ -82,6 +84,7 @@ settings(key, value)                                     -- impostazioni del can
 | `kc_focus(node_id)` | Torna su un nodo esistente (diventa il corrente) | RF4 |
 | `kc_link(visit_id, concept_id)` | Conferma che una visita è un concetto già noto (unisce) | RF6 |
 | `kc_move(node, parent)` | Sposta un nodo (con i figli) sotto un altro nodo o alla radice, indicati per titolo o id; non unisce concetti | RF18 |
+| `sources` in `kc_track` | URL delle ricerche web o dei documenti su cui si basa il nodo, solo quando la risposta li usa: il campo costa token solo in quelle chiamate. Massimo 10 per nodo, URL non validi ignorati, deduplica per URL normalizzato. `kc_recall` restituisce fino a 3 fonti per concetto; la pagina del concetto (Approfondisci) le elenca tutte, e dal pannello si possono togliere | Fonti (analisi/07) |
 | (opzione) `detail` in `kc_track` | I 5-10 punti chiave della risposta, con le sue parole, quando approfondisce un nodo; esposto con la sua regola solo se l'impostazione del canvas "Dettaglio approfondito" è accesa (tabella `settings`). Vale subito: le istruzioni del server sono fisse per sessione (Claude Desktop, via bridge, ne apre una sola per tutta la vita dell'app), quindi al cambio ogni sessione aperta registra di nuovo `kc_track` (notifica `tools/list_changed`, inoltrata dal bridge) e il risultato del successivo `kc_start`/`kc_track` porta una riga con la regola o con "spento". Da spento nessun costo in token; un `detail` inviato da spento viene ignorato | D17 |
 | `kc_rename(node, title)` | Rinomina un nodo; un titolo già usato da un altro concetto lo collega a quel concetto (D1) | D16 |
 | `kc_remove(node)` | Elimina un nodo; i figli salgono al suo padre | D16 |

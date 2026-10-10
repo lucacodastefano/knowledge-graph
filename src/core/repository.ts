@@ -2,6 +2,7 @@ import type {
   Concept,
   ConceptDetail,
   ConceptMatch,
+  ConceptSource,
   Conversation,
   ConversationTree,
   PersonalGraph,
@@ -40,17 +41,25 @@ export interface Repository {
   countConcepts(): number;
 
   getVisit(id: string): Visit | undefined;
-  createVisit(input: Omit<Visit, 'id' | 'seq' | 'createdAt'>): Visit;
+  createVisit(input: Omit<Visit, 'id' | 'seq' | 'createdAt' | 'sourceCount'>): Visit;
   setVisitConcept(visitId: string, conceptId: string): void;
   setVisitTitle(visitId: string, title: string): void;
   setVisitSummary(visitId: string, summary: string, excerpt: string | null, detail: string | null): void;
   setVisitParent(visitId: string, parentVisitId: string | null): void;
   /** Re-attaches the children of a visit to another parent (null = root). */
   reparentChildren(visitId: string, parentVisitId: string | null): void;
+  /** Deletes a visit with its source links; sources nobody cites any more go too. */
   deleteVisit(id: string): void;
   countVisitsOfConcept(conceptId: string): number;
   getTree(conversationId: string): ConversationTree | undefined;
   getPersonalGraph(): PersonalGraph;
+
+  /** Links normalized sources to a visit; a URL already stored is reused (dedup), a link already there is kept. */
+  addVisitSources(visitId: string, sources: { url: string; domain: string }[]): void;
+  /** Unlinks a source from a visit and drops the source if nothing cites it any more. False if it was not linked. */
+  removeVisitSource(visitId: string, sourceId: string): boolean;
+  /** Sources of every visit of a concept, each once with the visits citing it, newest first. */
+  listConceptSources(conceptId: string): ConceptSource[];
 
   addRevision(revision: Omit<Revision, 'createdAt'>): void;
   listRevisions(targetKind: Revision['targetKind'], targetId: string): Revision[];

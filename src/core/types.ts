@@ -27,6 +27,23 @@ export interface Visit {
   detail: string | null;
   seq: number;
   createdAt: string;
+  /** How many sources (cited URLs) support this node: for the badge on the canvas node. */
+  sourceCount: number;
+}
+
+/** A web page or document the model cited for a node, stored once per normalized URL. */
+export interface Source {
+  id: string;
+  /** Normalized: no utm_* parameters, #fragment or trailing slash. */
+  url: string;
+  /** Host without "www.". */
+  domain: string;
+  firstSeen: string;
+}
+
+/** A source of a concept, with the nodes (visits) of that concept it is linked to. */
+export interface ConceptSource extends Source {
+  visitIds: string[];
 }
 
 export interface ConceptMatch {
@@ -58,6 +75,8 @@ export interface ConceptOccurrence extends Visit {
 /** The "Approfondisci" page of a concept. */
 export interface ConceptPage extends Concept {
   visits: ConceptOccurrence[];
+  /** Sources of every visit of the concept, each once, newest first. */
+  sources: ConceptSource[];
 }
 
 /** Canvas settings that change what the server exposes to the model. */
@@ -78,6 +97,8 @@ export interface Revision {
 export interface GraphConcept extends Concept {
   /** Summary of the most recent visit, for the hover preview. */
   summary: string;
+  /** Distinct sources over all its visits: for the "solo concetti con fonti" filter. */
+  sourceCount: number;
 }
 
 export interface GraphEdge {

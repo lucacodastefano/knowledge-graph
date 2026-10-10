@@ -123,6 +123,10 @@ button.icon:hover { color: var(--text); }
 .editable.h3 { font-size: 15px; font-weight: 600; margin-top: 10px; }
 .editable.h4 { font-size: 13px; font-weight: 600; margin-top: 8px; }
 .editable.inline { display: inline-block; width: auto; max-width: 60%; margin: 0; padding: 0 2px; font-size: 12px; }
+.sources h3 { font-size: 15px; margin: 16px 0 6px; }
+.sources ul { margin: 0; padding: 0; list-style: none; }
+.sources li { display: flex; align-items: center; gap: 6px; margin: 2px 0; font-size: 13px; }
+.sources a { color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .save-bar { position: sticky; bottom: -16px; display: flex; gap: 8px; margin: 12px -16px -16px; padding: 12px 16px; background: var(--surface); border-top: 1px solid var(--border); }
 @media (prefers-color-scheme: dark) {
   .danger-text, button.danger-text { color: #f87171; }

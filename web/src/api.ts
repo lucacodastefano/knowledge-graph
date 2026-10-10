@@ -3,6 +3,7 @@ import type {
   ConceptOccurrence,
   ConceptPage,
   ConceptSection,
+  ConceptSource,
   Conversation,
   ConversationTree,
   PersonalGraph,
@@ -11,7 +12,7 @@ import type {
 } from '../../src/core/types.ts';
 import type { TrackerEvent, VisitEdit } from '../../src/core/tracker.ts';
 
-export type { Concept, ConceptOccurrence, ConceptPage, ConceptSection, Conversation, ConversationTree, PersonalGraph, Settings, TrackerEvent, Visit, VisitEdit };
+export type { Concept, ConceptOccurrence, ConceptPage, ConceptSection, ConceptSource, Conversation, ConversationTree, PersonalGraph, Settings, TrackerEvent, Visit, VisitEdit };
 
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(path);
@@ -56,6 +57,7 @@ export const api = {
   deleteConcept: (id: string) => send<void>('DELETE', `/api/concepts/${id}`),
   editVisit: (id: string, edit: VisitEdit) => send<Visit>('PATCH', `/api/visits/${id}`, edit),
   deleteVisit: (id: string) => send<void>('DELETE', `/api/visits/${id}`),
+  removeSource: (visitId: string, sourceId: string) => send<void>('DELETE', `/api/visits/${visitId}/sources/${sourceId}`),
 };
 
 /** Live updates from the daemon, with automatic reconnect. Returns an unsubscribe function. */

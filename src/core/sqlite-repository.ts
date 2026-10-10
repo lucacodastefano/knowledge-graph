@@ -5,6 +5,7 @@ import type {
   Concept,
   ConceptDetail,
   ConceptMatch,
+  ConceptSource,
   Conversation,
   ConversationTree,
   PersonalGraph,
@@ -51,8 +52,14 @@ function toVisit(r: Row): Visit {
     detail: (r.detail as string | null) ?? null,
     seq: Number(r.seq),
     createdAt: r.created_at as string,
+    sourceCount: Number(r.source_count ?? 0),
   };
 }
+
+/** Visits with their number of sources (the canvas badge). */
+const VISIT_SELECT = `
+  SELECT v.*, (SELECT COUNT(*) FROM visit_sources vs WHERE vs.visit_id = v.id) AS source_count
+  FROM visits v`;
 
 const CONCEPT_SELECT = `
   SELECT c.*, (SELECT COUNT(*) FROM visits v WHERE v.concept_id = c.id) AS visit_count
@@ -196,8 +203,9 @@ export class SqliteRepository implements Repository {
     if (!concept) return undefined;
     const visits = this.db
       .prepare(
-        `SELECT v.*, cv.title AS conversation_title FROM visits v
-         JOIN conversations cv ON cv.id = v.conversation_id
+        `SELECT v.*, cv.title AS conversation_title,
+           (SELECT COUNT(*) FROM visit_sources vs WHERE vs.visit_id = v.id) AS source_count
+         FROM visits v JOIN conversations cv ON cv.id = v.conversation_id
          WHERE v.concept_id = ? ORDER BY v.created_at DESC, v.rowid DESC`,
       )
       .all(id)
@@ -261,11 +269,11 @@ export class SqliteRepository implements Repository {
   }
 
   getVisit(id: string): Visit | undefined {
-    const r = this.db.prepare('SELECT * FROM visits WHERE id = ?').get(id);
+    const r = this.db.prepare(`${VISIT_SELECT} WHERE v.id = ?`).get(id);
     return r ? toVisit(r) : undefined;
   }
 
-  createVisit(input: Omit<Visit, 'id' | 'seq' | 'createdAt'>): Visit {
+  createVisit(input: Omit<Visit, 'id' | 'seq' | 'createdAt' | 'sourceCount'>): Visit {
     const id = randomUUID();
     const t = now();
     const { next } = this.db
@@ -304,6 +312,47 @@ export class SqliteRepository implements Repository {
   deleteVisit(id: string): void {
     this.db.prepare('UPDATE conversations SET current_visit_id = NULL WHERE current_visit_id = ?').run(id);
     this.db.prepare('DELETE FROM visits WHERE id = ?').run(id);
+    this.dropOrphanSources();
+  }
+
+  /** Sources no node cites any more (their last visit was deleted or unlinked). */
+  private dropOrphanSources() {
+    this.db.prepare('DELETE FROM sources WHERE NOT EXISTS (SELECT 1 FROM visit_sources vs WHERE vs.source_id = sources.id)').run();
+  }
+
+  addVisitSources(visitId: string, sources: { url: string; domain: string }[]): void {
+    const insert = this.db.prepare('INSERT INTO sources (id, url, domain, first_seen) VALUES (?, ?, ?, ?) ON CONFLICT(url) DO NOTHING');
+    const find = this.db.prepare('SELECT id FROM sources WHERE url = ?');
+    const link = this.db.prepare('INSERT OR IGNORE INTO visit_sources (visit_id, source_id) VALUES (?, ?)');
+    for (const s of sources) {
+      insert.run(randomUUID(), s.url, s.domain, now());
+      link.run(visitId, (find.get(s.url) as { id: string }).id);
+    }
+  }
+
+  removeVisitSource(visitId: string, sourceId: string): boolean {
+    const { changes } = this.db.prepare('DELETE FROM visit_sources WHERE visit_id = ? AND source_id = ?').run(visitId, sourceId);
+    this.dropOrphanSources();
+    return Number(changes) > 0;
+  }
+
+  listConceptSources(conceptId: string): ConceptSource[] {
+    return this.db
+      .prepare(
+        `SELECT s.*, group_concat(vs.visit_id) AS visit_ids FROM sources s
+         JOIN visit_sources vs ON vs.source_id = s.id
+         JOIN visits v ON v.id = vs.visit_id
+         WHERE v.concept_id = ?
+         GROUP BY s.id ORDER BY s.first_seen DESC, s.rowid DESC`,
+      )
+      .all(conceptId)
+      .map((r) => ({
+        id: r.id as string,
+        url: r.url as string,
+        domain: r.domain as string,
+        firstSeen: r.first_seen as string,
+        visitIds: (r.visit_ids as string).split(','),
+      }));
   }
 
   countVisitsOfConcept(conceptId: string): number {
@@ -315,7 +364,7 @@ export class SqliteRepository implements Repository {
     const conversation = this.getConversation(conversationId);
     if (!conversation) return undefined;
     const visits = this.db
-      .prepare('SELECT * FROM visits WHERE conversation_id = ? ORDER BY seq')
+      .prepare(`${VISIT_SELECT} WHERE v.conversation_id = ? ORDER BY v.seq`)
       .all(conversationId)
       .map(toVisit);
     return { conversation, visits };
@@ -325,12 +374,14 @@ export class SqliteRepository implements Repository {
     const concepts = this.db
       .prepare(
         `SELECT c.*, COUNT(v.id) AS visit_count,
-           (SELECT v2.summary FROM visits v2 WHERE v2.concept_id = c.id ORDER BY v2.created_at DESC, v2.seq DESC LIMIT 1) AS summary
+           (SELECT v2.summary FROM visits v2 WHERE v2.concept_id = c.id ORDER BY v2.created_at DESC, v2.seq DESC LIMIT 1) AS summary,
+           (SELECT COUNT(DISTINCT vs.source_id) FROM visit_sources vs JOIN visits v3 ON v3.id = vs.visit_id
+            WHERE v3.concept_id = c.id) AS source_count
          FROM concepts c JOIN visits v ON v.concept_id = c.id
          GROUP BY c.id`,
       )
       .all()
-      .map((r) => ({ ...toConcept(r), summary: (r.summary as string) ?? '' }));
+      .map((r) => ({ ...toConcept(r), summary: (r.summary as string) ?? '', sourceCount: Number(r.source_count ?? 0) }));
     // Edges come from drill-downs (parent visit -> child visit) plus explicit concept links.
     const edges = this.db
       .prepare(
