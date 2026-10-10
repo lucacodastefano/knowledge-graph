@@ -1,6 +1,6 @@
 # Architettura di knowledge-graph
 
-> Stato: architettura approvata il 2026-10-10 (D11). Nel prototipo sono implementati `kc_start`, `kc_track`, `kc_focus`, `kc_link` e la vista conversazione; il resto segue il piano al §9. Le decisioni di prodotto sono in DECISIONI.md del progetto.
+> Stato: architettura approvata il 2026-10-10 (D11). Sono implementati `kc_start`, `kc_track`, `kc_focus`, `kc_link`, gli strumenti di lettura `kc_recall`, `kc_tree`, `kc_profile`, la skill per Claude Code e la vista conversazione; il resto segue il piano al §9. Le decisioni di prodotto sono in DECISIONI.md del progetto.
 
 ## 1. Vincoli che guidano le scelte
 
@@ -80,7 +80,12 @@ fts_concepts(name, summaries)                            -- FTS5 per ricerca e s
 | `kc_tree(conversation_id?)` | Albero compatto di una conversazione | RF9 |
 | `kc_profile()` | Temi più esplorati e recenti | RF10 |
 
-Più un **prompt MCP** `kc_instructions` con le regole di tracciamento scritte in modo neutro rispetto al modello (quando creare un nodo, quanto lungo il riassunto, una chiamata per turno). Per Claude Code forniamo anche una skill pronta. Le richieste "segna questo" / "non tracciare" (RF7) sono gestite dalle istruzioni, non servono strumenti dedicati.
+Gli strumenti di lettura stanno in `src/core/reader.ts` (non scrivono mai) e rispondono in forma compatta:
+- `kc_recall`: al massimo 5 concetti `{id, name, seen, last, notes, near}`; `notes` sono gli ultimi 3 riassunti distinti, `near` i concetti esplorati subito prima o dopo. Cerca nei nomi (FTS5 trigram) e, per parole di almeno 4 lettere, anche in titoli e riassunti delle visite.
+- `kc_tree`: testo indentato, una riga per nodo con id e `*current`; i riassunti solo con `summaries: true`. Senza id usa la conversazione della sessione, altrimenti la più recente.
+- `kc_profile`: numero di concetti, 10 più esplorati, 10 più recenti, ultime 5 conversazioni non vuote.
+
+Più un **prompt MCP** `kc_instructions` con le regole di tracciamento scritte in modo neutro rispetto al modello (quando creare un nodo, quanto lungo il riassunto, una chiamata per turno). Per Claude Code c'è una skill pronta in `skills/knowledge-graph/SKILL.md`, installabile con `knowledge-graph install-skill` (copia in `~/.claude/skills/`). Le richieste "segna questo" / "non tracciare" (RF7) sono gestite dalle istruzioni, non servono strumenti dedicati.
 
 ## 6. Flussi chiave
 

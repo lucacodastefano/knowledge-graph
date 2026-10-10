@@ -16,6 +16,12 @@ export interface Repository {
   deleteConcept(id: string): void;
   similarConcepts(name: string, excludeId: string, limit: number): ConceptMatch[];
   getConceptDetail(id: string): ConceptDetail | undefined;
+  /** Concepts matching a free-text query on names, visit titles and summaries, best first. */
+  searchConcepts(query: string, limit: number): Concept[];
+  /** Concepts reached from or leading to this one through drill-downs, most frequent first. */
+  neighbourConcepts(conceptId: string, limit: number): ConceptMatch[];
+  rankConcepts(order: 'visits' | 'recent', limit: number): Concept[];
+  countConcepts(): number;
 
   getVisit(id: string): Visit | undefined;
   createVisit(input: Omit<Visit, 'id' | 'seq' | 'createdAt'>): Visit;
