@@ -93,7 +93,8 @@ Più un **prompt MCP** `kc_instructions` con le regole di tracciamento scritte i
 2. **Hover**: il canvas ha già titolo e riassunto breve in memoria → tooltip immediato → "Approfondisci" chiama `/api/concepts/:id` → pannello con tutte le visite.
 3. **Richiamo**: il modello, prima di spiegare un tema, chiama `kc_recall` → sa cosa Luca ha già visto e lo dà per noto.
 4. **Grafo personale**: la scheda "Grafo personale" chiama `/api/graph` (tutti i concetti con conteggio visite + archi pesati derivati dalle visite e da `concept_links`) → Sigma.js con layout ForceAtlas2; a ogni evento live ricarica e unisce i dati tenendo le posizioni dei nodi noti, così il disegno non salta.
-5. **Correzione manuale** (D8): azione sul canvas → `/api` → evento → stesso aggiornamento visto da tutti.
+5. **Correzione manuale** (D8, RF18): azione sul canvas → `/api` → regola in `Tracker` → evento su `/ws` → stesso aggiornamento visto da tutti. Dal pannello del concetto: rinomina (`PATCH /api/concepts/:id`; i nodi intitolati col vecchio nome lo seguono, un nome già preso va unito), unisci (`POST /api/concepts/:id/merge`), elimina (`DELETE /api/concepts/:id`, in tutte le conversazioni). Da "Modifica" sul nodo: titolo, genitore (mai sotto un proprio discendente), concetto collegato (`PATCH /api/visits/:id`), elimina (`DELETE /api/visits/:id`). Chi perde un nodo non perde i figli: salgono di un livello; un concetto rimasto senza visite sparisce.
+6. **Ricerca** (RF17): casella in alto → `/api/search?q=` (nome esatto, poi nomi che contengono il testo, poi titoli e riassunti) → il concetto scelto si apre nel pannello, si evidenzia nell'albero e il grafo personale ci si centra.
 
 ## 7. Sicurezza e privacy
 

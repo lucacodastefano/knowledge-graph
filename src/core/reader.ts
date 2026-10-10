@@ -31,6 +31,7 @@ const NEAR_PER_CONCEPT = 5;
 const NOTE_MAX = 300;
 const PROFILE_LIMIT = 10;
 const PROFILE_CONVERSATIONS = 5;
+const SEARCH_LIMIT = 20;
 
 const day = (iso: string) => iso.slice(0, 10);
 const clip = (s: string, max: number) => (s.length > max ? `${s.slice(0, max - 1)}…` : s);
@@ -110,5 +111,17 @@ export class Reader {
         .filter((c) => c.nodes > 0)
         .slice(0, PROFILE_CONVERSATIONS),
     };
+  }
+
+  /** Node search for the canvas (RF17): exact name, then names containing the text, then what was said. */
+  search(query: string): Concept[] {
+    const q = query.trim();
+    if (!q) return [];
+    const found = new Map<string, Concept>();
+    const exact = this.repo.findConceptByNorm(normalizeName(q));
+    if (exact) found.set(exact.id, exact);
+    for (const c of this.repo.findConceptsByName(q, SEARCH_LIMIT)) found.set(c.id, c);
+    for (const c of this.repo.searchConcepts(q, SEARCH_LIMIT)) found.set(c.id, c);
+    return [...found.values()].slice(0, SEARCH_LIMIT);
   }
 }

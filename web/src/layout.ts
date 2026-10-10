@@ -11,8 +11,11 @@ export interface VisitNodeData extends Record<string, unknown> {
   current: boolean;
   fresh: boolean;
   hovered: boolean;
+  /** Visit of the concept picked in the search. */
+  match: boolean;
   onHover: (visitId: string | null) => void;
   onOpen: (conceptId: string) => void;
+  onEdit: (visitId: string) => void;
 }
 
 /** Tree edges are solid; visits of the same concept are joined by dashed cross-links (D1). */

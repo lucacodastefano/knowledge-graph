@@ -30,7 +30,19 @@ export type TrackerEvent =
   | { type: 'conversation.created'; conversation: Conversation }
   | { type: 'visit.created'; visit: Visit; concept: Concept }
   | { type: 'visit.relinked'; visit: Visit; concept: Concept; removedConceptId: string | null }
-  | { type: 'focus.changed'; conversationId: string; visitId: string | null };
+  | { type: 'focus.changed'; conversationId: string; visitId: string | null }
+  | { type: 'visit.updated'; visit: Visit }
+  | { type: 'visit.deleted'; visitId: string; conversationId: string; removedConceptId: string | null }
+  | { type: 'concept.renamed'; concept: Concept }
+  | { type: 'concept.merged'; fromId: string; into: Concept }
+  | { type: 'concept.deleted'; conceptId: string };
+
+export interface VisitEdit {
+  title?: string;
+  /** New parent: a visit of the same conversation, or null for the root. */
+  parentVisitId?: string | null;
+  conceptId?: string;
+}
 
 const SIMILAR_LIMIT = 3;
 
@@ -164,5 +176,127 @@ export class Tracker {
     });
     this.emit({ type: 'visit.relinked', visit: updated, concept: this.repo.getConcept(conceptId)!, removedConceptId });
     return updated;
+  }
+
+  // --- Manual corrections from the canvas (D8, RF18) ---
+
+  private requireConcept(id: string): Concept {
+    const c = this.repo.getConcept(id);
+    if (!c) throw new TrackerError(`Concept ${id} not found`);
+    return c;
+  }
+
+  private requireVisit(id: string): Visit {
+    const v = this.repo.getVisit(id);
+    if (!v) throw new TrackerError(`Node ${id} not found`);
+    return v;
+  }
+
+  /**
+   * Renames a concept. Nodes titled like the old name follow it, so a typo fixed once is fixed everywhere;
+   * nodes with their own wording keep it. A name already taken by another concept must be merged instead.
+   */
+  renameConcept(conceptId: string, name: string): Concept {
+    const concept = this.requireConcept(conceptId);
+    const trimmed = name.trim();
+    if (!trimmed) throw new TrackerError('Empty name');
+    const norm = normalizeName(trimmed);
+    const clash = this.repo.findConceptByNorm(norm);
+    if (clash && clash.id !== conceptId) throw new TrackerError(`"${clash.name}" already exists: merge the two concepts instead`);
+
+    const oldNorm = normalizeName(concept.name);
+    const renamed: Visit[] = [];
+    const updated = this.repo.transaction(() => {
+      this.repo.renameConcept(conceptId, trimmed, norm);
+      for (const v of this.repo.getConceptDetail(conceptId)!.visits) {
+        if (normalizeName(v.title) === oldNorm && v.title !== trimmed) {
+          this.repo.setVisitTitle(v.id, trimmed);
+          renamed.push(this.repo.getVisit(v.id)!);
+        }
+      }
+      return this.repo.getConcept(conceptId)!;
+    });
+    for (const visit of renamed) this.emit({ type: 'visit.updated', visit });
+    this.emit({ type: 'concept.renamed', concept: updated });
+    return updated;
+  }
+
+  /** Merges a duplicate concept into another one: every visit moves, the duplicate disappears. */
+  mergeConcepts(fromId: string, intoId: string): Concept {
+    this.requireConcept(fromId);
+    this.requireConcept(intoId);
+    if (fromId === intoId) throw new TrackerError('Cannot merge a concept into itself');
+    const into = this.repo.transaction(() => {
+      this.repo.reassignConcept(fromId, intoId);
+      this.repo.deleteConcept(fromId);
+      return this.repo.getConcept(intoId)!;
+    });
+    this.emit({ type: 'concept.merged', fromId, into });
+    return into;
+  }
+
+  /** Deletes a concept and all its nodes, in every conversation; their children move up one level. */
+  deleteConcept(conceptId: string): void {
+    this.requireConcept(conceptId);
+    this.repo.transaction(() => {
+      for (const v of this.repo.getConceptDetail(conceptId)!.visits) this.removeVisit(v.id);
+      this.repo.deleteConcept(conceptId);
+    });
+    this.emit({ type: 'concept.deleted', conceptId });
+  }
+
+  /** Renames a node, moves it under another parent, or links it to another concept. */
+  editVisit(visitId: string, edit: VisitEdit): Visit {
+    const visit = this.requireVisit(visitId);
+    let removedConceptId: string | null = null;
+    const updated = this.repo.transaction(() => {
+      if (edit.title !== undefined) {
+        const title = edit.title.trim();
+        if (!title) throw new TrackerError('Empty title');
+        this.repo.setVisitTitle(visitId, title);
+      }
+      if (edit.parentVisitId !== undefined) this.moveVisit(visit, edit.parentVisitId);
+      if (edit.conceptId !== undefined && edit.conceptId !== visit.conceptId) {
+        this.requireConcept(edit.conceptId);
+        this.repo.setVisitConcept(visitId, edit.conceptId);
+        if (this.repo.countVisitsOfConcept(visit.conceptId) === 0) {
+          this.repo.deleteConcept(visit.conceptId);
+          removedConceptId = visit.conceptId;
+        }
+      }
+      return this.repo.getVisit(visitId)!;
+    });
+    if (removedConceptId) this.emit({ type: 'visit.relinked', visit: updated, concept: this.repo.getConcept(updated.conceptId)!, removedConceptId });
+    this.emit({ type: 'visit.updated', visit: updated });
+    return updated;
+  }
+
+  private moveVisit(visit: Visit, parentVisitId: string | null) {
+    if (parentVisitId !== null) {
+      this.requireVisitIn(visit.conversationId, parentVisitId);
+      // Walk up from the new parent: reaching the node itself would create a cycle.
+      for (let p: string | null = parentVisitId; p; p = this.repo.getVisit(p)!.parentVisitId) {
+        if (p === visit.id) throw new TrackerError('A node cannot move under itself or one of its descendants');
+      }
+    }
+    this.repo.setVisitParent(visit.id, parentVisitId);
+  }
+
+  /** Deletes one node; its children move up to its parent and an unused concept is dropped. */
+  deleteVisit(visitId: string): void {
+    const visit = this.requireVisit(visitId);
+    const removedConceptId = this.repo.transaction(() => this.removeVisit(visitId));
+    this.emit({ type: 'visit.deleted', visitId, conversationId: visit.conversationId, removedConceptId });
+  }
+
+  private removeVisit(visitId: string): string | null {
+    const visit = this.repo.getVisit(visitId)!;
+    const conversation = this.repo.getConversation(visit.conversationId)!;
+    this.repo.reparentChildren(visitId, visit.parentVisitId);
+    this.repo.deleteVisit(visitId);
+    if (conversation.currentVisitId === visitId) this.repo.setCurrentVisit(visit.conversationId, visit.parentVisitId);
+    if (this.repo.countVisitsOfConcept(visit.conceptId) > 0) return null;
+    this.repo.deleteConcept(visit.conceptId);
+    return visit.conceptId;
   }
 }

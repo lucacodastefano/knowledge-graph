@@ -103,3 +103,87 @@ test('the personal graph shows every concept, previews it on hover and grows liv
   await page.getByText('11 concetti').waitFor();
   await client.close();
 });
+
+test('search finds a concept and the canvas corrects nodes and concepts (RF17, D8)', async () => {
+  const page = await browser.newPage({ viewport: { width: 1400, height: 820 } });
+  const tree = async () => {
+    const convs = (await (await fetch(`${base}/api/conversations`)).json()) as { id: string; title: string }[];
+    const id = convs.find((c) => c.title.startsWith('Kafka e architetture'))!.id;
+    return (await (await fetch(`${base}/api/conversations/${id}/tree`)).json()) as {
+      visits: { id: string; title: string; parentVisitId: string | null }[];
+    };
+  };
+  await page.goto(base);
+  const value = await page.locator('select[aria-label=Conversazione] option', { hasText: 'Kafka e architetture' }).getAttribute('value');
+  await page.selectOption('select[aria-label=Conversazione]', value!);
+  const visits = page.locator('[data-testid=visit]');
+  await visits.nth(11).waitFor();
+
+  // Search: a fragment of the name is enough; picking opens the concept and highlights its nodes.
+  await page.getByLabel('Cerca concetti').fill('consu');
+  await page.getByRole('option', { name: /Consumer group/ }).click();
+  const panel = page.getByLabel('Dettaglio concetto');
+  await panel.getByRole('heading', { name: 'Consumer group' }).waitFor();
+  await page.locator('.visit.match', { hasText: 'Consumer group' }).waitFor();
+  await page.screenshot({ path: join(out, '8-ricerca.png') });
+
+  // Rename the concept: its node in the tree follows.
+  await panel.getByRole('button', { name: 'Rinomina' }).click();
+  await panel.getByLabel('Nuovo nome').fill('Consumer groups');
+  await panel.getByRole('button', { name: 'Salva' }).click();
+  await visits.filter({ hasText: /^Consumer groups$/ }).waitFor();
+
+  // A name already taken is refused with a hint to merge.
+  await panel.getByRole('button', { name: 'Rinomina' }).click();
+  await panel.getByLabel('Nuovo nome').fill('offset');
+  await panel.getByRole('button', { name: 'Salva' }).click();
+  assert.match(await panel.getByRole('alert').innerText(), /Esiste già «Offset»/);
+  await panel.getByRole('button', { name: 'Annulla' }).click();
+
+  // Merge a concept into another from its panel.
+  await page.getByLabel('Cerca concetti').fill('rebal');
+  await page.getByRole('option', { name: /Rebalancing/ }).click();
+  await panel.getByRole('heading', { name: 'Rebalancing' }).waitFor();
+  await panel.getByRole('button', { name: 'Unisci a…' }).click();
+  await panel.getByLabel('Unisci a', { exact: true }).fill('consumer');
+  await panel.getByRole('option', { name: /Consumer groups/ }).click();
+  await panel.getByRole('heading', { name: 'Consumer groups' }).waitFor();
+  await panel.locator('.visits li').nth(1).waitFor();
+  await panel.getByRole('button', { name: 'Chiudi', exact: true }).click();
+
+  // Edit a single node: move it, rename it, then delete another one.
+  const editNode = async (title: string) => {
+    await visits.filter({ hasText: title }).hover();
+    await page.getByRole('tooltip').getByRole('button', { name: 'Modifica' }).click();
+    const p = page.getByLabel('Modifica nodo');
+    await p.waitFor();
+    return p;
+  };
+  let edit = await editNode('Snapshot dello stato');
+  const kafkaId = (await tree()).visits.find((v) => v.title === 'Apache Kafka')!.id;
+  await edit.getByLabel('Sotto').selectOption(kafkaId);
+  await edit.getByLabel('Titolo').fill('Snapshot');
+  await edit.getByRole('button', { name: 'Salva' }).click();
+  await visits.filter({ hasText: /^Snapshot$/ }).waitFor();
+  assert.equal((await tree()).visits.find((v) => v.title === 'Snapshot')!.parentVisitId, kafkaId);
+  await page.screenshot({ path: join(out, '9-modifica-nodo.png') });
+  await edit.getByRole('button', { name: 'Chiudi modifica' }).click();
+
+  edit = await editNode('Proiezioni di lettura');
+  await edit.getByRole('button', { name: 'Elimina nodo' }).click();
+  await edit.getByRole('button', { name: 'Conferma eliminazione' }).click();
+  await edit.waitFor({ state: 'detached' });
+  await page.waitForFunction(() => document.querySelectorAll('[data-testid=visit]').length === 11);
+
+  // Delete a whole concept from the personal graph.
+  await page.goto(`${base}/#personale`);
+  await page.getByTestId('concept-count').waitFor();
+  await page.getByLabel('Cerca concetti').fill('Schema reg');
+  await page.getByRole('option', { name: /Schema registry/ }).click();
+  await panel.getByRole('button', { name: 'Elimina' }).click();
+  await panel.getByRole('button', { name: 'Conferma eliminazione' }).click();
+  await panel.waitFor({ state: 'detached' });
+  // 11 concepts - Rebalancing (merged) - Proiezioni (deleted node) - Schema registry.
+  await page.getByText('8 concetti').waitFor();
+  await page.screenshot({ path: join(out, '10-grafo-corretto.png') });
+});

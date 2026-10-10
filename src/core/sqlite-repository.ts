@@ -120,6 +120,31 @@ export class SqliteRepository implements Repository {
     this.db.prepare('DELETE FROM concepts WHERE id = ?').run(id);
   }
 
+  renameConcept(id: string, name: string, nameNorm: string): void {
+    this.db.prepare('UPDATE concepts SET name = ?, name_norm = ? WHERE id = ?').run(name, nameNorm, id);
+    this.db.prepare('UPDATE concepts_fts SET name = ? WHERE concept_id = ?').run(name, id);
+  }
+
+  reassignConcept(fromId: string, toId: string): void {
+    this.db.prepare('UPDATE visits SET concept_id = ? WHERE concept_id = ?').run(toId, fromId);
+    this.db.prepare('UPDATE OR IGNORE concept_links SET from_concept_id = ? WHERE from_concept_id = ?').run(toId, fromId);
+    this.db.prepare('UPDATE OR IGNORE concept_links SET to_concept_id = ? WHERE to_concept_id = ?').run(toId, fromId);
+    this.db
+      .prepare('DELETE FROM concept_links WHERE from_concept_id = ?1 OR to_concept_id = ?1 OR from_concept_id = to_concept_id')
+      .run(fromId);
+    this.db
+      .prepare('UPDATE concepts SET last_seen_at = MAX(last_seen_at, (SELECT last_seen_at FROM concepts WHERE id = ?1)) WHERE id = ?2')
+      .run(fromId, toId);
+  }
+
+  findConceptsByName(fragment: string, limit: number): Concept[] {
+    const like = `%${fragment.replace(/[\\%_]/g, (m) => `\\${m}`)}%`;
+    return this.db
+      .prepare(`${CONCEPT_SELECT} WHERE c.name LIKE ? ESCAPE '\\' ORDER BY length(c.name), c.last_seen_at DESC LIMIT ?`)
+      .all(like, limit)
+      .map(toConcept);
+  }
+
   similarConcepts(name: string, excludeId: string, limit: number): ConceptMatch[] {
     const q = ftsQuery(name);
     if (!q) return [];
@@ -226,6 +251,23 @@ export class SqliteRepository implements Repository {
 
   setVisitConcept(visitId: string, conceptId: string): void {
     this.db.prepare('UPDATE visits SET concept_id = ? WHERE id = ?').run(conceptId, visitId);
+  }
+
+  setVisitTitle(visitId: string, title: string): void {
+    this.db.prepare('UPDATE visits SET title = ? WHERE id = ?').run(title, visitId);
+  }
+
+  setVisitParent(visitId: string, parentVisitId: string | null): void {
+    this.db.prepare('UPDATE visits SET parent_visit_id = ? WHERE id = ?').run(parentVisitId, visitId);
+  }
+
+  reparentChildren(visitId: string, parentVisitId: string | null): void {
+    this.db.prepare('UPDATE visits SET parent_visit_id = ? WHERE parent_visit_id = ?').run(parentVisitId, visitId);
+  }
+
+  deleteVisit(id: string): void {
+    this.db.prepare('UPDATE conversations SET current_visit_id = NULL WHERE current_visit_id = ?').run(id);
+    this.db.prepare('DELETE FROM visits WHERE id = ?').run(id);
   }
 
   countVisitsOfConcept(conceptId: string): number {
