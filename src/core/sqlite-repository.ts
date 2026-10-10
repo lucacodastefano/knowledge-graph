@@ -78,7 +78,7 @@ export class SqliteRepository implements Repository {
   }
 
   listConversations(): Conversation[] {
-    return this.db.prepare('SELECT * FROM conversations ORDER BY last_activity_at DESC').all().map(toConversation);
+    return this.db.prepare('SELECT * FROM conversations ORDER BY last_activity_at DESC, rowid DESC').all().map(toConversation);
   }
 
   setCurrentVisit(conversationId: string, visitId: string | null): void {
@@ -187,7 +187,7 @@ export class SqliteRepository implements Repository {
   }
 
   rankConcepts(order: 'visits' | 'recent', limit: number): Concept[] {
-    const orderBy = order === 'visits' ? 'visit_count DESC, c.last_seen_at DESC' : 'c.last_seen_at DESC';
+    const orderBy = order === 'visits' ? 'visit_count DESC, c.last_seen_at DESC' : 'c.last_seen_at DESC, c.rowid DESC';
     return this.db.prepare(`${CONCEPT_SELECT} ORDER BY ${orderBy} LIMIT ?`).all(limit).map(toConcept);
   }
 
