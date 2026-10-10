@@ -1,10 +1,13 @@
 import { useRef, useState } from 'react';
 import { Handle, NodeToolbar, Position, type NodeProps } from '@xyflow/react';
-import type { VisitNode as VisitNodeType } from './layout.ts';
+import { HANDLES, type VisitNode as VisitNodeType } from './layout.ts';
+
+const POSITION = { left: Position.Left, right: Position.Right, center: Position.Top };
 
 /**
  * A concept visit. Hovering shows the short summary beside the node, on the side with more room, with an
  * "Approfondisci" button (D7, WP6); only one tooltip is open at a time and it never blocks clicks on the canvas.
+ * The view highlights the hovered or clicked node with its relatives (`focus`, `related`) and fades the rest (`dim`).
  */
 export function VisitNode({ data }: NodeProps<VisitNodeType>) {
   const { visit, current, fresh, hovered, match } = data;
@@ -20,19 +23,26 @@ export function VisitNode({ data }: NodeProps<VisitNodeType>) {
   return (
     <div
       ref={ref}
-      className={`visit${data.also.length ? ' shared' : ''}${current ? ' current' : ''}${fresh ? ' fresh' : ''}${match ? ' match' : ''}`}
+      className={`visit${data.also.length ? ' shared' : ''}${current ? ' current' : ''}${fresh ? ' fresh' : ''}${match ? ' match' : ''}${
+        data.focus ? ' focus' : data.related ? ' related' : data.dim ? ' dim' : ''
+      }`}
       onMouseEnter={show}
       onMouseLeave={hide}
       data-testid="visit"
     >
-      <Handle type="target" position={data.handles === 'rl' ? Position.Right : Position.Left} className={data.handles} />
+      {/* Every handle is always mounted: edges pick theirs by id, so a node changing side never leaves stale positions. */}
+      {HANDLES.map((h) => (
+        <Handle key={`t-${h}`} id={`t-${h}`} type="target" position={POSITION[h]} className={h} />
+      ))}
+      {HANDLES.map((h) => (
+        <Handle key={`s-${h}`} id={`s-${h}`} type="source" position={POSITION[h]} className={h} />
+      ))}
       <span className="visit-title">{visit.title}</span>
       {data.also.length > 0 && (
         <span className="also" title={`Anche in: ${data.also.join(', ')}`}>
           anche in: {data.also.join(', ')}
         </span>
       )}
-      <Handle type="source" position={data.handles === 'rl' ? Position.Left : Position.Right} className={data.handles} />
       <NodeToolbar isVisible={hovered} position={side} offset={10}>
         <div className="tooltip passive" role="tooltip">
           <p>{visit.summary || 'Nessun riassunto.'}</p>

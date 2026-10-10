@@ -47,7 +47,7 @@ Alternativa scartata: ogni client avvia il suo server stdio e tutti scrivono sul
 | Server HTTP | **Fastify** | Leggero, già usato in LocalChat, WebSocket via plugin | Hono, Express |
 | Persistenza | **SQLite** (WAL) + **FTS5** via `node:sqlite` | Un file = backup facile (RNF8); 10k concetti sono pochi; FTS5 per ricerca e concetti simili | Neo4j (troppo pesante per un tool locale), DB a grafo embedded (ecosistema fragile) |
 | Somiglianza concetti (RF6) | **Lessicale** (FTS5 + nome normalizzato) | Zero dipendenze, decide comunque il modello | Embedding locali: in backlog se la lessicale non basta |
-| Vista conversazione | **React + React Flow** con layout **ELK**: radiale (predefinito), mappa mentale (due layered affiancati) o albero layered | Nodi HTML ricchi: tooltip con "Approfondisci" banale; ≤500 nodi fluidi | Cytoscape.js |
+| Vista conversazione | **React + React Flow** con layout radiale (predefinito, spicchi proporzionali alle foglie, anelli allargati finché i nodi non si sovrappongono), mappa mentale (due layered **ELK** affiancati, bilanciati per foglie) o albero layered **ELK**; i collegamenti tratteggiati girano attorno ai nodi (percorso su griglia) | Nodi HTML ricchi: tooltip con "Approfondisci" banale; ≤500 nodi fluidi | Cytoscape.js |
 | Vista personale | **Sigma.js** (WebGL) + layout force | 10k nodi fluidi (RNF7) | Cytoscape.js (unica libreria per entrambe, ma lenta oltre qualche migliaio) |
 | Tempo reale | **WebSocket**, eventi dal dominio | Latenza < 1 s (RNF4) | SSE |
 | Distribuzione | **pacchetto npm**: `npx knowledge-graph` | Un comando (RNF2) | Binario singolo, Docker |
