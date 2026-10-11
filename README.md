@@ -3,8 +3,8 @@
 A canvas that starts blank and grows a **concept graph while you chat with an LLM**.
 The model writes to it through [MCP](https://modelcontextprotocol.io): every new topic becomes a node, every drill-down hangs new nodes under it, and hovering a node shows what the model told you about it.
 
-- **Conversation view**: the path you took, as a tree; concepts you come back to are joined by dashed links.
-- **Personal graph**: every concept you ever explored, across all conversations.
+- **Graph**: the path you took, as a tree; concepts you come back to are joined by dashed links.
+- **Global graph**: every concept you ever explored, across all graphs.
 - **The model remembers**: before explaining a topic it can check what you already know and build on it.
 - **Model-agnostic and local**: any MCP client can feed it; data stays in one SQLite file on your machine. No API keys, no telemetry.
 
@@ -39,7 +39,7 @@ The **[user manual](docs/MANUAL.md)** covers every client (Claude Code, Claude D
 
 | Tool | Purpose |
 |---|---|
-| `kc_start` | Start a conversation, or resume one (same title, `resume`, similar maps offered) |
+| `kc_start` | Start a graph, or resume one (same title, `resume`, similar graphs offered) |
 | `kc_track` | Add the concept nodes of an answer (batch) |
 | `kc_edit` | Change part of a node (replace, append, summary, sources) without resending it |
 | `kc_focus` | Go back to a node already on the canvas |
@@ -48,7 +48,7 @@ The **[user manual](docs/MANUAL.md)** covers every client (Claude Code, Claude D
 | `kc_rename` | Rename a node |
 | `kc_remove` | Remove a node; its children move up |
 | `kc_recall` | What the user already explored about a topic |
-| `kc_tree` | Outline of a conversation, with its relations |
+| `kc_tree` | Outline of a graph, with its relations |
 | `kc_read` | Full text of one node, with its children's titles |
 | `kc_profile` | Overview of the user's knowledge |
 

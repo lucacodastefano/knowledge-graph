@@ -14,49 +14,30 @@ const H = 190;
 const PAD = { l: 44, r: 12, t: 10, b: 24 };
 
 const fmt = (n: number) => (n >= 10_000 ? `${Math.round(n / 1000)}k` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(Math.round(n)));
-const label = (t: string, bucket: 'hour' | 'day') => (bucket === 'hour' ? `${t.slice(11, 13)}:00` : t.slice(5, 10).split('-').reverse().join('/'));
 
-interface Line {
-  name: string;
-  color: string;
-  values: (number | null)[];
-}
-
-/** Dependency-free SVG line chart; the x labels are the first, middle and last bucket. */
-function LineChart({ labels, lines, testId }: { labels: string[]; lines: Line[]; testId: string }) {
-  const max = Math.max(1, ...lines.flatMap((l) => l.values.filter((v): v is number => v !== null)));
-  const n = labels.length;
-  const x = (i: number) => PAD.l + (n <= 1 ? (W - PAD.l - PAD.r) / 2 : (i / (n - 1)) * (W - PAD.l - PAD.r));
-  const y = (v: number) => PAD.t + (1 - v / max) * (H - PAD.t - PAD.b);
-  const ticks = [0, 0.5, 1].map((f) => f * max);
-  const shown = [...new Set([0, Math.floor((n - 1) / 2), n - 1])].filter((i) => i >= 0 && i < n);
+/** Dependency-free SVG chart with numeric axes: x = graph size, y = tokens. `line` joins the points in time order, otherwise they are dots. */
+function XYChart({ points, line, xName, yName, testId }: { points: { x: number; y: number }[]; line?: boolean; xName: string; yName: string; testId: string }) {
+  const maxX = Math.max(1, ...points.map((p) => p.x));
+  const maxY = Math.max(1, ...points.map((p) => p.y));
+  const x = (v: number) => PAD.l + (v / maxX) * (W - PAD.l - PAD.r);
+  const y = (v: number) => PAD.t + (1 - v / maxY) * (H - PAD.t - PAD.b);
   return (
     <div data-testid={testId}>
       <svg viewBox={`0 0 ${W} ${H}`} className="chart" role="img">
-        {ticks.map((t) => (
-          <g key={t}>
-            <line x1={PAD.l} x2={W - PAD.r} y1={y(t)} y2={y(t)} className="grid" />
-            <text x={PAD.l - 6} y={y(t) + 4} textAnchor="end" className="axis">{fmt(t)}</text>
+        {[0, 0.5, 1].map((f) => (
+          <g key={f}>
+            <line x1={PAD.l} x2={W - PAD.r} y1={y(f * maxY)} y2={y(f * maxY)} className="grid" />
+            <text x={PAD.l - 6} y={y(f * maxY) + 4} textAnchor="end" className="axis">{fmt(f * maxY)}</text>
+            <text x={x(f * maxX)} y={H - 6} textAnchor={f === 0 ? 'start' : f === 1 ? 'end' : 'middle'} className="axis">{fmt(f * maxX)}</text>
           </g>
         ))}
-        {shown.map((i) => (
-          <text key={i} x={x(i)} y={H - 6} textAnchor={i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'} className="axis">{labels[i]}</text>
-        ))}
-        {lines.map((l) => {
-          const pts = l.values.flatMap((v, i) => (v === null ? [] : [[x(i), y(v)] as const]));
-          return (
-            <g key={l.name}>
-              {pts.length > 1 && <polyline points={pts.map((p) => p.join(',')).join(' ')} fill="none" stroke={l.color} strokeWidth={2} />}
-              {pts.length === 1 && <circle cx={pts[0][0]} cy={pts[0][1]} r={3} fill={l.color} />}
-            </g>
-          );
-        })}
+        {line && points.length > 1 ? (
+          <polyline points={points.map((p) => `${x(p.x)},${y(p.y)}`).join(' ')} fill="none" stroke="var(--c1)" strokeWidth={2} />
+        ) : (
+          points.map((p, i) => <circle key={i} cx={x(p.x)} cy={y(p.y)} r={3} fill="var(--c2)" fillOpacity={0.6} />)
+        )}
       </svg>
-      <div className="chart-legend">
-        {lines.map((l) => (
-          <span key={l.name}><i style={{ background: l.color }} />{l.name}</span>
-        ))}
-      </div>
+      <div className="chart-legend"><span>x: {xName}</span><span>y: {yName}</span></div>
     </div>
   );
 }
@@ -117,8 +98,8 @@ export function MetricsView({ live }: { live: LiveEvent | null }) {
     <div className="metrics" data-testid="metrics">
       <div className="metrics-head">
         <h2>Metriche</h2>
-        <select aria-label="Mappa" value={conversation} onChange={(e) => setConversation(e.target.value)}>
-          <option value="">Tutte le mappe</option>
+        <select aria-label="Grafo" value={conversation} onChange={(e) => setConversation(e.target.value)}>
+          <option value="">Tutti i grafi</option>
           {conversations.map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}
         </select>
         <select aria-label="Periodo" value={period} onChange={(e) => setPeriod(e.target.value as Period)}>
@@ -140,34 +121,14 @@ export function MetricsView({ live }: { live: LiveEvent | null }) {
             <Stat value={m.efficiency.tokensPerNode === null ? '–' : fmt(m.efficiency.tokensPerNode)} name="token per nodo" />
           </div>
           <div className="metric-grid">
-            <Card wide title="Token nel tempo" caption="Quanto costa costruire il grafo: token scritti dal modello e restituiti dagli strumenti, per periodo e cumulati.">
-              {m.tokens.series.length === 0 ? <p className="m-empty">Ancora nessuna chiamata nel periodo.</p> : (
-                <div className="two-charts">
-                  <div>
-                    <h4>Per {m.bucket === 'hour' ? 'ora' : 'giorno'}</h4>
-                    <LineChart testId="chart-tokens" labels={m.tokens.series.map((s) => label(s.t, m.bucket))} lines={[
-                      { name: 'Scritti dal modello', color: 'var(--c1)', values: m.tokens.series.map((s) => s.written) },
-                      { name: 'Letti dagli strumenti', color: 'var(--c2)', values: m.tokens.series.map((s) => s.read) },
-                    ]} />
-                  </div>
-                  <div>
-                    <h4>Cumulati</h4>
-                    <LineChart testId="chart-tokens-cum" labels={m.tokens.series.map((s) => label(s.t, m.bucket))} lines={[
-                      { name: 'Scritti dal modello', color: 'var(--c1)', values: m.tokens.series.map((s) => s.cumWritten) },
-                      { name: 'Letti dagli strumenti', color: 'var(--c2)', values: m.tokens.series.map((s) => s.cumRead) },
-                    ]} />
-                  </div>
-                </div>
+            <Card title="Costo cumulato e dimensione" caption="Quanti token sono costati i nodi del grafo: token spesi fin qui (y) contro numero di nodi (x).">
+              {m.size.length === 0 ? <p className="m-empty">Ancora nessuna chiamata nel periodo.</p> : (
+                <XYChart testId="chart-cost-size" line xName="nodi nel grafo" yName="token cumulati" points={m.size.map((p) => ({ x: p.nodes, y: p.cumTokens }))} />
               )}
             </Card>
-            <Card title="Crescita del grafo" caption="Mappe, concetti, nodi e relazioni nel tempo: il grafo cresce in proporzione ai token spesi?">
-              {m.growth.length === 0 ? <p className="m-empty">Ancora niente nel periodo.</p> : (
-                <LineChart testId="chart-growth" labels={m.growth.map((g) => label(g.t, m.bucket))} lines={[
-                  { name: 'Mappe', color: 'var(--c3)', values: m.growth.map((g) => g.maps) },
-                  { name: 'Concetti', color: 'var(--c1)', values: m.growth.map((g) => g.concepts) },
-                  { name: 'Nodi', color: 'var(--c2)', values: m.growth.map((g) => g.nodes) },
-                  { name: 'Relazioni', color: 'var(--c4)', values: m.growth.map((g) => g.relations) },
-                ]} />
+            <Card title="Costo per nodo e dimensione" caption="Ogni punto è una chiamata che ha creato nodi: se i punti salgono, aggiungere nodi costa di più man mano che il grafo cresce.">
+              {m.size.every((p) => p.perNode === null) ? <p className="m-empty">Ancora nessun nodo creato nel periodo.</p> : (
+                <XYChart testId="chart-pernode-size" xName="nodi nel grafo" yName="token per nodo creato" points={m.size.flatMap((p) => (p.perNode === null ? [] : [{ x: p.nodes, y: p.perNode }]))} />
               )}
             </Card>
             <Card title="Token per strumento" caption="Dove va il costo: token scritti più letti da ogni strumento.">
@@ -198,7 +159,7 @@ export function MetricsView({ live }: { live: LiveEvent | null }) {
                 <Stat value={`${m.memory.read.hits}/${m.memory.read.calls}`} name={`kc_read con risultato (${pct(m.memory.read.hits, m.memory.read.calls)})`} />
               </div>
             </Card>
-            <Card wide title="Qualità del grafo" caption="Lacune da colmare: nodi senza testo o fonti, concetti senza superclasse, titoli simili, profondità delle mappe.">
+            <Card wide title="Qualità del grafo" caption="Lacune da colmare: nodi senza testo o fonti, concetti senza superclasse, titoli simili, forma dell’albero.">
               <div className="quality" data-testid="quality">
                 <div className="stats small">
                   <Stat value={`${m.quality.withoutDetail}/${m.quality.nodes}`} name="nodi senza dettaglio" />
@@ -212,8 +173,13 @@ export function MetricsView({ live }: { live: LiveEvent | null }) {
                   )}
                 </div>
                 <div>
-                  <h4>Profondità dei nodi</h4>
+                  <h4>Nodi per livello</h4>
+                  <p className="caption">Quanti nodi stanno a ciascun livello dell’albero: barre lunghe ai primi livelli indicano un grafo largo e poco approfondito.</p>
                   <Bars testId="chart-depth" rows={m.quality.depth.map((n, i) => ({ name: `Livello ${i + 1}`, value: n }))} />
+                  <div className="stats small">
+                    <Stat value={String(m.quality.maxDepth)} name="profondità massima (livelli)" />
+                    <Stat value={m.quality.avgChildren === null ? '–' : String(m.quality.avgChildren).replace('.', ',')} name="figli medi per nodo che ha figli" />
+                  </div>
                 </div>
               </div>
             </Card>

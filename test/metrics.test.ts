@@ -23,27 +23,39 @@ const call = (over: Partial<ToolCall>): ToolCall => ({
   hit: null,
   ...over,
 });
-const emptyGraph: GraphSnapshot = { conversations: [], concepts: [], visits: [], relationTimes: [] };
+const emptyGraph: GraphSnapshot = { conversations: [], concepts: [], visits: [] };
 
 test('tokens are characters / 3.5, rounded up', () => {
   assert.equal(tokens(350), 100);
   assert.equal(tokens(1), 1);
 });
 
-test('token series: per hour, quiet hours filled, cumulative totals', () => {
-  const m = buildMetrics(
-    [call({}), call({ at: '2026-10-11T10:40:00.000Z' }), call({ at: '2026-10-11T12:10:00.000Z', argChars: 700 })],
-    emptyGraph,
-    { period: '24h' },
-    NOW,
-  );
-  assert.equal(m.bucket, 'hour');
-  assert.deepEqual(m.tokens.series.map((s) => s.t.slice(11, 13)), ['10', '11', '12']);
-  assert.deepEqual(m.tokens.series.map((s) => s.written), [200, 0, 200]);
-  assert.deepEqual(m.tokens.series.map((s) => s.cumWritten), [200, 200, 400]);
+test('token totals are characters / 3.5, split into written and read', () => {
+  const m = buildMetrics([call({}), call({ at: '2026-10-11T10:40:00.000Z' }), call({ at: '2026-10-11T12:10:00.000Z', argChars: 700 })], emptyGraph, { period: '24h' }, NOW);
   assert.equal(m.tokens.written, 400);
   assert.equal(m.tokens.read, 600);
   assert.equal(m.tokens.calls, 3);
+});
+
+test('size series: graph size, cumulative tokens and tokens per new node at every call', () => {
+  const v = (id: string, at: string, conversationId = 'c1') => ({ id, conversationId, conceptId: `k-${id}`, parentVisitId: null, at, hasDetail: true, sourceCount: 1 });
+  const graph: GraphSnapshot = {
+    conversations: [],
+    concepts: [],
+    visits: [v('a', '2026-10-11T10:04:00.000Z'), v('b', '2026-10-11T10:04:30.000Z'), v('x', '2026-10-11T10:50:00.000Z', 'c2')],
+    
+  };
+  const calls = [
+    call({ nodesCreated: 2 }),
+    call({ at: '2026-10-11T10:30:00.000Z', tool: 'kc_recall', nodesCreated: 0 }),
+    call({ at: '2026-10-11T11:00:00.000Z', conversationId: 'c2' }),
+  ];
+  const all = buildMetrics(calls, graph, { period: 'all' }, NOW).size;
+  assert.deepEqual(all.map((p) => p.nodes), [2, 2, 3]);
+  assert.deepEqual(all.map((p) => p.cumTokens), [300, 600, 900]);
+  assert.deepEqual(all.map((p) => p.perNode), [150, null, 300]);
+  const one = buildMetrics(calls, graph, { conversation: 'c2' }, NOW).size;
+  assert.deepEqual(one, [{ nodes: 1, cumTokens: 300, perNode: 300 }]);
 });
 
 test('per-tool stats, errors, efficiency and memory hits', () => {
@@ -79,7 +91,7 @@ test('conversation and period filters', () => {
   assert.equal(buildMetrics(calls, emptyGraph, { period: 'all', conversation: 'c2' }, NOW).tokens.calls, 1);
 });
 
-test('quality: missing detail / sources / superclass, duplicates, depth', () => {
+test('quality: missing detail / sources / superclass, duplicates, depth and branching', () => {
   const v = (id: string, parent: string | null, extra: object = {}) => ({
     id, conversationId: 'c1', conceptId: `k-${id}`, parentVisitId: parent, at: '2026-10-11T09:00:00.000Z', hasDetail: true, sourceCount: 1, ...extra,
   });
@@ -90,17 +102,16 @@ test('quality: missing detail / sources / superclass, duplicates, depth', () => 
       { id: 'k-b', name: 'Microservizi', at: '2026-10-11T09:00:00.000Z', hasSuperclass: false },
       { id: 'k-c', name: 'Event sourcing pattern', at: '2026-10-11T09:00:00.000Z', hasSuperclass: false },
     ],
-    visits: [v('a', null), v('b', 'a', { hasDetail: false }), v('c', 'b', { sourceCount: 0 })],
-    relationTimes: ['2026-10-11T09:30:00.000Z'],
+    visits: [v('a', null), v('b', 'a', { hasDetail: false }), v('c', 'b', { sourceCount: 0 }), v('d', 'a')],
   };
   const m = buildMetrics([], graph, { period: 'all' }, NOW);
-  assert.deepEqual(m.quality.depth, [1, 1, 1]);
+  assert.deepEqual(m.quality.depth, [1, 2, 1]);
+  assert.equal(m.quality.maxDepth, 3);
+  assert.equal(m.quality.avgChildren, 1.5); // a has 2 children, b has 1
   assert.equal(m.quality.withoutDetail, 1);
   assert.equal(m.quality.withoutSources, 1);
   assert.equal(m.quality.withoutSuperclass, 2);
   assert.deepEqual(m.quality.duplicates, [['Event sourcing', 'Event sourcing pattern']]);
-  const last = m.growth.at(-1)!;
-  assert.deepEqual([last.maps, last.concepts, last.nodes, last.relations], [1, 3, 3, 1]);
 });
 
 // --- logging through the real MCP layer ---

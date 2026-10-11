@@ -28,7 +28,7 @@ export function DeleteConversation({ id, title, onDeleted }: Props) {
   const remove = () => {
     setOpen(false);
     const ok = window.confirm(
-      `Cancellare la mappa «${title ?? 'senza titolo'}»?\n\nI concetti usati anche in altre conversazioni restano nel grafo personale; gli altri vengono rimossi con le loro relazioni.`,
+      `Cancellare il grafo «${title ?? 'senza titolo'}»?\n\nI concetti usati anche in altri grafi restano nel grafo globale; gli altri vengono rimossi con le loro relazioni.`,
     );
     if (ok) void api.deleteConversation(id).then(onDeleted);
   };
@@ -40,7 +40,7 @@ export function DeleteConversation({ id, title, onDeleted }: Props) {
       {open && (
         <div className="menu" role="menu">
           <button type="button" role="menuitem" className="danger-text" onClick={remove}>
-            Cancella mappa…
+            Cancella grafo…
           </button>
         </div>
       )}

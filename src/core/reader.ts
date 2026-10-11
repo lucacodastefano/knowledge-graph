@@ -143,7 +143,7 @@ export class Reader {
     const seen = new Set(top.map((c) => c.id));
     const recent = this.repo.rankConcepts('recent', MEMORY_TOPICS).filter((c) => !seen.has(c.id)).slice(0, MEMORY_TOPICS);
     return [
-      `User's graph (${total} concepts).`,
+      `Global graph (${total} concepts).`,
       ...(areas.length ? [`Areas: ${areas.join(', ')}`] : []),
       ...(top.length ? [`Most explored: ${top.map((c) => `${c.name} ×${c.visitCount}`).join(', ')}`] : []),
       ...(recent.length ? [`Recent: ${recent.map((c) => c.name).join(', ')}`] : []),
@@ -191,9 +191,9 @@ export class Reader {
    */
   tree(conversationId: string | null, withSummaries: boolean, compact = false, touched?: Set<string>, open?: { root?: string; depth?: number; relations?: boolean; orient?: boolean }): string {
     const id = conversationId ?? this.repo.listConversations()[0]?.id;
-    if (!id) return 'No conversations yet.';
+    if (!id) return 'No graphs yet.';
     const tree = this.repo.getTree(id);
-    if (!tree) throw new TrackerError(`Conversation ${id} not found`);
+    if (!tree) throw new TrackerError(`Graph ${id} not found`);
 
     const { conversation, visits } = tree;
     if (compact && visits.length === 0) return 'Tree: empty';
@@ -215,7 +215,7 @@ export class Reader {
       const ref = open.root.trim();
       const norm = normalizeName(ref);
       const root = byId.get(ref) ?? visits.findLast((v) => normalizeName(v.title) === norm);
-      if (!root) throw new TrackerError(`Node "${ref}" not found in this conversation`);
+      if (!root) throw new TrackerError(`Node "${ref}" not found in this graph`);
       top = root.id;
     }
     const subtree = (parent: string | null, depth: number, into: number[]) => {
@@ -285,7 +285,7 @@ export class Reader {
     let visit = visits.find((v) => v.id === q) ?? visits.findLast((v) => normalizeName(v.title) === norm);
     if (!visit) {
       const concept = this.repo.findConceptByNorm(norm);
-      if (!concept) throw new TrackerError(`"${q}" not found in this conversation or in the user's graph`);
+      if (!concept) throw new TrackerError(`"${q}" not found in this graph or in the global graph`);
       const all = this.repo.getConceptDetail(concept.id)?.visits ?? [];
       visit = all.find((v) => v.detail) ?? all[0];
       if (!visit) throw new TrackerError(`"${q}" has no text yet`);

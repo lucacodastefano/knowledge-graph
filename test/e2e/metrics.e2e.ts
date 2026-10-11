@@ -1,4 +1,4 @@
-/** End-to-end: the Metriche panel shows token charts, tool bars and quality for logged calls. Needs `npm run build:web`. */
+/** End-to-end: the Metriche panel shows cost-vs-size charts, tool bars and quality for logged calls. Needs `npm run build:web`. */
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync } from 'node:fs';
@@ -46,9 +46,10 @@ test('the Metriche tab shows the charts and updates with the filters', async () 
   const page = await browser.newPage({ viewport: { width: 1280, height: 1500 } });
   await page.goto(`${base}/#metriche`);
   await page.getByTestId('metrics').waitFor();
-  await page.getByTestId('chart-tokens').locator('polyline').first().waitFor();
-  assert.equal(await page.getByTestId('chart-tokens').locator('polyline').count(), 2);
-  assert.equal(await page.getByTestId('chart-tokens-cum').locator('polyline').count(), 2);
+  await page.getByTestId('chart-cost-size').locator('polyline').waitFor();
+  assert.ok((await page.getByTestId('chart-pernode-size').locator('circle').count()) >= 1);
+  assert.equal(await page.getByText('Crescita del grafo').count(), 0);
+  assert.match((await page.getByTestId('quality').textContent()) ?? '', /profondità massima/);
   assert.match((await page.getByTestId('chart-tools').textContent()) ?? '', /kc_track/);
   assert.match((await page.getByTestId('table-errors').textContent()) ?? '', /kc_read/);
   assert.match((await page.getByTestId('memory').textContent()) ?? '', /1\/1/);
@@ -58,7 +59,7 @@ test('the Metriche tab shows the charts and updates with the filters', async () 
   await page.screenshot({ path: join(out, 'metriche.png'), fullPage: true });
 
   await page.getByLabel('Periodo').selectOption('24h');
-  await page.getByLabel('Mappa').selectOption(conv.id);
-  await page.getByTestId('chart-tokens').waitFor();
+  await page.getByLabel('Grafo', { exact: true }).selectOption(conv.id);
+  await page.getByTestId('chart-cost-size').waitFor();
   await page.close();
 });

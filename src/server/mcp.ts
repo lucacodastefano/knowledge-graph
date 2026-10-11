@@ -11,13 +11,13 @@ import { meterTools } from './metering.ts';
 export interface McpSessionState {
   conversationId: string | null;
   client: string | null;
-  /** Title given to kc_start while similar maps were on offer: the map is created on the first kc_track unless one is resumed. */
+  /** Title given to kc_start while similar maps were on offer: the graph is created on the first kc_track unless one is resumed. */
   pendingTitle?: string | null;
 }
 
 const ok = (data: unknown): CallToolResult => ({ content: [{ type: 'text', text: JSON.stringify(data) }] });
 const text = (data: string): CallToolResult => ({ content: [{ type: 'text', text: data }] });
-export const TRACKED_NOTE = 'Saved in the map. Write your answer now, once.';
+export const TRACKED_NOTE = 'Saved in the graph. Write your answer now, once.';
 export const START_NOTE = 'Before each answer that explains a concept, call kc_track with its nodes, then write the answer.';
 /** A kc_track error: the batch is atomic, so the model must retry instead of claiming it was recorded. */
 export const TRACK_FAILED = 'Nothing was recorded. Fix this and call kc_track again before answering.';
@@ -83,7 +83,7 @@ export function createMcpServer(tracker: Tracker, state: McpSessionState): McpSe
     'kc_start',
     {
       description:
-        'Start the canvas conversation at the first real topic of every chat (once per chat; a new topic is kc_track with parent "root"). To continue an earlier map ("continue the research on X"), pass resume: its id or title.',
+        'Start the canvas graph at the first real topic of every chat (once per chat; a new topic is kc_track with parent "root"). To continue an earlier graph ("continue the research on X"), pass resume: its id or title.',
       inputSchema: { title: z.string().optional(), resume: z.string().optional() },
     },
     ({ title, resume }) =>
@@ -97,7 +97,7 @@ export function createMcpServer(tracker: Tracker, state: McpSessionState): McpSe
           c = tracker.findConversation(resume);
         } else if (same) {
           c = same;
-          note = `Resumed the existing map "${c.title}" instead of creating another. ${START_NOTE}`;
+          note = `Resumed the existing graph "${c.title}" instead of creating another. ${START_NOTE}`;
         } else {
           similar = title ? reader.similarMaps(title) : [];
           // With similar maps on offer the new one is held back until the model decides, so no empty duplicate is left.
@@ -107,8 +107,8 @@ export function createMcpServer(tracker: Tracker, state: McpSessionState): McpSe
         state.conversationId = c?.id ?? null;
         const lines = similar.length
           ? [
-              `Similar maps: ${similar.map((m) => `"${m.title}" [${m.id}] ${m.last}, ${m.nodes} nodes`).join('; ')}`,
-              'To continue one, call kc_start(resume: its id or title) instead of starting another. Otherwise kc_track starts a new map.',
+              `Similar graphs: ${similar.map((m) => `"${m.title}" [${m.id}] ${m.last}, ${m.nodes} nodes`).join('; ')}`,
+              'To continue one, call kc_start(resume: its id or title) instead of starting another. Otherwise kc_track starts a new graph.',
             ]
           : [];
         const result = ok({ conversation: state.conversationId });
@@ -172,7 +172,7 @@ export function createMcpServer(tracker: Tracker, state: McpSessionState): McpSe
   server.registerTool(
     'kc_focus',
     {
-      description: 'Make a node of this conversation\'s map current again. To go deeper, kc_track its parts instead.',
+      description: 'Make a node of this graph current again. To go deeper, kc_track its parts instead.',
       inputSchema: { node: z.string().describe('Title or id') },
     },
     ({ node }) =>
@@ -271,9 +271,9 @@ export function createMcpServer(tracker: Tracker, state: McpSessionState): McpSe
   server.registerTool(
     'kc_tree',
     {
-      description: 'Outline of a conversation (default: this one, else the latest), with its relations. A big map shows 2 levels, collapsed branches as (+N): open one with root.',
+      description: 'Outline of a graph (default: this one, else the latest), with its relations. A big graph shows 2 levels, collapsed branches as (+N): open one with root.',
       inputSchema: {
-        conversation: z.string().optional().describe('Conversation id'),
+        conversation: z.string().optional().describe('Graph id'),
         summaries: z.boolean().optional().describe('Include node texts'),
         root: z.string().optional().describe('Title of a node: outline only its branch'),
         depth: z.number().int().min(1).optional().describe('Levels to show (default 2 on a big map)'),
@@ -287,7 +287,7 @@ export function createMcpServer(tracker: Tracker, state: McpSessionState): McpSe
   server.registerTool(
     'kc_read',
     {
-      description: 'Full text of one node (title in this conversation, or a concept of the user\'s graph) and its children\'s titles.',
+      description: 'Full text of one node (title in this graph, or a concept of the global graph) and its children\'s titles.',
       inputSchema: { node: z.string().describe('Title') },
     },
     ({ node }) => guarded(() => text(reader.read(state.conversationId, node))),
@@ -295,13 +295,13 @@ export function createMcpServer(tracker: Tracker, state: McpSessionState): McpSe
 
   server.registerTool(
     'kc_profile',
-    { description: "Overview of the user's knowledge: top and recent concepts, last conversations." },
+    { description: "Overview of the global graph: top and recent concepts, last graphs." },
     () => guarded(() => ok(reader.profile())),
   );
 
   server.registerPrompt(
     'kc_instructions',
-    { description: 'How to keep the knowledge-graph canvas up to date during a conversation.' },
+    { description: 'How to keep the knowledge-graph canvas up to date during a chat.' },
     () => ({ messages: [{ role: 'user', content: { type: 'text', text: trackingInstructions(tracker.settings()) } }] }),
   );
 

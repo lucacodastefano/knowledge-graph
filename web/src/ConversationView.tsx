@@ -871,10 +871,10 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
           className="bar-map"
           value={pinned}
           onChange={(e) => setPinned(e.target.value)}
-          aria-label="Conversazione"
-          title={conversations.find((c) => c.id === pinned)?.title ?? "Segui l'ultima conversazione"}
+          aria-label="Grafo"
+          title={conversations.find((c) => c.id === pinned)?.title ?? "Segui l'ultimo grafo"}
         >
-          <option value={AUTO}>Segui l'ultima conversazione</option>
+          <option value={AUTO}>Segui l'ultimo grafo</option>
           {conversations.map((c) => (
             <option key={c.id} value={c.id}>
               {c.title} · {new Date(c.startedAt).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })}

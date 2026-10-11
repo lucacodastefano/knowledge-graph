@@ -736,9 +736,9 @@ export function PersonalView({ live, found, onOpenConcept, onBackgroundClick, fo
       for (const g of groups.values()) {
         if (g.key === 'isolated') g.name = 'Concetti isolati';
         else if (g.key === 'c:other') g.name = 'Altre comunità';
-        else if (g.key === 'v:other') g.name = 'Altre conversazioni';
+        else if (g.key === 'v:other') g.name = 'Altri grafi';
         else if (g.key.startsWith('c:')) g.name = nameOfCommunity(g.key.slice(2));
-        else g.name = conversations.current.get(g.key.slice(2)) ?? 'Conversazione';
+        else g.name = conversations.current.get(g.key.slice(2)) ?? 'Grafo';
       }
       const order = (g: Group) => (g.slot >= 0 ? 0 : g.key === 'isolated' ? 2 : 1);
       setLegend([...groups.values()].sort((a, b) => order(a) - order(b) || b.count - a.count));
@@ -866,11 +866,11 @@ export function PersonalView({ live, found, onOpenConcept, onBackgroundClick, fo
               }}
             >
               <option value="community">per comunità</option>
-              <option value="conversation">per conversazione</option>
+              <option value="conversation">per grafo</option>
             </select>
           </label>
-          <select aria-label="Filtra conversazione" value={conversation} onChange={(e) => setConversation(e.target.value)}>
-            <option value="">Tutte le conversazioni</option>
+          <select aria-label="Filtra grafo" value={conversation} onChange={(e) => setConversation(e.target.value)}>
+            <option value="">Tutti i grafi</option>
             {conversationList.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.title}
@@ -918,8 +918,8 @@ export function PersonalView({ live, found, onOpenConcept, onBackgroundClick, fo
         <div ref={container} className="sigma" data-testid="personal-graph" data-level={overview ? 'overview' : 'detail'} />
         {count === 0 && (
           <div className="empty">
-            <p>Il grafo personale è vuoto.</p>
-            <p className="muted">Ogni concetto esplorato in una conversazione comparirà qui.</p>
+            <p>Il grafo globale è vuoto.</p>
+            <p className="muted">Ogni concetto esplorato in un grafo comparirà qui.</p>
           </div>
         )}
         {count !== null && count > 0 && legend.length > 0 && (
@@ -933,7 +933,7 @@ export function PersonalView({ live, found, onOpenConcept, onBackgroundClick, fo
                 store('kg.personal.legend', !legendOpen);
               }}
             >
-              {colorBy === 'community' ? 'Comunità' : 'Conversazioni'} <span aria-hidden="true">{legendOpen ? '▾' : '▸'}</span>
+              {colorBy === 'community' ? 'Comunità' : 'Grafi'} <span aria-hidden="true">{legendOpen ? '▾' : '▸'}</span>
             </button>
             {legendOpen && (
               <ul aria-label="Legenda">
