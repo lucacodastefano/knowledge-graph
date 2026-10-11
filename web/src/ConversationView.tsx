@@ -447,6 +447,14 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
       if ((e.key === 'Delete' || e.key === 'Backspace') && armed) {
         e.preventDefault();
         removeRelation(armed);
+      } else if ((e.key === 'Delete' || e.key === 'Backspace') && selected) {
+        // The selected node goes (its children move up to its parent); the concept is dropped if nothing else uses it.
+        e.preventDefault();
+        const v = tree?.visits.find((x) => x.id === selected);
+        if (!v || !window.confirm(`Eliminare il nodo «${v.title}»? I suoi figli salgono al padre.`)) return;
+        setSelected(null);
+        setNotice(null);
+        api.deleteVisit(v.id).catch(fail);
       } else if (mod && key === 'z' && !e.shiftKey) {
         e.preventDefault();
         travel(undoStack.current, redoStack.current, 'undo');
@@ -457,7 +465,7 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
     };
     addEventListener('keydown', onKey);
     return () => removeEventListener('keydown', onKey);
-  }, [armed, removeRelation, travel]);
+  }, [armed, selected, tree, fail, removeRelation, travel]);
   // Keeps React Flow's measured sizes in our state: without them every rebuild resets nodes to
   // unmeasured (hidden), and a rebuild racing the resize observer can leave them hidden for good.
   const onNodesChange = useCallback(

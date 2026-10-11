@@ -656,6 +656,12 @@ test('hovering an edge lifts it with its label and fades what covers it; draggin
   await panel.waitFor({ state: 'detached' });
   assert.equal(await page.getByRole('tooltip').count(), 0);
   await page.mouse.up();
+
+  // Canc deletes the selected node after a confirmation; its children move up.
+  await titled(page, 'Ramo uno').click();
+  page.once('dialog', (d) => void d.accept());
+  await page.keyboard.press('Delete');
+  await titled(page, 'Ramo uno').waitFor({ state: 'detached' });
   await page.close();
 });
 
