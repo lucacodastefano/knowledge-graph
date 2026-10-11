@@ -134,7 +134,18 @@ const radiusOf = (pos: Map<string, Point>) => {
  * possible to the communities it links to (or to the centre), searching on a spiral.
  */
 function pack(ids: string[], radius: Map<string, number>, links: Map<string, Map<string, number>>, rng: () => number): Map<string, Point> {
-  const placed: { id: string; x: number; y: number; r: number }[] = [];
+  // Placed circles are kept in a grid, so a candidate spot looks at the 3x3 cells around it instead of every circle placed so
+  // far (the spiral search was quadratic: 110 s at 10,000 concepts). Cells fit the usual circles; the few huge ones (an
+  // isolated grid of thousands) are kept apart and always checked, and a huge candidate checks everything.
+  const sorted = [...radius.values()].sort((x, y) => x - y);
+  const median = sorted[Math.floor(sorted.length / 2)] ?? 0;
+  // "Usual" circles: up to four times the median; the biggest of those sets the cell size.
+  const usual = sorted.filter((r) => r <= 4 * median).at(-1) ?? 0;
+  const cell = 2 * usual + GAP;
+  const grid = new Map<string, { x: number; y: number; r: number }[]>();
+  const huge: { x: number; y: number; r: number }[] = [];
+  const everyone: { x: number; y: number; r: number }[] = [];
+  const cellOf = (x: number, y: number) => [Math.floor(x / cell), Math.floor(y / cell)] as const;
   const centre = new Map<string, Point>();
   // Communities linked to nothing spiral out from the centre: resume where the last one landed.
   let lastFree = 0;
@@ -154,7 +165,18 @@ function pack(ids: string[], radius: Map<string, number>, links: Map<string, Map
       tx /= tw;
       ty /= tw;
     }
-    const free = (x: number, y: number) => placed.every((p) => Math.hypot(p.x - x, p.y - y) >= p.r + r + GAP);
+    const clash = (p: { x: number; y: number; r: number }, x: number, y: number) => Math.hypot(p.x - x, p.y - y) < p.r + r + GAP;
+    const free = (x: number, y: number) => {
+      if (r > usual) return !everyone.some((p) => clash(p, x, y));
+      if (huge.some((p) => clash(p, x, y))) return false;
+      const [ci, cj] = cellOf(x, y);
+      for (let i = ci - 1; i <= ci + 1; i++) {
+        for (let j = cj - 1; j <= cj + 1; j++) {
+          for (const p of grid.get(`${i},${j}`) ?? []) if (clash(p, x, y)) return false;
+        }
+      }
+      return true;
+    };
     const step = Math.max(GAP / 2, r / 3);
     const phase = rng() * Math.PI * 2;
     const first = tw > 0 ? 1 : Math.max(1, Math.floor((lastFree - GAP) / step));
@@ -168,7 +190,13 @@ function pack(ids: string[], radius: Map<string, number>, links: Map<string, Map
       }
     }
     if (tw === 0) lastFree = Math.max(lastFree, Math.hypot(spot.x, spot.y));
-    placed.push({ id, x: spot.x, y: spot.y, r });
+    const circle = { x: spot.x, y: spot.y, r };
+    everyone.push(circle);
+    if (r > usual) huge.push(circle);
+    else {
+      const [ci, cj] = cellOf(spot.x, spot.y);
+      grid.set(`${ci},${cj}`, [...(grid.get(`${ci},${cj}`) ?? []), circle]);
+    }
     centre.set(id, spot);
   }
   return centre;

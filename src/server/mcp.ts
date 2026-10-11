@@ -269,14 +269,16 @@ export function createMcpServer(tracker: Tracker, state: McpSessionState): McpSe
   server.registerTool(
     'kc_tree',
     {
-      description: 'Outline of a conversation (default: this one, else the latest), with its relations.',
+      description: 'Outline of a conversation (default: this one, else the latest), with its relations. A big map is cut by depth: open a branch with node.',
       inputSchema: {
         conversation: z.string().optional().describe('Conversation id'),
         summaries: z.boolean().optional().describe('Include node texts'),
+        node: z.string().optional().describe('Open this branch (title) of a map that was cut'),
+        depth: z.number().int().min(1).optional().describe('Levels to show'),
       },
     },
-    ({ conversation, summaries }) =>
-      guarded(() => text(reader.tree(conversation ?? state.conversationId, summaries ?? false))),
+    ({ conversation, summaries, node, depth }) =>
+      guarded(() => text(reader.tree(conversation ?? state.conversationId, summaries ?? false, false, undefined, { node, depth }))),
   );
 
   server.registerTool(

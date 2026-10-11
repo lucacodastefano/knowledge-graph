@@ -62,6 +62,12 @@ const treeEdges = (visits: Visit[]) =>
 /** The invisible centre joining several roots takes almost no room. */
 const box = (id: string) => (id === VIRTUAL_ROOT ? { id, width: 1, height: NODE_H } : { id, width: NODE_W, height: NODE_H });
 
+/**
+ * Beyond this many nodes the layered layout stops honouring the model's order of siblings: that option made ELK take
+ * 2 s at 300 nodes and over a minute at 1,000, against under a second without it.
+ */
+const KEEP_ORDER_MAX = 150;
+
 /** Layered layout of some nodes; edges only follow the tree, so cross-links never distort it. */
 async function layered(visits: Visit[], direction: 'RIGHT' | 'LEFT') {
   const graph = await elk.layout({
@@ -71,7 +77,7 @@ async function layered(visits: Visit[], direction: 'RIGHT' | 'LEFT') {
       'elk.direction': direction,
       'elk.layered.spacing.nodeNodeBetweenLayers': '70',
       'elk.spacing.nodeNode': '22',
-      'elk.layered.considerModelOrder.strategy': 'NODES_AND_EDGES',
+      ...(visits.length <= KEEP_ORDER_MAX ? { 'elk.layered.considerModelOrder.strategy': 'NODES_AND_EDGES' } : {}),
     },
     children: visits.map((v) => box(v.id)),
     edges: treeEdges(visits),

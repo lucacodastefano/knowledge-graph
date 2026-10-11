@@ -38,6 +38,9 @@ CREATE TABLE IF NOT EXISTS concept_links (
   PRIMARY KEY (from_concept_id, to_concept_id, kind)
 );
 
+-- "Who is under this superclass": without it every superclass lookup scans all links (2.5 s per kc_start at 10,000 concepts).
+CREATE INDEX IF NOT EXISTS concept_links_to ON concept_links(to_concept_id, kind);
+
 -- Previous values of every manual or model edit (D16): history for a future versioning UI.
 CREATE TABLE IF NOT EXISTS revisions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

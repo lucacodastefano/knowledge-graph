@@ -168,3 +168,37 @@ test('the text index is built from existing nodes when a database from before it
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('a big outline is cut by depth and a branch can be opened (kc_tree node / depth)', async () => {
+  const { Reader, TREE_MAX_NODES } = await import('../src/core/reader.ts');
+  const t = new Tracker(new SqliteRepository(':memory:'));
+  const reader = new Reader(t.repo);
+  const c = t.startConversation('Grande', null);
+  // 5 branches of 3 levels: 5 + 5*6 + 5*6*6 = 215 nodes, over the cap.
+  const names = (i: number) => `n${String.fromCharCode(97 + (i % 26))}${String.fromCharCode(97 + (Math.floor(i / 26) % 26))}${Math.floor(i / 676)}x`;
+  let n = 0;
+  const add = (parent: string, kids: number, depth: number) => {
+    for (let k = 0; k < kids; k++) {
+      const title = `Concetto ${names(n++)}`;
+      t.track(c.id, [{ title, summary: 's.', parent }]);
+      if (depth > 1) add(title, 6, depth - 1);
+    }
+  };
+  add('root', 5, 3);
+  const total = t.repo.getTree(c.id)!.visits.length;
+  assert.ok(total > TREE_MAX_NODES);
+  const cut = reader.tree(c.id, false, true);
+  assert.match(cut, new RegExp(`Showing \\d+ of ${total} nodes`));
+  assert.match(cut, /\(\+\d+\)/);
+  assert.ok(cut.split('\n').length < total);
+  // The whole outline on request, a branch from its own root.
+  const full = reader.tree(c.id, false, true, undefined, { depth: 99 });
+  assert.doesNotMatch(full, /Showing/);
+  assert.equal(full.split('\n').length, total + 1);
+  const branch = reader.tree(c.id, false, true, undefined, { node: 'Concetto naa0x' });
+  assert.match(branch, /^Tree:\n- Concetto naa0x\n {2}- /);
+  assert.ok(branch.split('\n').length < 60);
+  assert.throws(() => reader.tree(c.id, false, true, undefined, { node: 'Inesistente' }), /not found/);
+  // Small outlines are untouched.
+  assert.doesNotMatch(reader.tree(c.id, false, true, undefined, { node: 'Concetto naa0x', depth: 1 }), /Showing 1 of 1/);
+});
