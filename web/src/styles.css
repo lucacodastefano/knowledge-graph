@@ -196,3 +196,6 @@ button.icon:hover { color: var(--text); }
 .suggestions-pop { position: absolute; top: 100%; right: 0; z-index: 10; width: 320px; max-height: 60vh; overflow: auto; margin-top: 6px; padding: 8px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 4px 16px rgb(0 0 0 / 0.2); }
 .suggestion { padding: 6px 0; border-bottom: 1px solid var(--border); }
 .suggestion:last-child { border-bottom: none; }
+
+/* Preview of where a dragged node would attach. */
+.react-flow__edge.preview .react-flow__edge-path { stroke: #9ca3af; stroke-width: 2; stroke-dasharray: 6 5; opacity: 0.8; pointer-events: none; }

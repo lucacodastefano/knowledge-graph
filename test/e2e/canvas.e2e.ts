@@ -462,3 +462,72 @@ test('XMind gestures: drag a node onto another to move it with its children, pul
   }, [base, conv.id, kid.id, oldParent]);
   await page.close();
 });
+
+test('dragging a node near another previews the attachment, releasing attaches it, and out of range nothing changes', async () => {
+  const conv = tracker.startConversation('Giunzione', null);
+  tracker.track(conv.id, [
+    { title: 'Alfa', summary: 'a' },
+    { title: 'Beta', summary: 'b', parent: '#0' },
+    { title: 'Gamma', summary: 'g', parent: '#0' },
+    { title: 'Delta', summary: 'd', parent: '#2' },
+  ]);
+  const page = await browser.newPage({ viewport: { width: 1400, height: 820 } });
+  await page.goto(base);
+  await titled(page, 'Delta').waitFor();
+  await page.waitForTimeout(900);
+  const parentOf = async (title: string) => {
+    const t = (await (await fetch(`${base}/api/conversations/${conv.id}/tree`)).json()) as { visits: { id: string; title: string; parentVisitId: string | null }[] };
+    const v = t.visits.find((x) => x.title === title)!;
+    return t.visits.find((x) => x.id === v.parentVisitId)?.title ?? null;
+  };
+  const box = async (title: string) => (await titled(page, title).boundingBox())!;
+  const centre = async (title: string) => {
+    const b = await box(title);
+    return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+  };
+  const preview = page.locator('.react-flow__edge.preview');
+  assert.equal(await parentOf('Beta'), 'Alfa');
+
+  // Hold Beta and bring it close to Gamma, without touching it: the grey preview shows, release attaches.
+  const g = await box('Gamma');
+  const b = await centre('Beta');
+  await page.mouse.move(b.x, b.y + 12);
+  await page.mouse.down();
+  await page.mouse.move(g.x + g.width / 2, g.y + g.height + 70, { steps: 12 });
+  await preview.waitFor();
+  assert.equal(await parentOf('Beta'), 'Alfa', 'nothing changes while the button is held');
+  await page.screenshot({ path: join(out, '14-anteprima-giunzione.png') });
+  await page.mouse.up();
+  await page.waitForFunction(async ([base, id]) => {
+    const t = await (await fetch(`${base}/api/conversations/${id}/tree`)).json();
+    const byTitle = (n: string) => t.visits.find((v: { title: string }) => v.title === n);
+    return byTitle('Beta').parentVisitId === byTitle('Gamma').id;
+  }, [base, conv.id]);
+  await preview.waitFor({ state: 'detached' });
+  await page.waitForTimeout(900);
+
+  // Far from every node: no preview, and releasing changes nothing.
+  const boxes = await Promise.all(['Alfa', 'Beta', 'Gamma', 'Delta'].map(box));
+  const far = [{ x: 60, y: 760 }, { x: 1340, y: 760 }, { x: 1340, y: 140 }, { x: 700, y: 790 }].find((p) =>
+    boxes.every((r) => Math.hypot(Math.max(0, r.x - p.x, p.x - (r.x + r.width)), Math.max(0, r.y - p.y, p.y - (r.y + r.height))) > 220),
+  )!;
+  assert.ok(far, 'an empty corner exists');
+  const d = await centre('Delta');
+  const before = await parentOf('Delta');
+  await page.mouse.move(d.x, d.y + 12);
+  await page.mouse.down();
+  await page.mouse.move(far.x, far.y, { steps: 14 });
+  assert.equal(await preview.count(), 0, 'no preview out of range');
+  await page.mouse.up();
+  await page.waitForTimeout(600);
+  assert.equal(await parentOf('Delta'), before);
+
+  // Ctrl+Z undoes the attach.
+  await page.keyboard.press('Control+z');
+  await page.waitForFunction(async ([base, id]) => {
+    const t = await (await fetch(`${base}/api/conversations/${id}/tree`)).json();
+    const byTitle = (n: string) => t.visits.find((v: { title: string }) => v.title === n);
+    return byTitle('Beta').parentVisitId === byTitle('Alfa').id;
+  }, [base, conv.id]);
+  await page.close();
+});
