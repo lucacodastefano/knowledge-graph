@@ -38,7 +38,7 @@ test('token totals are characters / 3.5, split into written and read', () => {
 });
 
 test('size series: graph size, cumulative tokens and tokens per new node at every call', () => {
-  const v = (id: string, at: string, conversationId = 'c1') => ({ id, conversationId, conceptId: `k-${id}`, parentVisitId: null, at, hasDetail: true, sourceCount: 1 });
+  const v = (id: string, at: string, conversationId = 'c1') => ({ id, conversationId, conceptId: `k-${id}`, parentVisitId: null, title: id, at, hasDetail: true, sourceCount: 1 });
   const graph: GraphSnapshot = {
     conversations: [],
     concepts: [],
@@ -93,10 +93,10 @@ test('conversation and period filters', () => {
 
 test('quality: missing detail / sources / superclass, duplicates, depth and branching', () => {
   const v = (id: string, parent: string | null, extra: object = {}) => ({
-    id, conversationId: 'c1', conceptId: `k-${id}`, parentVisitId: parent, at: '2026-10-11T09:00:00.000Z', hasDetail: true, sourceCount: 1, ...extra,
+    id, conversationId: 'c1', conceptId: `k-${id}`, parentVisitId: parent, title: id, at: '2026-10-11T09:00:00.000Z', hasDetail: true, sourceCount: 1, ...extra,
   });
   const graph: GraphSnapshot = {
-    conversations: [{ id: 'c1', at: '2026-10-11T09:00:00.000Z' }],
+    conversations: [{ id: 'c1', title: 'G1', at: '2026-10-11T09:00:00.000Z' }],
     concepts: [
       { id: 'k-a', name: 'Event sourcing', at: '2026-10-11T09:00:00.000Z', hasSuperclass: true },
       { id: 'k-b', name: 'Microservizi', at: '2026-10-11T09:00:00.000Z', hasSuperclass: false },
@@ -107,6 +107,8 @@ test('quality: missing detail / sources / superclass, duplicates, depth and bran
   const m = buildMetrics([], graph, { period: 'all' }, NOW);
   assert.deepEqual(m.quality.depth, [1, 2, 1]);
   assert.equal(m.quality.maxDepth, 3);
+  assert.deepEqual(m.quality.graphs, [{ id: 'c1', title: 'G1' }]);
+  assert.deepEqual(m.quality.tree.map((n) => [n.id, n.parent]), [['a', null], ['b', 'a'], ['c', 'b'], ['d', 'a']]);
   assert.equal(m.quality.avgChildren, 1.5); // a has 2 children, b has 1
   assert.equal(m.quality.withoutDetail, 1);
   assert.equal(m.quality.withoutSources, 1);

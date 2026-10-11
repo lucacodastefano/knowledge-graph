@@ -310,5 +310,13 @@ table.mini { width: 100%; border-collapse: collapse; font-size: 12px; }
 table.mini th { text-align: left; color: var(--muted); font-weight: 500; }
 table.mini td, table.mini th { padding: 3px 6px 3px 0; }
 table.mini tr.bad td { color: #dc2626; }
-.quality { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+.quality { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; align-items: start; }
 .quality ul { margin: 0; padding-left: 18px; font-size: 12px; }
+
+/* Sunburst in Metriche: ring = depth, arc = subtree */
+.sunburst svg { width: 100%; max-width: 360px; height: auto; display: block; margin: 0 auto; }
+.sunburst .arc { stroke: var(--surface); stroke-width: 0.6; cursor: pointer; }
+.sunburst .arc:hover { filter: brightness(1.12); }
+.sunburst .sun-centre { fill: var(--surface); stroke: var(--border); }
+.sunburst .sun-label { font-size: 9px; font-weight: 600; fill: var(--text); pointer-events: none; }
+.sunburst .sun-sub { font-size: 8px; fill: var(--muted); pointer-events: none; }

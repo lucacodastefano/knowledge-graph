@@ -50,6 +50,10 @@ test('the Metriche tab shows the charts and updates with the filters', async () 
   assert.ok((await page.getByTestId('chart-pernode-size').locator('circle').count()) >= 1);
   assert.equal(await page.getByText('Crescita del grafo').count(), 0);
   assert.match((await page.getByTestId('quality').textContent()) ?? '', /profondità massima/);
+  const sun = page.getByTestId('chart-depth');
+  assert.ok((await sun.locator('path.arc').count()) >= 1, 'sunburst arcs');
+  await sun.locator('path.arc').first().dispatchEvent('mouseover');
+  assert.match((await sun.locator('.sun-sub').textContent()) ?? '', /sotto/);
   assert.match((await page.getByTestId('chart-tools').textContent()) ?? '', /kc_track/);
   assert.match((await page.getByTestId('table-errors').textContent()) ?? '', /kc_read/);
   assert.match((await page.getByTestId('memory').textContent()) ?? '', /1\/1/);
