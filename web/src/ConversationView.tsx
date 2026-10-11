@@ -790,13 +790,23 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
     });
   }, [nodes, tree, flow]);
 
-  // The concept picked in the search glows in the tree, and the view moves to it.
+  // The concept picked in the search glows in the tree, and the view moves to it. A text hit also switches to
+  // the map that holds the node and selects it; this waits until that map is laid out.
   const matchConcept = found?.conceptId ?? null;
+  const handledFound = useRef(0);
   useEffect(() => {
-    if (!found || !tree) return;
-    const ids = tree.visits.filter((v) => v.conceptId === found.conceptId).map((v) => ({ id: v.id }));
-    if (ids.length) void flow.fitView({ nodes: ids, padding: 1, maxZoom: 1.2, duration: 400 });
-  }, [found]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!found || !tree || handledFound.current === found.seq) return;
+    if (found.conversationId && found.conversationId !== tree.conversation.id) {
+      setPinned(found.conversationId);
+      return;
+    }
+    const ids = tree.visits.filter((v) => (found.visitId ? v.id === found.visitId : v.conceptId === found.conceptId)).map((v) => ({ id: v.id }));
+    if (ids.length && !ids.every((n) => nodes.some((x) => x.id === n.id))) return;
+    handledFound.current = found.seq;
+    if (!ids.length) return;
+    if (found.visitId) setSelected(found.visitId);
+    requestAnimationFrame(() => void flow.fitView({ nodes: ids, padding: 1, maxZoom: 1.2, duration: 400 }));
+  }, [found, tree, nodes]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Highlight around the pointed or selected node: parent, children and the other nodes of its concept; the
   // rest fades. Highlighted edges are drawn last, so they stay on top of the faded ones.

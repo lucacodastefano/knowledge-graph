@@ -147,6 +147,8 @@ export async function buildApp({ tracker, webRoot, logger = false, onShutdown }:
 
   app.get<{ Querystring: { q?: string } }>('/api/search', async (req) => new Reader(repo).search(req.query.q ?? ''));
 
+  app.get<{ Querystring: { q?: string } }>('/api/search/text', async (req) => new Reader(repo).searchText(req.query.q ?? ''));
+
   // --- Manual corrections (D8): every change is broadcast on /ws like the model's ones ---
   app.patch<{ Params: { id: string }; Body: { name: string } }>(
     '/api/concepts/:id',

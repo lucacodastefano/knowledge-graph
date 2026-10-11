@@ -126,3 +126,79 @@ test('kc_track: at most 10 nodes per call, sources by reference inside the call'
   assert.match(bad.text, /Source @3 is not in sources/);
   await c.close();
 });
+
+test('searchText finds words inside the full detail of any map, follows edits and deletions', () => {
+  const t = new Tracker(new SqliteRepository(':memory:'));
+  const a = t.startConversation('Kafka', null);
+  const b = t.startConversation('Eventi', null);
+  t.track(a.id, [{ title: 'Partizioni', summary: 'Unità di parallelismo.', detail: 'Ogni partizione ha un leader; la replica garantisce la durabilità.', parent: 'root' }]);
+  t.track(b.id, [{ title: 'Replicazione', summary: 'Copie dei dati.', detail: 'Il quorum decide la durabilità.', parent: 'root' }]);
+  const titles = (q: string) => t.repo.searchText(q, 10).map((h) => `${h.conversationTitle}/${h.title}/${h.field}`);
+  assert.deepEqual(titles('durabilità').sort(), ['Eventi/Replicazione/detail', 'Kafka/Partizioni/detail']);
+  assert.deepEqual(titles('durabilita quorum'), ['Eventi/Replicazione/detail'], 'all words, accents folded');
+  assert.match(t.repo.searchText('leader', 5)[0].snippet, /Ogni partizione ha un leader/);
+  assert.equal(titles('partizioni')[0], 'Kafka/Partizioni/title', 'a title match ranks first');
+  assert.deepEqual(titles('quorum durabilità leader').length, 2, 'falls back to any word when none has all');
+  assert.deepEqual(titles('zz'), []);
+  t.editNode(a.id, 'Partizioni', { find: 'leader', replace: 'coordinatore' });
+  assert.deepEqual(titles('leader'), []);
+  assert.deepEqual(titles('coordinatore'), ['Kafka/Partizioni/detail']);
+  t.deleteConversation(b.id);
+  assert.deepEqual(titles('quorum'), []);
+});
+
+test('the text index is built from existing nodes when a database from before it is opened', async () => {
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { DatabaseSync } = await import('node:sqlite');
+  const dir = mkdtempSync(`${tmpdir()}/kg-fts-`);
+  try {
+    const path = `${dir}/graph.db`;
+    const t1 = new Tracker(new SqliteRepository(path));
+    const c = t1.startConversation('Vecchia', null);
+    t1.track(c.id, [{ title: 'Nodo', summary: 's.', detail: 'testo antico indicizzabile', parent: 'root' }]);
+    t1.repo.close();
+    const raw = new DatabaseSync(path);
+    raw.exec('DROP TRIGGER visits_fts_ai; DROP TRIGGER visits_fts_ad; DROP TRIGGER visits_fts_au; DROP TABLE visits_fts;');
+    raw.close();
+    const t2 = new Tracker(new SqliteRepository(path));
+    assert.equal(t2.repo.searchText('indicizzabile', 5).length, 1);
+    t2.repo.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a big outline is cut by depth and a branch can be opened (kc_tree node / depth)', async () => {
+  const { Reader, TREE_MAX_NODES } = await import('../src/core/reader.ts');
+  const t = new Tracker(new SqliteRepository(':memory:'));
+  const reader = new Reader(t.repo);
+  const c = t.startConversation('Grande', null);
+  // 5 branches of 3 levels: 5 + 5*6 + 5*6*6 = 215 nodes, over the cap.
+  const names = (i: number) => `n${String.fromCharCode(97 + (i % 26))}${String.fromCharCode(97 + (Math.floor(i / 26) % 26))}${Math.floor(i / 676)}x`;
+  let n = 0;
+  const add = (parent: string, kids: number, depth: number) => {
+    for (let k = 0; k < kids; k++) {
+      const title = `Concetto ${names(n++)}`;
+      t.track(c.id, [{ title, summary: 's.', parent }]);
+      if (depth > 1) add(title, 6, depth - 1);
+    }
+  };
+  add('root', 5, 3);
+  const total = t.repo.getTree(c.id)!.visits.length;
+  assert.ok(total > TREE_MAX_NODES);
+  const cut = reader.tree(c.id, false, true);
+  assert.match(cut, new RegExp(`Showing \\d+ of ${total} nodes`));
+  assert.match(cut, /\(\+\d+\)/);
+  assert.ok(cut.split('\n').length < total);
+  // The whole outline on request, a branch from its own root.
+  const full = reader.tree(c.id, false, true, undefined, { depth: 99 });
+  assert.doesNotMatch(full, /Showing/);
+  assert.equal(full.split('\n').length, total + 1);
+  const branch = reader.tree(c.id, false, true, undefined, { node: 'Concetto naa0x' });
+  assert.match(branch, /^Tree:\n- Concetto naa0x\n {2}- /);
+  assert.ok(branch.split('\n').length < 60);
+  assert.throws(() => reader.tree(c.id, false, true, undefined, { node: 'Inesistente' }), /not found/);
+  // Small outlines are untouched.
+  assert.doesNotMatch(reader.tree(c.id, false, true, undefined, { node: 'Concetto naa0x', depth: 1 }), /Showing 1 of 1/);
+});

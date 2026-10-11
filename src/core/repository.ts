@@ -6,6 +6,7 @@ import type {
   Conversation,
   ConversationTree,
   PersonalGraph,
+  TextHit,
   Revision,
   ToolCall,
   GraphSnapshot,
@@ -47,6 +48,8 @@ export interface Repository {
   getConceptDetail(id: string): ConceptDetail | undefined;
   /** Concepts matching a free-text query on names, visit titles and summaries, best first. */
   searchConcepts(query: string, limit: number): Concept[];
+  /** Nodes of every map whose title, summary or full detail contains the words, best first (one hit per node). */
+  searchText(query: string, limit: number): TextHit[];
   /** Concepts reached from or leading to this one through drill-downs, most frequent first. */
   neighbourConcepts(conceptId: string, limit: number): ConceptMatch[];
   rankConcepts(order: 'visits' | 'recent', limit: number): Concept[];

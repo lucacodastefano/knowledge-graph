@@ -152,6 +152,19 @@ export interface GroupSuggestion {
   into?: ConceptMatch;
 }
 
+/** A node whose text matches a search (title, summary or the full detail): it opens in its own map. */
+export interface TextHit {
+  visitId: string;
+  conversationId: string;
+  conversationTitle: string;
+  conceptId: string;
+  title: string;
+  /** Where the words were found first. */
+  field: 'title' | 'summary' | 'detail';
+  /** A short excerpt around the match. */
+  snippet: string;
+}
+
 /** One MCP tool call as logged by the server (metrics). Sizes are characters of the JSON/text exchanged with the model. */
 export interface ToolCall {
   at: string;

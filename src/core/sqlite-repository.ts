@@ -9,6 +9,7 @@ import type {
   Conversation,
   ConversationTree,
   PersonalGraph,
+  TextHit,
   Revision,
   ToolCall,
   GraphSnapshot,
@@ -179,6 +180,80 @@ export class SqliteRepository implements Repository {
     if (!has('concept_links', 'label')) this.db.exec('ALTER TABLE concept_links ADD COLUMN label TEXT');
     if (!has('visits', 'detail')) this.db.exec('ALTER TABLE visits ADD COLUMN detail TEXT');
     if (!has('concept_links', 'created_at')) this.db.exec('ALTER TABLE concept_links ADD COLUMN created_at TEXT');
+    this.migrateTextSearch();
+  }
+
+  /**
+   * Full-text index over what every node says (title, summary, detail), kept in step by triggers so every writer is covered.
+   * Trigram tokens: substring matches, accents folded. An index created now is filled from the nodes already there.
+   */
+  private migrateTextSearch() {
+    const existed = this.db.prepare(`SELECT 1 FROM sqlite_master WHERE name = 'visits_fts'`).get() !== undefined;
+    this.db.exec(`
+      CREATE VIRTUAL TABLE IF NOT EXISTS visits_fts USING fts5(
+        title, summary, detail, content = 'visits', content_rowid = 'rowid', tokenize = 'trigram remove_diacritics 1'
+      );
+      CREATE TRIGGER IF NOT EXISTS visits_fts_ai AFTER INSERT ON visits BEGIN
+        INSERT INTO visits_fts (rowid, title, summary, detail) VALUES (new.rowid, new.title, new.summary, new.detail);
+      END;
+      CREATE TRIGGER IF NOT EXISTS visits_fts_ad AFTER DELETE ON visits BEGIN
+        INSERT INTO visits_fts (visits_fts, rowid, title, summary, detail) VALUES ('delete', old.rowid, old.title, old.summary, old.detail);
+      END;
+      CREATE TRIGGER IF NOT EXISTS visits_fts_au AFTER UPDATE OF title, summary, detail ON visits BEGIN
+        INSERT INTO visits_fts (visits_fts, rowid, title, summary, detail) VALUES ('delete', old.rowid, old.title, old.summary, old.detail);
+        INSERT INTO visits_fts (rowid, title, summary, detail) VALUES (new.rowid, new.title, new.summary, new.detail);
+      END;
+    `);
+    if (!existed) this.db.exec(`INSERT INTO visits_fts (visits_fts) VALUES ('rebuild')`);
+  }
+
+  searchText(query: string, limit: number): TextHit[] {
+    const words = [...new Set(query.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 3))].slice(0, 8);
+    const select = `SELECT v.id, v.conversation_id, v.concept_id, v.title, v.summary, v.detail, cv.title AS conversation_title
+      FROM visits_fts f JOIN visits v ON v.rowid = f.rowid JOIN conversations cv ON cv.id = v.conversation_id`;
+    let rows: Row[] = [];
+    if (words.length > 0) {
+      // All the words first (precise); any of them only when nothing contains them all.
+      const match = (join: string) => words.map((w) => `"${w.replaceAll('"', '')}"`).join(join);
+      const run = (q: string) =>
+        this.db.prepare(`${select} WHERE visits_fts MATCH ? ORDER BY bm25(visits_fts, 8, 3, 1) LIMIT ?`).all(q, limit);
+      rows = run(match(' AND '));
+      if (rows.length === 0 && words.length > 1) rows = run(match(' OR '));
+    } else {
+      // Under 3 characters the trigram index cannot help: titles only.
+      const q = query.trim();
+      if (!q) return [];
+      const like = `%${q.replace(/[\\%_]/g, (m) => `\\${m}`)}%`;
+      rows = this.db
+        .prepare(
+          `SELECT v.id, v.conversation_id, v.concept_id, v.title, v.summary, v.detail, cv.title AS conversation_title
+           FROM visits v JOIN conversations cv ON cv.id = v.conversation_id
+           WHERE v.title LIKE ? ESCAPE '\\' ORDER BY length(v.title) LIMIT ?`,
+        )
+        .all(like, limit);
+    }
+    const needles = words.length ? words : [query.trim().toLowerCase()];
+    return rows.map((r) => {
+      const where = (text: string | null) => {
+        const lower = (text ?? '').toLowerCase();
+        const at = needles.map((n) => lower.indexOf(n)).filter((i) => i >= 0);
+        return at.length ? Math.min(...at) : -1;
+      };
+      const field = where(r.title as string) >= 0 ? 'title' : where(r.summary as string) >= 0 ? 'summary' : 'detail';
+      const text = (r[field] as string | null) ?? '';
+      const at = Math.max(0, where(text));
+      const from = Math.max(0, at - 40);
+      const snippet = field === 'title' ? '' : `${from > 0 ? '…' : ''}${text.slice(from, at + 90).replace(/\s+/g, ' ').trim()}${at + 90 < text.length ? '…' : ''}`;
+      return {
+        visitId: r.id as string,
+        conversationId: r.conversation_id as string,
+        conversationTitle: r.conversation_title as string,
+        conceptId: r.concept_id as string,
+        title: r.title as string,
+        field,
+        snippet,
+      };
+    });
   }
 
   findConceptsByKey(name: string, excludeId: string): ConceptMatch[] {

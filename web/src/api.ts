@@ -9,13 +9,14 @@ import type {
   PersonalGraph,
   GroupSuggestion,
   Settings,
+  TextHit,
   Visit,
 } from '../../src/core/types.ts';
 import type { Metrics, Period } from '../../src/core/metrics.ts';
 import type { LayoutEntry } from '../../src/core/repository.ts';
 import type { TrackerEvent, VisitEdit } from '../../src/core/tracker.ts';
 
-export type { Metrics, Period, GroupSuggestion, Concept, ConceptOccurrence, ConceptPage, ConceptSection, ConceptSource, Conversation, ConversationTree, PersonalGraph, Settings, TrackerEvent, Visit, VisitEdit };
+export type { Metrics, Period, GroupSuggestion, Concept, ConceptOccurrence, ConceptPage, ConceptSection, ConceptSource, Conversation, ConversationTree, PersonalGraph, Settings, TextHit, TrackerEvent, Visit, VisitEdit };
 
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(path);
@@ -62,6 +63,7 @@ export const api = {
   updateSettings: (patch: Partial<Settings>) => send<Settings>('PATCH', '/api/settings', patch),
   graph: () => get<PersonalGraph>('/api/graph'),
   search: (q: string) => get<Concept[]>(`/api/search?q=${encodeURIComponent(q)}`),
+  searchText: (q: string) => get<TextHit[]>(`/api/search/text?q=${encodeURIComponent(q)}`),
   renameConcept: (id: string, name: string) => send<Concept>('PATCH', `/api/concepts/${id}`, { name }),
   mergeConcept: (id: string, into: string) => send<Concept>('POST', `/api/concepts/${id}/merge`, { into }),
   deleteConcept: (id: string) => send<void>('DELETE', `/api/concepts/${id}`),

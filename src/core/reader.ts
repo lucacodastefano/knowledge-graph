@@ -1,5 +1,5 @@
 import type { Repository } from './repository.ts';
-import type { Concept, ConceptMatch, ConceptPage, ConceptSection, GroupSuggestion, Visit } from './types.ts';
+import type { Concept, ConceptMatch, ConceptPage, ConceptSection, GroupSuggestion, TextHit, Visit } from './types.ts';
 import { normalizeName } from './normalize.ts';
 import { TrackerError } from './tracker.ts';
 import { sharesEnough, titleStems } from './similarity.ts';
@@ -47,11 +47,15 @@ const NOTE_MAX = 300;
 /** Sources returned by kc_recall per concept: enough to reuse, few tokens. */
 const RECALL_SOURCES = 3;
 const PROFILE_LIMIT = 10;
+const PROFILE_GROUPS = 20;
 /** Caps of the kc_start memory profile (D19): about 150 tokens. */
 const MEMORY_AREAS = 5;
 const MEMORY_TOPICS = 6;
 const PROFILE_CONVERSATIONS = 5;
 const SEARCH_LIMIT = 20;
+const TEXT_HITS = 30;
+/** Outline nodes shown at once (about 1,000 tokens): a bigger map is shown down to the depth that fits, branches opened on request. */
+export const TREE_MAX_NODES = 150;
 const SIMILAR_MAPS = 3;
 
 const MEMBERS_SHOWN = 8;
@@ -183,7 +187,7 @@ export class Reader {
    * a title. `touched` narrows it to the branches leading to those nodes (the kc_track result); otherwise the free
    * relations (the dashed lines of the canvas) close the outline. Defaults to the most recent conversation.
    */
-  tree(conversationId: string | null, withSummaries: boolean, compact = false, touched?: Set<string>): string {
+  tree(conversationId: string | null, withSummaries: boolean, compact = false, touched?: Set<string>, open?: { node?: string; depth?: number }): string {
     const id = conversationId ?? this.repo.listConversations()[0]?.id;
     if (!id) return 'No conversations yet.';
     const tree = this.repo.getTree(id);
@@ -203,17 +207,59 @@ export class Reader {
     for (const v of visits) titles.set(normalizeName(v.title), (titles.get(normalizeName(v.title)) ?? 0) + 1);
 
     const lines = compact ? ['Tree:'] : [`${conversation.title} [${conversation.id}] ${day(conversation.lastActivityAt)}, ${visits.length} nodes`];
+    // A big outline is cut at the depth that fits TREE_MAX_NODES; a branch (open.node) is outlined from its own root.
+    let top: string | null = null;
+    if (open?.node) {
+      const ref = open.node.trim();
+      const norm = normalizeName(ref);
+      const root = byId.get(ref) ?? visits.findLast((v) => normalizeName(v.title) === norm);
+      if (!root) throw new TrackerError(`Node "${ref}" not found in this conversation`);
+      top = root.id;
+    }
+    const subtree = (parent: string | null, depth: number, into: number[]) => {
+      for (const v of children.get(parent) ?? []) {
+        if (touched && !shown.has(v.id)) continue;
+        into[depth] = (into[depth] ?? 0) + 1;
+        subtree(v.id, depth + 1, into);
+      }
+    };
+    const perDepth: number[] = [];
+    if (top) ((perDepth[0] = 1), subtree(top, 1, perDepth));
+    else subtree(null, 0, perDepth);
+    const total = perDepth.reduce((a, b) => a + b, 0);
+    let maxDepth = open?.depth !== undefined ? Math.max(0, open.depth - 1) : perDepth.length - 1;
+    if (open?.depth === undefined && !touched) {
+      let acc = 0;
+      maxDepth = 0;
+      for (let d = 0; d < perDepth.length; d++) {
+        acc += perDepth[d];
+        if (acc > TREE_MAX_NODES && d > 0) break;
+        maxDepth = d;
+      }
+    }
+    let listed = 0;
+    const hidden = (id: string): number => (children.get(id) ?? []).reduce((n, c) => n + 1 + hidden(c.id), 0);
     const walk = (parent: string | null, depth: number) => {
       for (const v of children.get(parent) ?? []) {
         if (touched && !shown.has(v.id)) continue;
+        listed++;
         const dup = (titles.get(normalizeName(v.title)) ?? 0) > 1 ? ` [${v.id}]` : '';
         const current = !compact && v.id === conversation.currentVisitId ? ' *current' : '';
         const summary = withSummaries && v.summary ? `: ${v.summary}` : '';
-        lines.push(`${'  '.repeat(depth)}- ${v.title}${dup}${current}${summary}`);
-        walk(v.id, depth + 1);
+        const more = depth >= maxDepth && !touched ? hidden(v.id) : 0;
+        lines.push(`${'  '.repeat(depth)}- ${v.title}${dup}${current}${more ? ` (+${more})` : ''}${summary}`);
+        if (depth < maxDepth || touched) walk(v.id, depth + 1);
       }
     };
-    walk(null, 0);
+    if (top) {
+      const root = byId.get(top)!;
+      listed++;
+      lines.push(`- ${root.title}${withSummaries && root.summary ? `: ${root.summary}` : ''}`);
+      walk(top, 1);
+    } else {
+      walk(null, 0);
+    }
+    if (listed < total) lines.push(`Showing ${listed} of ${total} nodes; (+n) = hidden below. kc_tree(node: "<title>") opens a branch, kc_read gives one node's text.`);
 
     if (!compact) {
       const titleOf = new Map(visits.map((v) => [v.conceptId, v.title]));
@@ -249,6 +295,16 @@ export class Reader {
       .join('\n\n');
   }
 
+  /** Superclasses with their sizes, the biggest first; a long list is cut so kc_profile stays small. */
+  private profileGroups(): string[] {
+    const all = this.repo
+      .listSuperclasses()
+      .map((g) => ({ name: g.name, n: this.repo.listMembers(g.id).length }))
+      .sort((a, b) => b.n - a.n || a.name.localeCompare(b.name));
+    const shown = all.slice(0, PROFILE_GROUPS).map((g) => `${g.name} (${g.n})`);
+    return all.length > PROFILE_GROUPS ? [...shown, `…and ${all.length - PROFILE_GROUPS} more groups`] : shown;
+  }
+
   /**
    * Maps the user already has on a similar topic (kc_start): titles sharing words with the new one, or holding a concept
    * that matches it. Most recent first.
@@ -272,7 +328,7 @@ export class Reader {
       concepts: this.repo.countConcepts(),
       top: this.repo.rankConcepts('visits', PROFILE_LIMIT).map((c) => `${c.name} ×${c.visitCount}`),
       recent: this.repo.rankConcepts('recent', PROFILE_LIMIT).map((c) => c.name),
-      groups: this.repo.listSuperclasses().map((g) => `${g.name} (${this.repo.listMembers(g.id).length})`),
+      groups: this.profileGroups(),
       ungrouped: this.repo.listRootConcepts().slice(0, UNGROUPED_SHOWN).map((c) => c.name),
       conversations: this.repo
         .listConversations()
@@ -332,5 +388,10 @@ export class Reader {
     for (const c of this.repo.findConceptsByName(q, SEARCH_LIMIT)) found.set(c.id, c);
     for (const c of this.repo.searchConcepts(q, SEARCH_LIMIT)) found.set(c.id, c);
     return [...found.values()].slice(0, SEARCH_LIMIT);
+  }
+
+  /** Text search for the canvas: nodes of every map whose title, summary or full text has the words; each opens in its map. */
+  searchText(query: string): TextHit[] {
+    return this.repo.searchText(query, TEXT_HITS);
   }
 }
