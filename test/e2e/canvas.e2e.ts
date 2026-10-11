@@ -108,12 +108,11 @@ test('the personal graph shows every concept, previews it on hover and grows liv
     () => (window as unknown as { __kgPersonal: { position(l: string): { x: number; y: number } } }).__kgPersonal.position('Partizioni'),
   );
   await page.mouse.move(box.x + pos.x, box.y + pos.y);
-  const tooltip = page.getByRole('tooltip');
-  await tooltip.waitFor();
-  assert.match(await tooltip.innerText(), /Visto 3 volte/);
+  // No tooltip: hovering opens the Approfondisci panel on the node.
+  assert.equal(await page.getByRole('tooltip').count(), 0);
+  const panel = page.getByLabel('Dettaglio concetto');
+  await panel.locator('.visits li').nth(2).waitFor();
   await page.screenshot({ path: join(out, '7-grafo-hover.png') });
-  await tooltip.getByRole('button', { name: 'Approfondisci' }).click();
-  await page.getByLabel('Dettaglio concetto').locator('.visits li').nth(2).waitFor();
 
   const client = new Client({ name: 'e2e', version: '1' });
   await client.connect(new StreamableHTTPClientTransport(new URL('/mcp', base)));
@@ -530,4 +529,77 @@ test('dragging a node near another previews the attachment, releasing attaches i
     return byTitle('Beta').parentVisitId === byTitle('Alfa').id;
   }, [base, conv.id]);
   await page.close();
+});
+
+test('personal graph: the panel follows the hover, a click locks it, Esc or an empty click unlocks it', async () => {
+  const conv = tracker.startConversation('Prova hover', null);
+  tracker.track(conv.id, [
+    { title: 'Alfa', summary: 'Primo nodo.', parent: 'root' },
+    { title: 'Beta', summary: 'Secondo nodo.', parent: 'Alfa' },
+  ]);
+  const page = await browser.newPage({ viewport: { width: 1400, height: 820 } });
+  await page.goto(`${base}/#personale`);
+  await page.getByTestId('concept-count').waitFor();
+  await page.waitForTimeout(500);
+  const box = (await page.getByTestId('personal-graph').boundingBox())!;
+  const at = (label: string) =>
+    page.evaluate(
+      `window.__kgPersonal.position(${JSON.stringify(label)})`,
+    ) as Promise<{ x: number; y: number }>;
+  const panel = page.getByLabel('Dettaglio concetto');
+  // Pan the canvas so both nodes sit left of the panel docked on the right (the layout is random).
+  const [a, b] = [await at('Alfa'), await at('Beta')];
+  const dx = 500 - (a.x + b.x) / 2;
+  await page.mouse.move(box.x + 700, box.y + box.height - 20);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 700 + dx, box.y + box.height - 20, { steps: 8 });
+  await page.mouse.up();
+  await page.waitForTimeout(300);
+  const move = async (label: string) => {
+    const p = await at(label);
+    await page.mouse.move(box.x + p.x, box.y + p.y, { steps: 4 });
+  };
+
+  // Hover mode: the panel opens on the node and updates in place when the pointer moves to another.
+  await move('Alfa');
+  await panel.locator('h2', { hasText: 'Alfa' }).waitFor();
+  assert.equal(await panel.getByText('fissato').count(), 0, 'not pinned while following the hover');
+  await move('Beta');
+  await panel.locator('h2', { hasText: 'Beta' }).waitFor();
+
+  // Focus mode: a click locks the panel, hovering elsewhere no longer changes it.
+  await page.mouse.click(box.x + (await at('Beta')).x, box.y + (await at('Beta')).y);
+  await panel.getByText('fissato').waitFor();
+  await move('Alfa');
+  await page.waitForTimeout(900);
+  assert.equal(await panel.locator('h2').innerText(), 'Beta');
+
+  // Esc leaves focus mode and closes the panel until the next hover.
+  await page.keyboard.press('Escape');
+  await panel.waitFor({ state: 'detached' });
+  await page.mouse.move(box.x + 700, box.y + box.height - 20);
+  await move('Alfa');
+  await panel.locator('h2', { hasText: 'Alfa' }).waitFor();
+
+  // A click on empty canvas also unlocks.
+  await page.mouse.click(box.x + (await at('Alfa')).x, box.y + (await at('Alfa')).y);
+  await panel.getByText('fissato').waitFor();
+  await page.mouse.move(box.x + 700, box.y + box.height - 20);
+  await page.waitForTimeout(500); // not a double click with the click that locked the panel
+  await page.mouse.click(box.x + 700, box.y + box.height - 20);
+  await panel.waitFor({ state: 'detached' });
+
+  // Editing implies focus: it survives hovering elsewhere, and Esc cancels the edit before leaving focus.
+  await move('Alfa');
+  await panel.locator('h2', { hasText: 'Alfa' }).waitFor();
+  await panel.getByRole('button', { name: 'Modifica' }).click();
+  await panel.getByLabel('Nome del concetto').waitFor();
+  await move('Beta');
+  await page.waitForTimeout(900);
+  assert.equal(await panel.getByLabel('Nome del concetto').inputValue(), 'Alfa');
+  await page.keyboard.press('Escape');
+  await panel.getByLabel('Nome del concetto').waitFor({ state: 'detached' });
+  assert.equal(await panel.count(), 1, 'the first Esc only cancels the edit');
+  await page.keyboard.press('Escape');
+  await panel.waitFor({ state: 'detached' });
 });

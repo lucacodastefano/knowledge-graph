@@ -13,6 +13,10 @@ interface Props {
   onOpenConcept: (conceptId: string) => void;
   /** A click on empty canvas: the app closes the detail panel. */
   onBackgroundClick?: () => void;
+  /** The concept the panel is locked on (focus mode): highlighted, and hovering no longer changes it. */
+  focusId?: string | null;
+  /** The concept under the pointer, or null when it leaves every node (hover mode). */
+  onHoverConcept?: (conceptId: string | null) => void;
 }
 
 interface NodeAttrs {
@@ -30,12 +34,6 @@ interface NodeAttrs {
   x: number;
   y: number;
   size: number;
-}
-
-interface Hover {
-  id: string;
-  x: number;
-  y: number;
 }
 
 type ColorBy = 'community' | 'conversation';
@@ -235,7 +233,11 @@ function merge(graph: Graph<NodeAttrs>, data: PersonalGraph, relayout: boolean, 
 /** Every concept ever explored, across conversations (D2), as a WebGL graph grouped by topic. */
 const RELATION_COLOR = '#f59e0b';
 
-export function PersonalView({ live, found, onOpenConcept, onBackgroundClick }: Props) {
+export function PersonalView({ live, found, onOpenConcept, onBackgroundClick, focusId = null, onHoverConcept }: Props) {
+  const focusRef = useRef(focusId);
+  focusRef.current = focusId;
+  const hoverCallback = useRef(onHoverConcept);
+  hoverCallback.current = onHoverConcept;
   const backgroundClick = useRef(onBackgroundClick);
   backgroundClick.current = onBackgroundClick;
   const container = useRef<HTMLDivElement>(null);
@@ -243,7 +245,6 @@ export function PersonalView({ live, found, onOpenConcept, onBackgroundClick }: 
   const sigmaRef = useRef<Sigma<NodeAttrs> | null>(null);
   const hoverRef = useRef<string | null>(null);
   const foundRef = useRef<string | null>(null);
-  const closeTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const rngRef = useRef(seeded(9));
   const relayoutRef = useRef(true);
   const communitySlots = useRef(new Map<string, number>());
@@ -260,7 +261,6 @@ export function PersonalView({ live, found, onOpenConcept, onBackgroundClick }: 
     /** Node size cap at the full view: big graphs are dense, their nodes start as dots and grow with the zoom. */
     maxSize: Infinity,
   });
-  const [hover, setHover] = useState<Hover | null>(null);
   const [count, setCount] = useState<number | null>(null);
   const [shown, setShown] = useState(0);
   const [colorBy, setColorBy] = useState<ColorBy>(() =>
@@ -527,25 +527,18 @@ export function PersonalView({ live, found, onOpenConcept, onBackgroundClick }: 
     });
     renderer.on('afterRender', draw);
 
-    const place = (id: string) => {
-      // Display data is in normalized "framed graph" space, not raw graph coordinates.
-      const d = renderer.getNodeDisplayData(id);
-      if (!d) return;
-      const p = renderer.framedGraphToViewport(d);
-      setHover({ id, x: p.x, y: p.y });
-    };
+    // Hover mode: the highlight and the panel follow the node under the pointer; in focus mode they stay put.
     renderer.on('enterNode', ({ node }) => {
-      clearTimeout(closeTimer.current);
+      if (focusRef.current) return;
       hoverRef.current = node;
-      place(node);
+      hoverCallback.current?.(node);
       renderer.refresh({ skipIndexation: true });
     });
     renderer.on('leaveNode', () => {
-      closeTimer.current = setTimeout(() => {
-        hoverRef.current = null;
-        setHover(null);
-        renderer.refresh({ skipIndexation: true });
-      }, 180);
+      if (focusRef.current) return;
+      hoverRef.current = null;
+      hoverCallback.current?.(null);
+      renderer.refresh({ skipIndexation: true });
     });
     renderer.on('clickNode', ({ node, event }) => {
       // From afar a node is a dot inside its community: the click zooms in rather than opening it.
@@ -579,9 +572,6 @@ export function PersonalView({ live, found, onOpenConcept, onBackgroundClick }: 
       const ratio = camera.getState().ratio * Math.min(1, (p.r * 2 * 1.15) / Math.min(width, height));
       void camera.animate({ x: target.x, y: target.y, ratio }, { duration: 450 });
     };
-    renderer.getCamera().on('updated', () => {
-      if (hoverRef.current) place(hoverRef.current);
-    });
     // Lets end-to-end tests find concepts and communities on screen; WebGL draws nothing in the DOM.
     (window as unknown as { __kgPersonal?: unknown }).__kgPersonal = {
       position: (label: string) => {
@@ -597,7 +587,6 @@ export function PersonalView({ live, found, onOpenConcept, onBackgroundClick }: 
       ratio: () => renderer.getCamera().getState().ratio,
     };
     return () => {
-      clearTimeout(closeTimer.current);
       renderer.kill();
       sigmaRef.current = null;
     };
@@ -772,7 +761,12 @@ export function PersonalView({ live, found, onOpenConcept, onBackgroundClick }: 
     if (d) void renderer.getCamera().animate({ x: d.x, y: d.y, ratio }, { duration: 400 });
   }, [found]);
 
-  const hovered = hover && graphRef.current.hasNode(hover.id) ? graphRef.current.getNodeAttributes(hover.id) : null;
+  // Focus mode highlights the locked node with its relations; leaving it returns to hover mode.
+  useEffect(() => {
+    hoverRef.current = focusId && graphRef.current.hasNode(focusId) ? focusId : null;
+    sigmaRef.current?.refresh({ skipIndexation: true });
+  }, [focusId]);
+
   const filtered = conversation !== '' || period !== '' || hideIsolated || withSources;
   const camera = () => sigmaRef.current?.getCamera();
 
@@ -918,33 +912,6 @@ export function PersonalView({ live, found, onOpenConcept, onBackgroundClick }: 
               }}
             >
               ⤢
-            </button>
-          </div>
-        )}
-        {hover && hovered && (
-          <div
-            className="tooltip floating"
-            role="tooltip"
-            style={{
-              // Kept inside the canvas so it never makes the page scroll.
-              left: Math.min(Math.max(hover.x, 150), Math.max(150, (container.current?.clientWidth ?? 0) - 150)),
-              top: Math.min(hover.y + 14, Math.max(0, (container.current?.clientHeight ?? 0) - 170)),
-            }}
-            onMouseEnter={() => clearTimeout(closeTimer.current)}
-            onMouseLeave={() => {
-              hoverRef.current = null;
-              setHover(null);
-              sigmaRef.current?.refresh({ skipIndexation: true });
-            }}
-          >
-            <strong>{hovered.label}</strong>
-            <p>{hovered.summary || 'Nessun testo dalla risposta.'}</p>
-            <p className="muted small">
-              Visto {hovered.visitCount} {hovered.visitCount === 1 ? 'volta' : 'volte'}
-              {hovered.conversationIds.length > 1 && ` in ${hovered.conversationIds.length} conversazioni`}
-            </p>
-            <button type="button" onClick={() => onOpenConcept(hover.id)}>
-              Approfondisci
             </button>
           </div>
         )}

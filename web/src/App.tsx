@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { subscribe, type TrackerEvent } from './api.ts';
 import { ConversationView } from './ConversationView.tsx';
 import { PersonalView } from './PersonalView.tsx';
@@ -19,6 +19,10 @@ export interface Found {
 }
 
 type View = 'conversation' | 'personal';
+/** Dwell before the hover panel opens, and how long it stays after the pointer leaves a node. */
+const HOVER_OPEN_MS = 300;
+const HOVER_CLOSE_MS = 400;
+
 const viewFromHash = (): View => (location.hash === '#personale' ? 'personal' : 'conversation');
 
 export function App() {
@@ -26,7 +30,24 @@ export function App() {
   const [live, setLive] = useState<LiveEvent | null>(null);
   const [online, setOnline] = useState(false);
   const [openConcept, setOpenConcept] = useState<string | null>(null);
-  const closeConcept = useCallback(() => setOpenConcept(null), []);
+  // Personal graph, hover mode: the panel follows the node under the pointer (`hoverConcept`) until a click
+  // locks it (`openConcept`, focus mode). It opens after a short dwell and lingers on leaving, so crossing
+  // empty space between nodes does not flash it.
+  const [hoverConcept, setHoverConcept] = useState<string | null>(null);
+  const hoverTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const hoverShown = useRef<string | null>(null);
+  hoverShown.current = hoverConcept;
+  const onHoverConcept = useCallback((id: string | null) => {
+    clearTimeout(hoverTimer.current);
+    hoverTimer.current = setTimeout(() => setHoverConcept(id), id ? (hoverShown.current ? 0 : HOVER_OPEN_MS) : HOVER_CLOSE_MS);
+  }, []);
+  const holdHover = useCallback(() => clearTimeout(hoverTimer.current), []);
+  // Leaves focus mode, and closes the panel until the next hover.
+  const closeConcept = useCallback(() => {
+    clearTimeout(hoverTimer.current);
+    setHoverConcept(null);
+    setOpenConcept(null);
+  }, []);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && closeConcept();
     addEventListener('keydown', onKey);
@@ -46,10 +67,15 @@ export function App() {
     }
   }, [live]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    const onHash = () => setView(viewFromHash());
+    const onHash = () => {
+      setHoverConcept(null);
+      setView(viewFromHash());
+    };
     addEventListener('hashchange', onHash);
     return () => removeEventListener('hashchange', onHash);
   }, []);
+
+  const shown = openConcept ?? (view === 'personal' ? hoverConcept : null);
 
   const tab = (v: View, label: string, hash: string) => (
     <a href={hash} role="tab" aria-selected={view === v} className={view === v ? 'active' : ''}>
@@ -81,11 +107,21 @@ export function App() {
         {view === 'conversation' ? (
           <ConversationView live={live} found={found} onOpenConcept={setOpenConcept} onBackgroundClick={closeConcept} />
         ) : (
-          <PersonalView live={live} found={found} onOpenConcept={setOpenConcept} onBackgroundClick={closeConcept} />
+          <PersonalView
+            live={live}
+            found={found}
+            onOpenConcept={setOpenConcept}
+            onBackgroundClick={closeConcept}
+            focusId={openConcept}
+            onHoverConcept={onHoverConcept}
+          />
         )}
-        {openConcept && (
+        {shown && (
           <DetailPanel
-            conceptId={openConcept}
+            conceptId={shown}
+            pinned={view === 'personal' && openConcept !== null}
+            onPin={() => setOpenConcept(shown)}
+            onPointer={(inside) => (inside ? holdHover() : openConcept === null && onHoverConcept(null))}
             version={live?.seq ?? 0}
             onClose={closeConcept}
             onOpen={setOpenConcept}
