@@ -4,6 +4,7 @@ import Sigma from 'sigma';
 import type { NodeLabelDrawingFunction } from 'sigma/rendering';
 import { api, type PersonalGraph } from './api.ts';
 import type { Found, LiveEvent } from './App.tsx';
+import { GroupSuggestions } from './GroupSuggestions.tsx';
 import { ISOLATED, layoutPersonalGraph, nextGridSpot, placeNear, seeded, type Point } from './personal-layout.ts';
 
 interface Props {
@@ -23,6 +24,8 @@ interface NodeAttrs {
   conversationIds: string[];
   /** Distinct sources cited over its visits. */
   sourceCount: number;
+  /** A superclass (it groups other concepts): drawn bigger, always labelled. */
+  isSuper: boolean;
   community: string;
   x: number;
   y: number;
@@ -112,7 +115,26 @@ function assignSlots(slots: Map<string, number>, sizes: Map<string, number>) {
  * everything is laid out again; afterwards known concepts keep their place and new ones
  * appear next to a neighbour, so the picture does not jump while the model tracks.
  */
+/** What the graph was last grouped by: when it changes, the areas of the superclasses are laid out again. */
+const groupSignatures = new WeakMap<object, string>();
+
 function merge(graph: Graph<NodeAttrs>, data: PersonalGraph, relayout: boolean, rng: () => number) {
+  // Superclasses (D18): the group of a concept is the topmost superclass above it (or itself, for a top one).
+  const up = new Map(data.concepts.filter((c) => c.superclassId).map((c) => [c.id, c.superclassId!]));
+  const top = (id: string) => {
+    let cur = id;
+    for (let i = 0; up.has(cur) && i < 50; i++) cur = up.get(cur)!;
+    return cur;
+  };
+  const supers = new Set(up.values());
+  const signature = [...up.entries()].map(([a, b]) => `${a}>${b}`).sort().join(',');
+  if (groupSignatures.get(graph) !== signature) relayout = true;
+  groupSignatures.set(graph, signature);
+  const groups = new Map<string, string>();
+  for (const c of data.concepts) if (up.has(c.id) || supers.has(c.id)) groups.set(c.id, top(c.id));
+  const members = new Map<string, number>();
+  for (const s of up.values()) members.set(s, (members.get(s) ?? 0) + 1);
+
   const seen = new Set<string>();
   const fresh: string[] = [];
   for (const c of data.concepts) {
@@ -124,7 +146,8 @@ function merge(graph: Graph<NodeAttrs>, data: PersonalGraph, relayout: boolean, 
       lastSeenAt: c.lastSeenAt,
       conversationIds: c.conversationIds,
       sourceCount: c.sourceCount,
-      size: nodeSize(c.visitCount),
+      isSuper: supers.has(c.id),
+      size: supers.has(c.id) ? nodeSize(Math.max(c.visitCount, members.get(c.id) ?? 0)) + 2 : nodeSize(c.visitCount),
     };
     if (graph.hasNode(c.id)) graph.mergeNodeAttributes(c.id, attrs);
     else {
@@ -138,14 +161,16 @@ function merge(graph: Graph<NodeAttrs>, data: PersonalGraph, relayout: boolean, 
   graph.clearEdges();
   for (const e of data.edges) {
     if (graph.hasNode(e.source) && graph.hasNode(e.target) && e.source !== e.target) {
-      graph.mergeEdge(e.source, e.target, { size: Math.min(0.6 + 0.4 * e.weight, 3), relation: !!e.relation });
+      graph.mergeEdge(e.source, e.target, { size: Math.min(0.6 + 0.4 * e.weight, 3), relation: !!e.relation, ...(e.label ? { label: e.label } : {}) });
     }
   }
 
   if (relayout) {
     const { community, position } = layoutPersonalGraph({
       nodes: graph.nodes(),
-      edges: data.edges,
+      // Each member is pulled to its superclass, so an area gathers around its hub (these edges are not drawn).
+      edges: [...data.edges, ...[...up.entries()].map(([source, target]) => ({ source, target, weight: 2 }))],
+      groups,
       sortKey: (n) => `${graph.getNodeAttribute(n, 'conversationIds')[0] ?? ''} ${graph.getNodeAttribute(n, 'label')}`,
     });
     graph.updateEachNodeAttributes((n, a) => ({ ...a, community: community.get(n)!, ...position.get(n)! }));
@@ -317,6 +342,9 @@ export function PersonalView({ live, found, onOpenConcept, onBackgroundClick }: 
 
     const renderer = new Sigma(graph, container.current!, {
       labelColor: { color: text },
+      renderEdgeLabels: true,
+      edgeLabelSize: 11,
+      edgeLabelColor: { color: text },
       defaultEdgeColor: cssVar('--edge'),
       labelFont,
       labelSize: 13,
@@ -341,7 +369,7 @@ export function PersonalView({ live, found, onOpenConcept, onBackgroundClick }: 
         const highlighted = node === h || isFound;
         const dim = h ? node !== h && !graph.areNeighbors(node, h) : v.focus ? g.key !== v.focus && !isFound : false;
         if (dim) return { ...data, size: Math.min(data.size, v.maxSize), color: faded, label: '', zIndex: 0 };
-        return { ...data, size: Math.min(data.size, v.maxSize), color, highlighted, zIndex: 1, forceLabel: !!h || isFound };
+        return { ...data, size: Math.min(data.size, v.maxSize), color, highlighted, zIndex: 1, forceLabel: !!h || isFound || !!data.isSuper };
       },
       edgeReducer: (edge, data) => {
         const v = view.current;
@@ -627,6 +655,7 @@ export function PersonalView({ live, found, onOpenConcept, onBackgroundClick }: 
       });
       const names = new Map<string, string>();
       const nameOfCommunity = (c: string) => {
+        if (c.startsWith('s:') && graph.hasNode(c.slice(2))) return graph.getNodeAttribute(c.slice(2), 'label');
         if (!names.has(c)) {
           const inside = (n: string) => graph.filterNeighbors(n, (_, a) => a.community === c).length;
           let best = '';
@@ -812,6 +841,7 @@ export function PersonalView({ live, found, onOpenConcept, onBackgroundClick }: 
           >
             Riordina
           </button>
+          <GroupSuggestions live={live} />
         </div>
       )}
       <div className="graph-area">

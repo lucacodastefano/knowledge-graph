@@ -48,6 +48,7 @@ export type TrackerEvent =
   | { type: 'concept.merged'; fromId: string; into: Concept }
   | { type: 'concept.deleted'; conceptId: string }
   | { type: 'concept.related'; from: string; to: string; related: boolean }
+  | { type: 'concept.grouped'; conceptId: string; superclassId: string | null }
   | { type: 'settings.changed'; settings: Settings };
 
 export interface VisitEdit {
@@ -379,9 +380,13 @@ export class Tracker {
     this.requireConcept(fromId);
     this.requireConcept(intoId);
     if (fromId === intoId) throw new TrackerError('Cannot merge a concept into itself');
+    const loop = (a: string, b: string) => [...this.ancestors(a)].some((x) => x === b && x !== this.repo.getSuperclass(a)?.id);
+    if (loop(intoId, fromId) || loop(fromId, intoId)) throw new TrackerError('Merging would create a loop in the superclasses: ungroup one first');
+    const up = this.repo.getSuperclass(fromId)?.id;
     const into = this.repo.transaction(() => {
       this.repo.reassignConcept(fromId, intoId);
       this.repo.deleteConcept(fromId);
+      if (up && up !== intoId) this.pruneSuperclass(up);
       return this.repo.getConcept(intoId)!;
     });
     this.emit({ type: 'concept.merged', fromId, into });
@@ -391,9 +396,11 @@ export class Tracker {
   /** Deletes a concept and all its nodes, in every conversation; their children move up one level. */
   deleteConcept(conceptId: string): void {
     this.requireConcept(conceptId);
+    const up = this.repo.getSuperclass(conceptId)?.id;
     this.repo.transaction(() => {
       for (const v of this.repo.getConceptDetail(conceptId)!.visits) this.removeVisit(v.id);
       this.repo.deleteConcept(conceptId);
+      if (up && this.repo.getConcept(up)) this.pruneSuperclass(up);
     });
     this.emit({ type: 'concept.deleted', conceptId });
   }
@@ -420,8 +427,10 @@ export class Tracker {
       if (edit.conceptId !== undefined && edit.conceptId !== visit.conceptId) {
         this.requireConcept(edit.conceptId);
         this.repo.setVisitConcept(visitId, edit.conceptId);
-        if (this.repo.countVisitsOfConcept(visit.conceptId) === 0) {
+        if (this.isUnused(visit.conceptId)) {
+          const up = this.repo.getSuperclass(visit.conceptId)?.id;
           this.repo.deleteConcept(visit.conceptId);
+          if (up) this.pruneSuperclass(up);
           removedConceptId = visit.conceptId;
         }
       }
@@ -443,14 +452,102 @@ export class Tracker {
     this.repo.setVisitParent(visit.id, parentVisitId);
   }
 
-  /** Draws (or, with related=false, removes) a free relation between two different concepts. */
-  setRelation(fromId: string, toId: string, related: boolean): void {
+  /** Draws (or, with related=false, removes) a free relation between two different concepts, with an optional label. */
+  setRelation(fromId: string, toId: string, related: boolean, label?: string | null): void {
     if (fromId === toId) throw new TrackerError('A concept cannot be related to itself: use merge for the same idea');
     this.requireConcept(fromId);
     this.requireConcept(toId);
-    const changed = this.repo.transaction(() => (related ? this.repo.addRelation(fromId, toId) : this.repo.removeRelation(fromId, toId)));
+    const changed = this.repo.transaction(() =>
+      related ? this.repo.addRelation(fromId, toId, label) : this.repo.removeRelation(fromId, toId),
+    );
     if (!changed && !related) throw new TrackerError('Relation not found');
     if (changed) this.emit({ type: 'concept.related', from: fromId, to: toId, related });
+  }
+
+  /** Puts a concept under a superclass ("is a kind of"), or out of it with null. One superclass per concept, no cycles. */
+  setSuperclass(conceptId: string, superId: string | null): void {
+    this.requireConcept(conceptId);
+    if (superId) {
+      this.requireConcept(superId);
+      if (this.ancestors(superId, true).has(conceptId)) throw new TrackerError('A concept cannot sit under itself or one of its own members');
+    }
+    const old = this.repo.getSuperclass(conceptId)?.id ?? null;
+    if (old === (superId ?? null)) return;
+    this.repo.transaction(() => {
+      this.repo.setSuperclass(conceptId, superId);
+      if (old) this.pruneSuperclass(old);
+    });
+    this.emit({ type: 'concept.grouped', conceptId, superclassId: superId });
+  }
+
+  /** Creates (or reuses, by name) a superclass and puts the given concepts under it; returns the superclass. */
+  group(name: string, conceptIds: string[]): Concept {
+    const title = name.trim();
+    if (!title) throw new TrackerError('Empty name');
+    const found = this.repo.findConceptByNorm(normalizeName(title));
+    const sup = found ?? this.repo.createConcept({ name: title, nameNorm: normalizeName(title) });
+    try {
+      for (const id of conceptIds) if (id !== sup.id) this.setSuperclass(id, sup.id);
+    } catch (err) {
+      if (!found) this.repo.transaction(() => this.pruneSuperclass(sup.id));
+      throw err;
+    }
+    if (!found && this.repo.listMembers(sup.id).length === 0) this.repo.transaction(() => this.pruneSuperclass(sup.id));
+    return this.repo.getConcept(sup.id) ?? sup;
+  }
+
+  /** "Ignora" on a suggestion: it will not be offered again. */
+  ignoreSuggestion(key: string) {
+    let ignored: string[] = [];
+    try {
+      ignored = JSON.parse(this.repo.getSetting('groupIgnored') ?? '[]') as string[];
+    } catch {
+      // Start over from an empty list.
+    }
+    // A "join" key lists every concept: remember each pair, so the other concepts are still offered.
+    const [sup, ids] = key.split(':');
+    const keys = ids ? ids.split(',').map((id) => `${sup}:${id}`) : [key];
+    this.repo.setSetting('groupIgnored', JSON.stringify([...new Set([...ignored, ...keys])]));
+  }
+
+  /** MCP entry (kc_relate): by names. A missing superclass is created; the other concepts must already exist. */
+  relateByName(input: { concept: string; superclass?: string; relatedTo?: string; label?: string }): string {
+    const find = (name: string) => {
+      const c = this.repo.findConceptByNorm(normalizeName(name));
+      if (!c) throw new TrackerError(`Concept "${name}" not found`);
+      return c;
+    };
+    const concept = find(input.concept);
+    if (input.superclass) {
+      const sup = this.group(input.superclass, [concept.id]);
+      return `"${concept.name}" is now under "${sup.name}"`;
+    }
+    if (input.relatedTo) {
+      const other = find(input.relatedTo);
+      this.setRelation(concept.id, other.id, true, input.label ?? null);
+      return `"${concept.name}" related to "${other.name}"`;
+    }
+    throw new TrackerError('Give superclass or related_to');
+  }
+
+  /** Superclasses above a concept, nearest first (optionally including the concept itself). */
+  private ancestors(id: string, self = false): Set<string> {
+    const out = new Set<string>(self ? [id] : []);
+    for (let p = this.repo.getSuperclass(id); p && !out.has(p.id); p = this.repo.getSuperclass(p.id)) out.add(p.id);
+    return out;
+  }
+
+  /** A superclass nobody sits under any more, with no visits of its own, is dropped (and so on up the chain). */
+  private pruneSuperclass(id: string) {
+    for (let cur: string | undefined = id; cur && this.isUnused(cur); ) {
+      const up: string | undefined = this.repo.getSuperclass(cur)?.id;
+      this.repo.deleteConcept(cur);
+      cur = up;
+    }
+  }
+
+  private isUnused(conceptId: string): boolean {
+    return this.repo.countVisitsOfConcept(conceptId) === 0 && this.repo.listMembers(conceptId).length === 0;
   }
 
   /** Removes a wrong source from a node (canvas correction); the source disappears when nothing else cites it. */
@@ -476,8 +573,10 @@ export class Tracker {
     this.repo.reparentChildren(visitId, visit.parentVisitId);
     this.repo.deleteVisit(visitId);
     if (conversation.currentVisitId === visitId) this.repo.setCurrentVisit(visit.conversationId, visit.parentVisitId);
-    if (this.repo.countVisitsOfConcept(visit.conceptId) > 0) return null;
+    if (!this.isUnused(visit.conceptId)) return null;
+    const up = this.repo.getSuperclass(visit.conceptId)?.id;
     this.repo.deleteConcept(visit.conceptId);
+    if (up) this.pruneSuperclass(up);
     return visit.conceptId;
   }
 }

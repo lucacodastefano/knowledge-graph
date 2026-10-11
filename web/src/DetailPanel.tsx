@@ -4,7 +4,7 @@ import { ConceptSearch } from './ConceptSearch.tsx';
 
 const fmt = (iso: string) => new Date(iso).toLocaleString('it-IT', { dateStyle: 'medium', timeStyle: 'short' });
 
-type Menu = 'closed' | 'open' | 'merge' | 'delete';
+type Menu = 'closed' | 'open' | 'group' | 'merge' | 'delete';
 
 /** Editable texts of one node: an occurrence of the concept or one of its sections. */
 interface NodeDraft {
@@ -157,6 +157,9 @@ export function DetailPanel({ conceptId, version, onClose, onOpen }: Props) {
           </button>
           {menu === 'open' && (
             <div className="menu" role="menu">
+              <button type="button" role="menuitem" onClick={() => setMenu('group')}>
+                Raggruppa in…
+              </button>
               <button type="button" role="menuitem" onClick={() => setMenu('merge')}>
                 Unisci a…
               </button>
@@ -167,6 +170,31 @@ export function DetailPanel({ conceptId, version, onClose, onOpen }: Props) {
           )}
         </div>
       </header>
+      {menu === 'group' && (
+        <div className="edit-box">
+          <p className="small">«{page?.name}» starà sotto una superclasse (una sola): scegline una esistente o creane una nuova.</p>
+          <ConceptSearch
+            label="Raggruppa in"
+            placeholder="Cerca la superclasse…"
+            exclude={conceptId}
+            autoFocus
+            onPick={(c) => void run(api.setSuperclass(conceptId, c.id))}
+          />
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              const name = new FormData(e.currentTarget).get('name') as string;
+              if (name.trim()) void run(api.group(name, [conceptId]));
+            }}
+          >
+            <input name="name" className="editable" aria-label="Nuova superclasse" placeholder="…oppure il nome di una nuova" />
+            <button type="submit">Crea e raggruppa</button>
+          </form>
+          <button type="button" className="ghost" onClick={() => setMenu('closed')}>
+            Annulla
+          </button>
+        </div>
+      )}
       {menu === 'merge' && (
         <div className="edit-box">
           <p className="small">Le visite di «{page?.name}» passeranno al concetto scelto, poi questo sparirà.</p>
@@ -206,6 +234,50 @@ export function DetailPanel({ conceptId, version, onClose, onOpen }: Props) {
           <p className="muted">
             Visto {page.visits.length} {page.visits.length === 1 ? 'volta' : 'volte'}, l'ultima {fmt(page.lastSeenAt)}
           </p>
+          {(page.superclass || page.members.length > 0) && (
+            <section className="groups" aria-label="Gruppi">
+              {page.superclass && (
+                <p className="small">
+                  In:{' '}
+                  <button type="button" className="link" onClick={() => onOpen(page.superclass!.id)}>
+                    {page.superclass.name}
+                  </button>{' '}
+                  <button
+                    type="button"
+                    className="ghost icon"
+                    aria-label="Togli dal gruppo"
+                    title="Togli dal gruppo"
+                    onClick={() => void run(api.setSuperclass(conceptId, null))}
+                  >
+                    ✕
+                  </button>
+                </p>
+              )}
+              {page.members.length > 0 && (
+                <>
+                  <h3>Contiene</h3>
+                  <ul>
+                    {page.members.map((m) => (
+                      <li key={m.id}>
+                        <button type="button" className="link" onClick={() => onOpen(m.id)}>
+                          {m.name}
+                        </button>{' '}
+                        <button
+                          type="button"
+                          className="ghost icon"
+                          aria-label={`Togli ${m.name} dal gruppo`}
+                          title="Togli dal gruppo"
+                          onClick={() => void run(api.setSuperclass(m.id, null))}
+                        >
+                          ✕
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+            </section>
+          )}
           <ol className="visits">
             {page.visits.map((v) => (
               <Occurrence
@@ -226,6 +298,19 @@ export function DetailPanel({ conceptId, version, onClose, onOpen }: Props) {
                   <li key={r.id}>
                     <button type="button" className="link" onClick={() => onOpen(r.id)}>
                       {r.name}
+                    </button>
+                    {r.label && <em className="small"> ({r.label})</em>}{' '}
+                    <button
+                      type="button"
+                      className="ghost icon"
+                      aria-label={`Etichetta della relazione con ${r.name}`}
+                      title="Etichetta"
+                      onClick={() => {
+                        const label = window.prompt('Etichetta della relazione (vuota per toglierla)', r.label ?? '');
+                        if (label !== null) void run(api.relate(conceptId, r.id, label.trim() || null));
+                      }}
+                    >
+                      ✎
                     </button>{' '}
                     <button
                       type="button"

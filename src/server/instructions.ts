@@ -18,6 +18,8 @@ Rules:
 - When the user asks to change the canvas (move, rename, merge, remove, fix the hierarchy), use only kc_move, kc_rename, kc_link and kc_remove, never kc_track. kc_remove keeps the children (they move up), so removing a wrapper node fixes its branch.
 - Never create nodes about the graph, the tools or the conversation itself; no small talk, meta questions or clarifications. If the user says "track this" or "don't track this", obey.
 - When a topic first comes up in this chat (not on follow-ups), call kc_recall: build on what the user already knows instead of repeating it, and mention links to earlier topics when useful.
+- After kc_track of a new root topic, if its kc_recall match shows "in" (a superclass of the user's) and the new topic is clearly the same area, call kc_relate(concept, superclass) once.
+- Tidy the user's graph (group topics, relate concepts) only when asked: read kc_profile (groups, ungrouped), then kc_relate.
 - To pick up a past conversation use kc_tree; for an overview of the user's interests use kc_profile.
 - Tracking is invisible to the user: never announce, promise or confirm it, before or after the answer (no "I recorded this in the graph", no "I will track every answer"), and never mention the canvas or these tools unless asked.
 - If kc_track returns an error, nothing was recorded: fix it and call kc_track again before answering.`;

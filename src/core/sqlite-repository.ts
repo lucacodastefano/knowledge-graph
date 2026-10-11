@@ -144,6 +144,8 @@ export class SqliteRepository implements Repository {
 
   reassignConcept(fromId: string, toId: string): void {
     this.db.prepare('UPDATE visits SET concept_id = ? WHERE concept_id = ?').run(toId, fromId);
+    // One superclass per concept: the target keeps its own if it has one.
+    if (this.getSuperclass(toId)) this.db.prepare(`DELETE FROM concept_links WHERE kind = 'is_a' AND from_concept_id = ?`).run(fromId);
     this.db.prepare('UPDATE OR IGNORE concept_links SET from_concept_id = ? WHERE from_concept_id = ?').run(toId, fromId);
     this.db.prepare('UPDATE OR IGNORE concept_links SET to_concept_id = ? WHERE to_concept_id = ?').run(toId, fromId);
     this.db
@@ -172,6 +174,7 @@ export class SqliteRepository implements Repository {
       for (const r of this.db.prepare('SELECT id, name FROM concepts').all()) set.run(similarityKey(r.name as string), r.id as string);
     }
     this.db.exec('CREATE INDEX IF NOT EXISTS concepts_key ON concepts(name_key)');
+    if (!has('concept_links', 'label')) this.db.exec('ALTER TABLE concept_links ADD COLUMN label TEXT');
     if (!has('visits', 'detail')) this.db.exec('ALTER TABLE visits ADD COLUMN detail TEXT');
   }
 
@@ -369,13 +372,13 @@ export class SqliteRepository implements Repository {
       .map(toVisit);
     const relations = this.db
       .prepare(
-        `SELECT l.from_concept_id AS f, l.to_concept_id AS t FROM concept_links l
+        `SELECT l.from_concept_id AS f, l.to_concept_id AS t, l.label FROM concept_links l
          WHERE l.kind = 'related'
            AND EXISTS (SELECT 1 FROM visits v WHERE v.conversation_id = ?1 AND v.concept_id = l.from_concept_id)
            AND EXISTS (SELECT 1 FROM visits v WHERE v.conversation_id = ?1 AND v.concept_id = l.to_concept_id)`,
       )
       .all(conversationId)
-      .map((r) => ({ from: r.f as string, to: r.t as string }));
+      .map((r) => ({ from: r.f as string, to: r.t as string, ...(r.label ? { label: r.label as string } : {}) }));
     return { conversation, visits, relations };
   }
 
@@ -386,11 +389,12 @@ export class SqliteRepository implements Repository {
            (SELECT v2.summary FROM visits v2 WHERE v2.concept_id = c.id ORDER BY v2.created_at DESC, v2.seq DESC LIMIT 1) AS summary,
            (SELECT COUNT(DISTINCT vs.source_id) FROM visit_sources vs JOIN visits v3 ON v3.id = vs.visit_id
             WHERE v3.concept_id = c.id) AS source_count
-         FROM concepts c JOIN visits v ON v.concept_id = c.id
-         GROUP BY c.id`,
+         FROM concepts c LEFT JOIN visits v ON v.concept_id = c.id
+         GROUP BY c.id
+         HAVING COUNT(v.id) > 0 OR EXISTS (SELECT 1 FROM concept_links l WHERE l.kind = 'is_a' AND l.to_concept_id = c.id)`,
       )
       .all()
-      .map((r) => ({ ...toConcept(r), summary: (r.summary as string) ?? '', sourceCount: Number(r.source_count ?? 0), conversationIds: [] as string[] }));
+      .map((r) => ({ ...toConcept(r), summary: (r.summary as string) ?? '', sourceCount: Number(r.source_count ?? 0), conversationIds: [] as string[], superclassId: null as string | null }));
     // Conversations of each concept, the one with most visits first: the canvas colours and filters by them.
     const byId = new Map(concepts.map((c) => [c.id, c]));
     for (const r of this.db
@@ -400,6 +404,10 @@ export class SqliteRepository implements Repository {
       )
       .all()) {
       byId.get(r.concept_id as string)?.conversationIds.push(r.conversation_id as string);
+    }
+    for (const r of this.db.prepare(`SELECT from_concept_id AS f, to_concept_id AS t FROM concept_links WHERE kind = 'is_a'`).all()) {
+      const c = byId.get(r.f as string);
+      if (c) c.superclassId = r.t as string;
     }
     const conversations = this.db
       .prepare(
@@ -411,26 +419,30 @@ export class SqliteRepository implements Repository {
     // Edges come from drill-downs (parent visit -> child visit) plus explicit concept links.
     const edges = this.db
       .prepare(
-        `SELECT source, target, SUM(w) AS weight, MAX(rel) AS rel FROM (
-           SELECT p.concept_id AS source, v.concept_id AS target, COUNT(*) AS w, 0 AS rel
+        `SELECT source, target, SUM(w) AS weight, MAX(rel) AS rel, MAX(label) AS label FROM (
+           SELECT p.concept_id AS source, v.concept_id AS target, COUNT(*) AS w, 0 AS rel, NULL AS label
            FROM visits v JOIN visits p ON p.id = v.parent_visit_id
            WHERE p.concept_id <> v.concept_id
            GROUP BY 1, 2
            UNION ALL
-           SELECT from_concept_id, to_concept_id, 1, 1 FROM concept_links
+           SELECT from_concept_id, to_concept_id, 1, 1, label FROM concept_links WHERE kind = 'related'
          ) GROUP BY source, target`,
       )
       .all()
-      .map((r) => ({ source: r.source as string, target: r.target as string, weight: Number(r.weight), ...(r.rel ? { relation: true } : {}) }));
+      .map((r) => ({ source: r.source as string, target: r.target as string, weight: Number(r.weight), ...(r.rel ? { relation: true } : {}), ...(r.label ? { label: r.label as string } : {}) }));
     return { concepts, edges, conversations };
   }
 
-  addRelation(fromId: string, toId: string): boolean {
-    const exists = this.db
-      .prepare(`SELECT 1 FROM concept_links WHERE kind = 'related' AND ((from_concept_id = ?1 AND to_concept_id = ?2) OR (from_concept_id = ?2 AND to_concept_id = ?1))`)
-      .get(fromId, toId);
-    if (exists) return false;
-    this.db.prepare(`INSERT INTO concept_links (from_concept_id, to_concept_id, kind) VALUES (?, ?, 'related')`).run(fromId, toId);
+  addRelation(fromId: string, toId: string, label?: string | null): boolean {
+    const text = label?.trim() || null;
+    const both = `kind = 'related' AND ((from_concept_id = ?1 AND to_concept_id = ?2) OR (from_concept_id = ?2 AND to_concept_id = ?1))`;
+    const exists = this.db.prepare(`SELECT label FROM concept_links WHERE ${both}`).get(fromId, toId);
+    if (exists) {
+      if (label === undefined || (exists.label ?? null) === text) return false;
+      this.db.prepare(`UPDATE concept_links SET label = ?3 WHERE ${both}`).run(fromId, toId, text);
+      return true;
+    }
+    this.db.prepare(`INSERT INTO concept_links (from_concept_id, to_concept_id, kind, label) VALUES (?, ?, 'related', ?)`).run(fromId, toId, text);
     return true;
   }
 
@@ -441,14 +453,52 @@ export class SqliteRepository implements Repository {
     return Number(r.changes) > 0;
   }
 
-  listRelated(conceptId: string): ConceptMatch[] {
+  listRelated(conceptId: string): (ConceptMatch & { label?: string })[] {
     return this.db
       .prepare(
-        `SELECT c.id, c.name FROM concept_links l
+        `SELECT c.id, c.name, l.label FROM concept_links l
          JOIN concepts c ON c.id = CASE WHEN l.from_concept_id = ?1 THEN l.to_concept_id ELSE l.from_concept_id END
          WHERE l.kind = 'related' AND (l.from_concept_id = ?1 OR l.to_concept_id = ?1) ORDER BY c.name`,
       )
       .all(conceptId)
+      .map((r) => ({ id: r.id as string, name: r.name as string, ...(r.label ? { label: r.label as string } : {}) }));
+  }
+
+  setSuperclass(childId: string, parentId: string | null): void {
+    this.db.prepare(`DELETE FROM concept_links WHERE kind = 'is_a' AND from_concept_id = ?`).run(childId);
+    if (parentId) this.db.prepare(`INSERT INTO concept_links (from_concept_id, to_concept_id, kind) VALUES (?, ?, 'is_a')`).run(childId, parentId);
+  }
+
+  getSuperclass(conceptId: string): ConceptMatch | undefined {
+    const r = this.db
+      .prepare(`SELECT c.id, c.name FROM concept_links l JOIN concepts c ON c.id = l.to_concept_id WHERE l.kind = 'is_a' AND l.from_concept_id = ?`)
+      .get(conceptId);
+    return r ? { id: r.id as string, name: r.name as string } : undefined;
+  }
+
+  listRootConcepts(): ConceptMatch[] {
+    return this.db
+      .prepare(
+        `SELECT c.id, c.name FROM concepts c
+         WHERE EXISTS (SELECT 1 FROM visits v WHERE v.concept_id = c.id AND v.parent_visit_id IS NULL)
+           AND NOT EXISTS (SELECT 1 FROM concept_links l WHERE l.kind = 'is_a' AND l.from_concept_id = c.id)
+         ORDER BY c.last_seen_at DESC`,
+      )
+      .all()
+      .map((r) => ({ id: r.id as string, name: r.name as string }));
+  }
+
+  listSuperclasses(): ConceptMatch[] {
+    return this.db
+      .prepare(`SELECT c.id, c.name FROM concepts c WHERE EXISTS (SELECT 1 FROM concept_links l WHERE l.kind = 'is_a' AND l.to_concept_id = c.id) ORDER BY c.name`)
+      .all()
+      .map((r) => ({ id: r.id as string, name: r.name as string }));
+  }
+
+  listMembers(superId: string): ConceptMatch[] {
+    return this.db
+      .prepare(`SELECT c.id, c.name FROM concept_links l JOIN concepts c ON c.id = l.from_concept_id WHERE l.kind = 'is_a' AND l.to_concept_id = ? ORDER BY c.name`)
+      .all(superId)
       .map((r) => ({ id: r.id as string, name: r.name as string }));
   }
 

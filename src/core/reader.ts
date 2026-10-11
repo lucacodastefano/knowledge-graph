@@ -1,7 +1,8 @@
 import type { Repository } from './repository.ts';
-import type { Concept, ConceptPage, ConceptSection, Visit } from './types.ts';
+import type { Concept, ConceptMatch, ConceptPage, ConceptSection, GroupSuggestion, Visit } from './types.ts';
 import { normalizeName } from './normalize.ts';
 import { TrackerError } from './tracker.ts';
+import { titleStems } from './similarity.ts';
 
 /** What the user already knows about a concept (RF8). Kept compact: it is sent to the model. */
 export interface RecalledConcept {
@@ -17,6 +18,12 @@ export interface RecalledConcept {
   near: string[];
   /** Known sources (URLs), newest first; only when there are some. */
   sources?: string[];
+  /** The superclass it sits under, when it has one. */
+  in?: string;
+  /** Free relations, as "name" or "name (label)". */
+  rel?: string[];
+  /** For a superclass: the concepts it groups. */
+  members?: string[];
 }
 
 export interface Profile {
@@ -24,6 +31,10 @@ export interface Profile {
   /** Most explored concepts, as "name ×visits". */
   top: string[];
   recent: string[];
+  /** Superclasses with how many concepts they group. */
+  groups: string[];
+  /** Topics not under any superclass yet: candidates when the user asks to tidy the graph (kc_relate). */
+  ungrouped: string[];
   conversations: { id: string; title: string; last: string; nodes: number }[];
 }
 
@@ -38,6 +49,23 @@ const RECALL_SOURCES = 3;
 const PROFILE_LIMIT = 10;
 const PROFILE_CONVERSATIONS = 5;
 const SEARCH_LIMIT = 20;
+
+const MEMBERS_SHOWN = 8;
+const UNGROUPED_SHOWN = 15;
+const SUGGESTION_MAX = 12;
+const IGNORED_KEY = 'groupIgnored';
+
+/** Superclass, relations and members of a concept, only the ones that exist (tokens). */
+function extras(repo: Repository, id: string): Pick<RecalledConcept, 'in' | 'rel' | 'members'> {
+  const up = repo.getSuperclass(id);
+  const rel = repo.listRelated(id).map((r) => (r.label ? `${r.name} (${r.label})` : r.name));
+  const members = repo.listMembers(id).map((m) => m.name);
+  return {
+    ...(up ? { in: up.name } : {}),
+    ...(rel.length ? { rel } : {}),
+    ...(members.length ? { members: members.slice(0, MEMBERS_SHOWN) } : {}),
+  };
+}
 
 const day = (iso: string) => iso.slice(0, 10);
 const clip = (s: string, max: number) => (s.length > max ? `${s.slice(0, max - 1)}…` : s);
@@ -72,6 +100,7 @@ export class Reader {
         notes,
         near: this.repo.neighbourConcepts(c.id, NEAR_PER_CONCEPT).map((n) => n.name),
         ...(sources.length > 0 ? { sources } : {}),
+        ...extras(this.repo, c.id),
       };
     });
   }
@@ -90,6 +119,8 @@ export class Reader {
       // Sources of this node and of the other visits of the same concept, each once.
       sources: this.repo.listConceptSources(conceptId),
       related: this.repo.listRelated(conceptId),
+      superclass: this.repo.getSuperclass(conceptId) ?? null,
+      members: this.repo.listMembers(conceptId),
       visits: detail.visits.map((v) => {
         const all = visitsOf(v.conversationId);
         const sections = (parentId: string, depth: number): ConceptSection[] =>
@@ -148,12 +179,54 @@ export class Reader {
       concepts: this.repo.countConcepts(),
       top: this.repo.rankConcepts('visits', PROFILE_LIMIT).map((c) => `${c.name} ×${c.visitCount}`),
       recent: this.repo.rankConcepts('recent', PROFILE_LIMIT).map((c) => c.name),
+      groups: this.repo.listSuperclasses().map((g) => `${g.name} (${this.repo.listMembers(g.id).length})`),
+      ungrouped: this.repo.listRootConcepts().slice(0, UNGROUPED_SHOWN).map((c) => c.name),
       conversations: this.repo
         .listConversations()
         .map((c) => ({ id: c.id, title: c.title, last: day(c.lastActivityAt), nodes: this.repo.getTree(c.id)!.visits.length }))
         .filter((c) => c.nodes > 0)
         .slice(0, PROFILE_CONVERSATIONS),
     };
+  }
+
+  /**
+   * Probable groupings of the topics not under a superclass yet (SC2), from words their names share: no model needed.
+   * A concept goes to its smallest group; a word that an existing superclass already uses proposes joining it.
+   */
+  suggestions(): GroupSuggestion[] {
+    let ignored: string[] = [];
+    try {
+      ignored = JSON.parse(this.repo.getSetting(IGNORED_KEY) ?? '[]') as string[];
+    } catch {
+      // A broken setting just means nothing was ignored.
+    }
+    const stemsOf = (name: string) => [...new Set(titleStems(name).filter((s) => s.length >= 4))];
+    const roots = this.repo.listRootConcepts().map((c) => ({ c, stems: stemsOf(c.name) }));
+    const out: GroupSuggestion[] = [];
+    // 1. Joining an existing superclass: a root shares a word with its name or its members' names.
+    const claimed = new Set<string>();
+    for (const sup of this.repo.listSuperclasses()) {
+      const words = new Set([sup.name, ...this.repo.listMembers(sup.id).map((m) => m.name)].flatMap(stemsOf));
+      const hits = roots.filter((r) => r.c.id !== sup.id && r.stems.some((s) => words.has(s)) && !ignored.includes(`${sup.id}:${r.c.id}`));
+      if (hits.length === 0) continue;
+      hits.forEach((h) => claimed.add(h.c.id));
+      out.push({ key: `${sup.id}:${hits.map((h) => h.c.id).join(',')}`, name: sup.name, concepts: hits.map((h) => h.c), into: sup });
+    }
+    // 2. New groups: roots sharing a word, each in its smallest group.
+    const byStem = new Map<string, ConceptMatch[]>();
+    for (const r of roots) if (!claimed.has(r.c.id)) for (const s of r.stems) byStem.set(s, [...(byStem.get(s) ?? []), r.c]);
+    const groups = [...byStem.entries()]
+      .filter(([s, list]) => list.length >= 2 && list.length <= SUGGESTION_MAX && !ignored.includes(s))
+      .sort((a, b) => a[1].length - b[1].length || a[0].localeCompare(b[0]));
+    const used = new Set<string>();
+    for (const [stem, list] of groups) {
+      const free = list.filter((c) => !used.has(c.id));
+      if (free.length < 2) continue;
+      free.forEach((c) => used.add(c.id));
+      const word = free[0].name.split(/\s+/).find((w) => titleStems(w).includes(stem)) ?? stem;
+      out.push({ key: stem, name: word.charAt(0).toUpperCase() + word.slice(1).toLowerCase(), concepts: free });
+    }
+    return out;
   }
 
   /** Node search for the canvas (RF17): exact name, then names containing the text, then what was said. */

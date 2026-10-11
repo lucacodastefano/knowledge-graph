@@ -61,11 +61,20 @@ export interface Repository {
   /** Sources of every visit of a concept, each once with the visits citing it, newest first. */
   listConceptSources(conceptId: string): ConceptSource[];
 
-  /** Adds a free relation between two concepts; false if they are already related (either direction). */
-  addRelation(fromId: string, toId: string): boolean;
+  /** Adds a free relation between two concepts, or updates its label; false if nothing changed. */
+  addRelation(fromId: string, toId: string, label?: string | null): boolean;
   /** Removes the relation between two concepts, whichever direction it was drawn; false if there was none. */
   removeRelation(aId: string, bId: string): boolean;
-  listRelated(conceptId: string): ConceptMatch[];
+  listRelated(conceptId: string): (ConceptMatch & { label?: string })[];
+  /** Makes `parentId` the one superclass of a concept, replacing any previous one; null removes it. */
+  setSuperclass(childId: string, parentId: string | null): void;
+  getSuperclass(conceptId: string): ConceptMatch | undefined;
+  /** Concepts with a visit at the top of a conversation and no superclass: what could be grouped. */
+  listRootConcepts(): ConceptMatch[];
+  /** Concepts that group others. */
+  listSuperclasses(): ConceptMatch[];
+  /** Concepts directly under a superclass, by name. */
+  listMembers(superId: string): ConceptMatch[];
 
   addRevision(revision: Omit<Revision, 'createdAt'>): void;
   listRevisions(targetKind: Revision['targetKind'], targetId: string): Revision[];

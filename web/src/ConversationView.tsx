@@ -3,6 +3,8 @@ import {
   applyNodeChanges,
   Background,
   BaseEdge,
+  EdgeLabelRenderer,
+  getBezierPath,
   Controls,
   ReactFlow,
   ReactFlowProvider,
@@ -32,8 +34,54 @@ function CrossEdge({ id, data, sourceX, sourceY, targetX, targetY }: EdgeProps<E
   return <BaseEdge id={id} path={data?.path ?? `M${sourceX},${sourceY} L${targetX},${targetY}`} />;
 }
 
+/**
+ * A free relation between two concepts: dotted line with its label. Clicking it arms it: a red ✕ (or Canc) removes
+ * it, ✎ sets the label.
+ */
+function RelationEdge({ id, data, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition }: EdgeProps<Edge<EdgeData>>) {
+  const [path, x, y] = getBezierPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition });
+  const d = data as unknown as RelationData;
+  return (
+    <>
+      <BaseEdge id={id} path={path} interactionWidth={24} />
+      {(d.label || d.armed) && (
+        <EdgeLabelRenderer>
+          <div className="relation-label nodrag nopan" style={{ transform: `translate(-50%, -50%) translate(${x}px, ${y}px)` }}>
+            {d.label && <span>{d.label}</span>}
+            {d.armed && (
+              <>
+                <button type="button" className="relation-edit" aria-label="Etichetta" title="Etichetta" onClick={d.onLabel}>
+                  ✎
+                </button>
+                <button type="button" className="relation-remove" aria-label="Rimuovi la relazione" title="Rimuovi (Canc)" onClick={d.onRemove}>
+                  ✕
+                </button>
+              </>
+            )}
+          </div>
+        </EdgeLabelRenderer>
+      )}
+    </>
+  );
+}
+
+interface RelationData {
+  from: string;
+  to: string;
+  label?: string;
+  armed: boolean;
+  onRemove: () => void;
+  onLabel: () => void;
+}
+
+/** One undoable canvas action (Ctrl+Z / Ctrl+Y). */
+interface Step {
+  undo: () => Promise<unknown>;
+  redo: () => Promise<unknown>;
+}
+
 const nodeTypes = { visit: VisitNode };
-const edgeTypes = { cross: CrossEdge };
+const edgeTypes = { cross: CrossEdge, relation: RelationEdge };
 const FRESH_MS = 1600;
 /** WP6: the tooltip opens after a short dwell and closes at once, with a grace period to reach its button. */
 const OPEN_DELAY_MS = 700;
@@ -114,18 +162,54 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
   const fail = useCallback((e: unknown) => setNotice(explain((e as Error).message)), []);
   /** Back to the laid-out positions after a drag that moved nothing. */
   const relayout = useCallback(() => setTree((t) => (t ? { ...t } : t)), []);
+  const undoStack = useRef<Step[]>([]);
+  const redoStack = useRef<Step[]>([]);
+  const [armed, setArmed] = useState<string | null>(null);
+  /** Runs a canvas action and remembers how to undo it; a new action clears what could be redone. */
+  const act = useCallback(
+    (step: Step) => {
+      setNotice(null);
+      step.redo().then(
+        () => {
+          undoStack.current.push(step);
+          redoStack.current = [];
+        },
+        (e: unknown) => {
+          fail(e);
+          relayout();
+        },
+      );
+    },
+    [fail, relayout],
+  );
+  const travel = useCallback(
+    (from: Step[], to: Step[], dir: 'undo' | 'redo') => {
+      const step = from.pop();
+      if (!step) return;
+      setNotice(null);
+      step[dir]().then(
+        () => void to.push(step),
+        (e: unknown) => {
+          fail(e);
+          from.push(step);
+        },
+      );
+    },
+    [fail],
+  );
   // Dropping a node on another one moves it (with its children) under that node; elsewhere it snaps back.
   const onDragStop = useCallback(
     (_: unknown, node: VisitNodeType) => {
       const target = flow.getIntersectingNodes(node).find((n) => n.id !== node.id);
-      if (!target || target.id === node.data.visit.parentVisitId) return relayout();
-      setNotice(null);
-      api.editVisit(node.id, { parentVisitId: target.id }).then(relayout, (e: unknown) => {
-        fail(e);
-        relayout();
+      const old = node.data.visit.parentVisitId;
+      if (!target || target.id === old) return relayout();
+      act({
+        redo: () => api.editVisit(node.id, { parentVisitId: target.id }),
+        undo: () => api.editVisit(node.id, { parentVisitId: old }),
       });
+      relayout();
     },
-    [flow, relayout, fail],
+    [flow, relayout, act],
   );
   // Pulling a line from one node to another relates their concepts (a different idea, unlike "Unisci a…").
   const onConnect = useCallback(
@@ -133,19 +217,54 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
       const from = tree?.visits.find((v) => v.id === c.source);
       const to = tree?.visits.find((v) => v.id === c.target);
       if (!from || !to) return;
-      setNotice(null);
-      api.relate(from.conceptId, to.conceptId).catch(fail);
+      act({ redo: () => api.relate(from.conceptId, to.conceptId), undo: () => api.unrelate(from.conceptId, to.conceptId) });
     },
-    [tree, fail],
+    [tree, act],
   );
-  const onEdgeClick = useCallback(
-    (_: unknown, edge: Edge<EdgeData>) => {
-      if (!edge.className?.includes('relation') || !edge.data) return;
-      const { from, to } = edge.data as { from: string; to: string };
-      if (window.confirm('Rimuovere questa relazione?')) api.unrelate(from, to).catch(fail);
+  const relationOf = useCallback((id: string) => tree?.relations.find((r) => `r-${r.from}-${r.to}` === id), [tree]);
+  const removeRelation = useCallback(
+    (id: string) => {
+      const r = relationOf(id);
+      if (!r) return;
+      setArmed(null);
+      act({ redo: () => api.unrelate(r.from, r.to), undo: () => api.relate(r.from, r.to, r.label) });
     },
-    [fail],
+    [relationOf, act],
   );
+  const labelRelation = useCallback(
+    (id: string) => {
+      const r = relationOf(id);
+      if (!r) return;
+      const label = window.prompt('Etichetta della relazione (vuota per toglierla)', r.label ?? '');
+      if (label === null) return;
+      act({ redo: () => api.relate(r.from, r.to, label.trim() || null), undo: () => api.relate(r.from, r.to, r.label ?? null) });
+    },
+    [relationOf, act],
+  );
+  const onEdgeClick = useCallback((_: unknown, edge: Edge<EdgeData>) => {
+    if (edge.className?.includes('relation')) setArmed((a) => (a === edge.id ? null : edge.id));
+  }, []);
+  // Canc removes the armed relation; Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z) walk back and forth through the actions.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+      const mod = e.ctrlKey || e.metaKey;
+      const key = e.key.toLowerCase();
+      if ((e.key === 'Delete' || e.key === 'Backspace') && armed) {
+        e.preventDefault();
+        removeRelation(armed);
+      } else if (mod && key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        travel(undoStack.current, redoStack.current, 'undo');
+      } else if (mod && (key === 'y' || (key === 'z' && e.shiftKey))) {
+        e.preventDefault();
+        travel(redoStack.current, undoStack.current, 'redo');
+      }
+    };
+    addEventListener('keydown', onKey);
+    return () => removeEventListener('keydown', onKey);
+  }, [armed, removeRelation, travel]);
   // Keeps React Flow's measured sizes in our state: without them every rebuild resets nodes to
   // unmeasured (hidden), and a rebuild racing the resize observer can leave them hidden for good.
   const onNodesChange = useCallback(
@@ -153,6 +272,7 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
     [],
   );
   const knownIds = useRef<Set<string>>(new Set());
+  const lastCurrent = useRef<string | null | undefined>(undefined);
   /** Mind map halves of the first-level branches, so a growing map moves a branch only when the balance pays. */
   const halves = useRef<Map<string, Half>>(new Map());
   /** The view to frame once React Flow has the new positions: everything, the current node, or nothing. */
@@ -169,6 +289,9 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
   useEffect(() => void loadConversations(), [loadConversations]);
   useEffect(() => {
     knownIds.current = new Set();
+    undoStack.current = [];
+    redoStack.current = [];
+    setArmed(null);
     fitAll.current = true;
     halves.current = new Map();
     setSelected(null);
@@ -244,14 +367,16 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
           target: b,
           sourceHandle: leftToRight ? 's-right' : 's-left',
           targetHandle: leftToRight ? 't-left' : 't-right',
-          type: 'default',
+          type: 'relation',
           className: 'relation',
-          interactionWidth: 20,
-          data: { from: r.from, to: r.to },
+          data: { from: r.from, to: r.to, label: r.label, armed: false, onRemove: () => undefined, onLabel: () => undefined },
         });
       }
       setEdges([...buildEdges(tree.visits, kind, placement), ...relEdges]);
-      pendingFit.current = fitAll.current ? 'all' : 'current';
+      // Only a new node or a new current node moves the view: touching nodes or editing relations never does.
+      const current = tree.conversation.currentVisitId;
+      pendingFit.current = fitAll.current ? 'all' : added.length > 0 || current !== lastCurrent.current ? 'current' : null;
+      lastCurrent.current = current;
       fitAll.current = false;
     });
     return () => {
@@ -300,14 +425,20 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
       }),
     [nodes, fresh, hovered, matchConcept, near, focusId],
   );
+  const base = edges;
   const shownEdges = useMemo(() => {
+    const edges = base.map((e) =>
+      e.className === 'relation'
+        ? { ...e, data: { ...e.data, armed: e.id === armed, onRemove: () => removeRelation(e.id), onLabel: () => labelRelation(e.id) } as EdgeData }
+        : e,
+    );
     if (!near) return edges;
     const mark = (e: Edge<EdgeData>, cls: string) => ({ ...e, className: [e.className, cls].filter(Boolean).join(' ') });
     return [
       ...edges.filter((e) => !near.edges.has(e.id)).map((e) => mark(e, 'dim')),
       ...edges.filter((e) => near.edges.has(e.id)).map((e) => mark(e, 'related')),
     ];
-  }, [edges, near]);
+  }, [base, near, armed, removeRelation, labelRelation]);
 
   return (
     <>
@@ -353,6 +484,7 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
           onNodeClick={(_, n) => setSelected((s) => (s === n.id ? null : n.id))}
           onPaneClick={() => {
             setSelected(null);
+            setArmed(null);
             onBackgroundClick?.();
           }}
           deleteKeyCode={null}

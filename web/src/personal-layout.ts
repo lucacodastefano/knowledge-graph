@@ -21,6 +21,8 @@ export interface LayoutInput {
   edges: { source: string; target: string; weight: number }[];
   /** Orders the isolated grid, so isolated concepts of the same conversation sit together. */
   sortKey?: (node: string) => string;
+  /** Concepts under a superclass (D18): node -> group, replacing Louvain for them. Louvain still sorts the rest. */
+  groups?: Map<string, string>;
 }
 
 export interface LayoutOutput {
@@ -176,7 +178,9 @@ function pack(ids: string[], radius: Map<string, number>, links: Map<string, Map
 export function layoutPersonalGraph(input: LayoutInput): LayoutOutput {
   const rng = seeded(42);
   const g = undirected(input);
-  const community = detectCommunities(g);
+  const forced = input.groups ?? new Map<string, string>();
+  const community = detectCommunities(undirected({ ...input, nodes: input.nodes.filter((n) => !forced.has(n)) }));
+  for (const n of input.nodes) if (forced.has(n)) community.set(n, `s:${forced.get(n)}`);
   const members = new Map<string, string[]>();
   for (const n of input.nodes) {
     const c = community.get(n)!;
