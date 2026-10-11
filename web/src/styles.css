@@ -269,3 +269,7 @@ button.icon:hover { color: var(--text); }
 .panel .rel-icon:hover { color: var(--text); background: var(--accent-soft); border-color: var(--accent); }
 .panel .rel-icon.danger:hover { color: #fff; background: #dc2626; border-color: #dc2626; }
 .visit.cover { opacity: 0.15; }
+.results .results-head { display: block; padding-top: 8px; border-top: 1px solid var(--border); }
+.results li.hit { flex-direction: column; justify-content: flex-start; gap: 2px; }
+.results li.hit .hit-snippet { overflow-wrap: anywhere; }
+.results mark { background: var(--accent-soft); color: inherit; border-radius: 2px; }

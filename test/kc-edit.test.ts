@@ -126,3 +126,45 @@ test('kc_track: at most 10 nodes per call, sources by reference inside the call'
   assert.match(bad.text, /Source @3 is not in sources/);
   await c.close();
 });
+
+test('searchText finds words inside the full detail of any map, follows edits and deletions', () => {
+  const t = new Tracker(new SqliteRepository(':memory:'));
+  const a = t.startConversation('Kafka', null);
+  const b = t.startConversation('Eventi', null);
+  t.track(a.id, [{ title: 'Partizioni', summary: 'Unità di parallelismo.', detail: 'Ogni partizione ha un leader; la replica garantisce la durabilità.', parent: 'root' }]);
+  t.track(b.id, [{ title: 'Replicazione', summary: 'Copie dei dati.', detail: 'Il quorum decide la durabilità.', parent: 'root' }]);
+  const titles = (q: string) => t.repo.searchText(q, 10).map((h) => `${h.conversationTitle}/${h.title}/${h.field}`);
+  assert.deepEqual(titles('durabilità').sort(), ['Eventi/Replicazione/detail', 'Kafka/Partizioni/detail']);
+  assert.deepEqual(titles('durabilita quorum'), ['Eventi/Replicazione/detail'], 'all words, accents folded');
+  assert.match(t.repo.searchText('leader', 5)[0].snippet, /Ogni partizione ha un leader/);
+  assert.equal(titles('partizioni')[0], 'Kafka/Partizioni/title', 'a title match ranks first');
+  assert.deepEqual(titles('quorum durabilità leader').length, 2, 'falls back to any word when none has all');
+  assert.deepEqual(titles('zz'), []);
+  t.editNode(a.id, 'Partizioni', { find: 'leader', replace: 'coordinatore' });
+  assert.deepEqual(titles('leader'), []);
+  assert.deepEqual(titles('coordinatore'), ['Kafka/Partizioni/detail']);
+  t.deleteConversation(b.id);
+  assert.deepEqual(titles('quorum'), []);
+});
+
+test('the text index is built from existing nodes when a database from before it is opened', async () => {
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { DatabaseSync } = await import('node:sqlite');
+  const dir = mkdtempSync(`${tmpdir()}/kg-fts-`);
+  try {
+    const path = `${dir}/graph.db`;
+    const t1 = new Tracker(new SqliteRepository(path));
+    const c = t1.startConversation('Vecchia', null);
+    t1.track(c.id, [{ title: 'Nodo', summary: 's.', detail: 'testo antico indicizzabile', parent: 'root' }]);
+    t1.repo.close();
+    const raw = new DatabaseSync(path);
+    raw.exec('DROP TRIGGER visits_fts_ai; DROP TRIGGER visits_fts_ad; DROP TRIGGER visits_fts_au; DROP TABLE visits_fts;');
+    raw.close();
+    const t2 = new Tracker(new SqliteRepository(path));
+    assert.equal(t2.repo.searchText('indicizzabile', 5).length, 1);
+    t2.repo.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

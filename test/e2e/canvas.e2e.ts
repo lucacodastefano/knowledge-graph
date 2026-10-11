@@ -878,3 +878,27 @@ test('Approfondisci renders the markdown of the detail: tables, headings, emphas
   assert.ok(await page.evaluate(() => (window as unknown as { pwned?: number }).pwned === undefined));
   await page.screenshot({ path: join(out, '6-markdown.png') });
 });
+
+test('search finds words inside the text of another map and opens the node in that map', async () => {
+  const a = tracker.startConversation('Vini siciliani', null);
+  tracker.track(a.id, [
+    { title: 'Vini', summary: 'Panoramica.', parent: 'root' },
+    { title: 'Passito', summary: 'Vino dolce.', detail: 'Si produce con uvetta di zibibbo appassita al sole.', parent: 'Vini' },
+  ]);
+  const b = tracker.startConversation('Pasta romana', null);
+  tracker.track(b.id, [{ title: 'Carbonara', summary: 'Pasta con uovo.', parent: 'root' }]);
+  const page = await browser.newPage({ viewport: { width: 1400, height: 820 } });
+  await page.goto(`${base}#personale`);
+  await page.getByLabel('Cerca concetti').fill('zibibbo');
+  const hit = page.getByRole('option', { name: /Passito/ });
+  await hit.waitFor();
+  assert.match(await hit.innerText(), /Vini siciliani/);
+  assert.match(await hit.innerText(), /uvetta di zibibbo/);
+  await hit.click();
+  // The view moves to the conversation view, on the map that holds the node, with the node selected.
+  await page.waitForFunction((id) => (document.querySelector('select[aria-label=Conversazione]') as HTMLSelectElement | null)?.value === id, a.id);
+  await titled(page, 'Passito').waitFor();
+  assert.equal(await titled(page, 'Carbonara').count(), 0, 'the other map is not shown');
+  await page.locator('.visit.match', { hasText: 'Passito' }).waitFor();
+  await page.close();
+});

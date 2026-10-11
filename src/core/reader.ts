@@ -1,5 +1,5 @@
 import type { Repository } from './repository.ts';
-import type { Concept, ConceptMatch, ConceptPage, ConceptSection, GroupSuggestion, Visit } from './types.ts';
+import type { Concept, ConceptMatch, ConceptPage, ConceptSection, GroupSuggestion, TextHit, Visit } from './types.ts';
 import { normalizeName } from './normalize.ts';
 import { TrackerError } from './tracker.ts';
 import { sharesEnough, titleStems } from './similarity.ts';
@@ -52,6 +52,7 @@ const MEMORY_AREAS = 5;
 const MEMORY_TOPICS = 6;
 const PROFILE_CONVERSATIONS = 5;
 const SEARCH_LIMIT = 20;
+const TEXT_HITS = 30;
 const SIMILAR_MAPS = 3;
 
 const MEMBERS_SHOWN = 8;
@@ -332,5 +333,10 @@ export class Reader {
     for (const c of this.repo.findConceptsByName(q, SEARCH_LIMIT)) found.set(c.id, c);
     for (const c of this.repo.searchConcepts(q, SEARCH_LIMIT)) found.set(c.id, c);
     return [...found.values()].slice(0, SEARCH_LIMIT);
+  }
+
+  /** Text search for the canvas: nodes of every map whose title, summary or full text has the words; each opens in its map. */
+  searchText(query: string): TextHit[] {
+    return this.repo.searchText(query, TEXT_HITS);
   }
 }

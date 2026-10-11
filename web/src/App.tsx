@@ -16,6 +16,9 @@ export interface LiveEvent {
 export interface Found {
   seq: number;
   conceptId: string;
+  /** A text hit: the node to open, in its own map. */
+  visitId?: string;
+  conversationId?: string;
 }
 
 type View = 'conversation' | 'personal';
@@ -90,11 +93,16 @@ export function App() {
         <strong>Knowledge Graph</strong>
         <ConceptSearch
           label="Cerca concetti"
-          placeholder="Cerca un concetto…"
+          placeholder="Cerca nei concetti e nei testi…"
           className="header-search"
           onPick={(c) => {
             setOpenConcept(c.id);
             setFound((prev) => ({ seq: (prev?.seq ?? 0) + 1, conceptId: c.id }));
+          }}
+          onPickHit={(h) => {
+            setOpenConcept(h.conceptId);
+            setFound((prev) => ({ seq: (prev?.seq ?? 0) + 1, conceptId: h.conceptId, visitId: h.visitId, conversationId: h.conversationId }));
+            if (view !== 'conversation') location.hash = '#conversazione';
           }}
         />
         <nav role="tablist" className="tabs">

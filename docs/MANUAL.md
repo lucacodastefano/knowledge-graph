@@ -164,7 +164,7 @@ Deleting a node never loses its children: they move up one level. A concept left
 
 ## 6. Search
 
-Type in the search box at the top (**Cerca concetti**). Results come in this order: exact name, names containing the text, then concepts whose titles or texts mention it. Picking one opens its panel, highlights it in the conversation tree and centres the personal graph on it.
+Type in the search box at the top (**Cerca concetti**). Concepts come first: exact name, names containing the text, then concepts whose titles or summaries mention it; picking one opens its panel, highlights it in the conversation tree and centres the personal graph on it. Below, **Nel testo delle mappe** lists the nodes of every map whose title, summary or full text contains your words (all of them; any of them if none has all), with an excerpt around the match. Picking one switches to that map and selects the node. The index is SQLite FTS5 (trigram: partial words and accents match; words shorter than 3 characters only search titles).
 
 ## 7. Your data
 
