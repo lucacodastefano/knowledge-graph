@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import { api } from './api.ts';
 
 interface Props {
@@ -6,18 +7,43 @@ interface Props {
   onDeleted: () => void;
 }
 
-/** Deletes the shown conversation's map after an explicit confirmation; concepts used elsewhere stay in the personal graph. */
+/** Overflow "⋯" menu of the conversation bar; "Cancella mappa" asks for confirmation, concepts used elsewhere stay in the personal graph. */
 export function DeleteConversation({ id, title, onDeleted }: Props) {
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: MouseEvent) => {
+      if (!box.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    document.addEventListener('mousedown', away);
+    document.addEventListener('keydown', esc);
+    return () => {
+      document.removeEventListener('mousedown', away);
+      document.removeEventListener('keydown', esc);
+    };
+  }, [open]);
   if (!id) return null;
   const remove = () => {
+    setOpen(false);
     const ok = window.confirm(
       `Cancellare la mappa «${title ?? 'senza titolo'}»?\n\nI concetti usati anche in altre conversazioni restano nel grafo personale; gli altri vengono rimossi con le loro relazioni.`,
     );
     if (ok) void api.deleteConversation(id).then(onDeleted);
   };
   return (
-    <button type="button" className="secondary danger" onClick={remove} title="Cancella questa mappa" aria-label="Cancella la mappa">
-      Cancella mappa
-    </button>
+    <div className="bar-menu" ref={box}>
+      <button type="button" className="bar-button bar-icon" aria-haspopup="menu" aria-expanded={open} title="Altre azioni" aria-label="Altre azioni" onClick={() => setOpen(!open)}>
+        ⋯
+      </button>
+      {open && (
+        <div className="menu" role="menu">
+          <button type="button" role="menuitem" className="danger-text" onClick={remove}>
+            Cancella mappa…
+          </button>
+        </div>
+      )}
+    </div>
   );
 }

@@ -205,10 +205,10 @@ const FRESH_MS = 1600;
 /** How close (screen px between short ends) a free-ended node must get to another one to preview attaching to it. */
 const DROP_RADIUS = 20;
 const AUTO = '';
-const LAYOUTS: { kind: LayoutKind; label: string }[] = [
-  { kind: 'radial', label: 'Radiale' },
-  { kind: 'mindmap', label: 'Mappa mentale' },
-  { kind: 'tree', label: 'Albero' },
+const LAYOUTS: { kind: LayoutKind; label: string; icon: string }[] = [
+  { kind: 'radial', label: 'Radiale', icon: '◎' },
+  { kind: 'mindmap', label: 'Mappa mentale', icon: '✳' },
+  { kind: 'tree', label: 'Albero', icon: '⊢' },
 ];
 const LAYOUT_KEY = 'kg.layout';
 const HIDE_DASHED_KEY = 'kg.hideDashed';
@@ -857,7 +857,13 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
   return (
     <>
       <div className="overlay-bar">
-        <select value={pinned} onChange={(e) => setPinned(e.target.value)} aria-label="Conversazione">
+        <select
+          className="bar-map"
+          value={pinned}
+          onChange={(e) => setPinned(e.target.value)}
+          aria-label="Conversazione"
+          title={conversations.find((c) => c.id === pinned)?.title ?? "Segui l'ultima conversazione"}
+        >
           <option value={AUTO}>Segui l'ultima conversazione</option>
           {conversations.map((c) => (
             <option key={c.id} value={c.id}>
@@ -865,6 +871,50 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
             </option>
           ))}
         </select>
+        <div className="bar-group" role="group" aria-label="Vista">
+          <span className="bar-select" title="Layout">
+            <span aria-hidden="true">{LAYOUTS.find((l) => l.kind === kind)?.icon}</span>
+            <select
+              value={kind}
+              aria-label="Layout"
+              onChange={(e) => {
+                const k = e.target.value as LayoutKind;
+                setKind(k);
+                try {
+                  localStorage.setItem(LAYOUT_KEY, k);
+                } catch {
+                  // Not remembered: the choice still applies to this page.
+                }
+              }}
+            >
+              {LAYOUTS.map((l) => (
+                <option key={l.kind} value={l.kind}>
+                  {l.label}
+                </option>
+              ))}
+            </select>
+          </span>
+          <button type="button" className="bar-button bar-icon" onClick={reorder} title="Riordina: rimette nodi e relazioni nel layout scelto (Ctrl+Z annulla)" aria-label="Riordina">
+            ↻
+          </button>
+          <button
+            type="button"
+            className="bar-button bar-icon"
+            aria-pressed={hideDashed}
+            aria-label="Relazioni tratteggiate"
+            title={hideDashed ? 'Mostra le relazioni tratteggiate' : 'Nascondi le relazioni tratteggiate'}
+            onClick={() => {
+              setHideDashed(!hideDashed);
+              try {
+                localStorage.setItem(HIDE_DASHED_KEY, hideDashed ? '0' : '1');
+              } catch {
+                // Not remembered: the choice still applies to this page.
+              }
+            }}
+          >
+            ┄
+          </button>
+        </div>
         <DeleteConversation
           id={pinned || conversations[0]?.id || null}
           title={conversations.find((c) => c.id === (pinned || conversations[0]?.id))?.title}
@@ -873,45 +923,9 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
             void loadConversations();
           }}
         />
-        <select
-          value={kind}
-          aria-label="Layout"
-          onChange={(e) => {
-            const k = e.target.value as LayoutKind;
-            setKind(k);
-            try {
-              localStorage.setItem(LAYOUT_KEY, k);
-            } catch {
-              // Not remembered: the choice still applies to this page.
-            }
-          }}
-        >
-          {LAYOUTS.map((l) => (
-            <option key={l.kind} value={l.kind}>
-              {l.label}
-            </option>
-          ))}
-        </select>
-        <button type="button" className="bar-button" onClick={reorder} title="Rimette nodi e relazioni nel layout scelto (Ctrl+Z annulla)">
-          Riordina
-        </button>
-        <button
-          type="button"
-          className="bar-button"
-          aria-pressed={hideDashed}
-          title="Nasconde le relazioni tratteggiate"
-          onClick={() => {
-            setHideDashed(!hideDashed);
-            try {
-              localStorage.setItem(HIDE_DASHED_KEY, hideDashed ? '0' : '1');
-            } catch {
-              // Not remembered: the choice still applies to this page.
-            }
-          }}
-        >
-          {hideDashed ? 'Mostra relazioni tratteggiate' : 'Nascondi relazioni tratteggiate'}
-        </button>
-        <span className="bar-hint">Doppio clic su un nodo per approfondire</span>
+        <span className="bar-hint" tabIndex={0} role="note" aria-label="Doppio clic su un nodo per approfondire" title="Doppio clic su un nodo per approfondire">
+          ?
+        </span>
         {notice && (
           <span className="notice error" role="alert" onClick={() => setNotice(null)}>
             {notice}
