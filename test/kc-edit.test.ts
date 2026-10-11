@@ -191,14 +191,19 @@ test('a big outline is cut by depth and a branch can be opened (kc_tree node / d
   assert.match(cut, new RegExp(`Showing \\d+ of ${total} nodes`));
   assert.match(cut, /\(\+\d+\)/);
   assert.ok(cut.split('\n').length < total);
-  // The whole outline on request, a branch from its own root.
-  const full = reader.tree(c.id, false, true, undefined, { depth: 99 });
-  assert.doesNotMatch(full, /Showing/);
-  assert.equal(full.split('\n').length, total + 1);
-  const branch = reader.tree(c.id, false, true, undefined, { node: 'Concetto naa0x' });
+  // The ceiling holds even with a big depth; a branch is outlined from its own root.
+  const deep = reader.tree(c.id, false, true, undefined, { depth: 99 });
+  assert.ok(deep.split('\n').length <= TREE_MAX_NODES + 3);
+  assert.match(deep, /Showing/);
+  const branch = reader.tree(c.id, false, true, undefined, { root: 'Concetto naa0x' });
   assert.match(branch, /^Tree:\n- Concetto naa0x\n {2}- /);
   assert.ok(branch.split('\n').length < 60);
-  assert.throws(() => reader.tree(c.id, false, true, undefined, { node: 'Inesistente' }), /not found/);
+  assert.throws(() => reader.tree(c.id, false, true, undefined, { root: 'Inesistente' }), /not found/);
+  // kc_tree orients on a big map: two levels, collapsed branches counted; a small map is shown whole.
+  const oriented = reader.tree(c.id, false, false, undefined, { orient: true });
+  assert.match(oriented, /Concetto nba0x \(\+6\)/);
+  assert.ok(oriented.split('\n').length < 45);
+  assert.match(oriented, /kc_tree\(root:/);
   // Small outlines are untouched.
-  assert.doesNotMatch(reader.tree(c.id, false, true, undefined, { node: 'Concetto naa0x', depth: 1 }), /Showing 1 of 1/);
+  assert.doesNotMatch(reader.tree(c.id, false, true, undefined, { root: 'Concetto naa0x', depth: 1 }), /Showing 1 of 1/);
 });
