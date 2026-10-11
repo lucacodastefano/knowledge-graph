@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { subscribe, type TrackerEvent } from './api.ts';
 import { ConversationView } from './ConversationView.tsx';
+import { MetricsView } from './MetricsView.tsx';
 import { PersonalView } from './PersonalView.tsx';
 import { DetailPanel } from './DetailPanel.tsx';
 import { ConceptSearch } from './ConceptSearch.tsx';
@@ -18,12 +19,12 @@ export interface Found {
   conceptId: string;
 }
 
-type View = 'conversation' | 'personal';
+type View = 'conversation' | 'personal' | 'metrics';
 /** Dwell before the hover panel opens, and how long it stays after the pointer leaves a node. */
 const HOVER_OPEN_MS = 300;
 const HOVER_CLOSE_MS = 400;
 
-const viewFromHash = (): View => (location.hash === '#personale' ? 'personal' : 'conversation');
+const viewFromHash = (): View => (location.hash === '#personale' ? 'personal' : location.hash === '#metriche' ? 'metrics' : 'conversation');
 
 export function App() {
   const [view, setView] = useState<View>(viewFromHash);
@@ -100,12 +101,15 @@ export function App() {
         <nav role="tablist" className="tabs">
           {tab('conversation', 'Conversazione', '#conversazione')}
           {tab('personal', 'Grafo personale', '#personale')}
+          {tab('metrics', 'Metriche', '#metriche')}
         </nav>
         <ModelSettings />
         <span className={`dot ${online ? 'on' : ''}`} title={online ? 'Collegato' : 'Non collegato'} />
       </header>
       <main>
-        {view === 'conversation' ? (
+        {view === 'metrics' ? (
+          <MetricsView live={live} />
+        ) : view === 'conversation' ? (
           <ConversationView live={live} found={found} onOpenConcept={setOpenConcept} onBackgroundClick={closeConcept} />
         ) : (
           <PersonalView
@@ -117,7 +121,7 @@ export function App() {
             onHoverConcept={onHoverConcept}
           />
         )}
-        {shown && (
+        {shown && view !== 'metrics' && (
           <DetailPanel
             conceptId={shown}
             pinned={view === 'personal' && openConcept !== null}

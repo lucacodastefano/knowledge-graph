@@ -140,6 +140,9 @@ Every concept you ever explored, across conversations. Bigger nodes were visited
 - **Colour.** **Colora per** colours by community or by conversation (a concept takes the colour of the conversation where it appears most). The legend (collapsible) lists the groups with their counts; click an entry to highlight that group.
 - **Filters.** By conversation, by period (last seen), **Nascondi isolati** and **Solo concetti con fonti** (only concepts whose answers cited at least one source). The counter shows how many concepts are left and the view fits them. The colouring, the isolated toggle and the legend state are remembered; the other filters are not.
 
+### Metriche (metrics)
+Tab **Metriche**: how the tool behaves, with a map filter and a period filter. The server logs every MCP tool call (size sent by the model, size returned, duration, outcome, nodes created) in the `tool_calls` table of `graph.db`; tokens are estimated as characters / 3.5. They cover only the traffic to and from the graph, not the model's reasoning, web searches, chat answer or context. Data accumulates from the version that introduced it. Charts: tokens over time (per period and cumulative), graph growth, tokens per tool, efficiency (tokens per node, full rewrites vs `kc_edit`), errors and duration, memory reuse (`kc_recall` / `kc_read` hits), graph quality (nodes without detail or sources, concepts without superclass, possible duplicates, depth). Also available as JSON at `/api/metrics?period=24h|7d|30d|all&conversation=<id>`.
+
 ### Concept panel
 
 Opened from **Approfondisci**, from the personal graph or from search. It lists every place the concept appears (newest first): conversation, the node it sits under, date and the text from the answer, followed by all its sub-concepts as sections, however deep, which is where the real depth of an explanation lives.
