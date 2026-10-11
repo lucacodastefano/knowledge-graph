@@ -1,3 +1,4 @@
+import { DeleteConversation } from './DeleteConversation.tsx';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   applyNodeChanges,
@@ -730,6 +731,14 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
             </option>
           ))}
         </select>
+        <DeleteConversation
+          id={pinned || conversations[0]?.id || null}
+          title={conversations.find((c) => c.id === (pinned || conversations[0]?.id))?.title}
+          onDeleted={() => {
+            setPinned(AUTO);
+            void loadConversations();
+          }}
+        />
         <select
           value={kind}
           aria-label="Layout"

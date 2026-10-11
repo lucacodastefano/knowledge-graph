@@ -19,6 +19,8 @@ export interface Repository {
   getConversation(id: string): Conversation | undefined;
   listConversations(): Conversation[];
   setCurrentVisit(conversationId: string, visitId: string | null): void;
+  /** Deletes a conversation row; its visits must already be gone. */
+  deleteConversation(id: string): void;
 
   findConceptByNorm(nameNorm: string): Concept | undefined;
   getConcept(id: string): Concept | undefined;

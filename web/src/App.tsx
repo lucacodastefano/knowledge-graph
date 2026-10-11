@@ -62,6 +62,7 @@ export function App() {
     if (!e) return;
     if (e.type === 'concept.merged' && e.fromId === openConcept) setOpenConcept(e.into.id);
     if (e.type === 'concept.deleted' && e.conceptId === openConcept) setOpenConcept(null);
+    if (e.type === 'conversation.deleted' && openConcept && e.removedConceptIds.includes(openConcept)) setOpenConcept(null);
     if ((e.type === 'visit.relinked' || e.type === 'visit.deleted') && e.removedConceptId === openConcept) {
       setOpenConcept(e.type === 'visit.relinked' ? e.concept.id : null);
     }

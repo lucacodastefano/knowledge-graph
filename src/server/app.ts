@@ -190,6 +190,10 @@ export async function buildApp({ tracker, webRoot, logger = false, onShutdown }:
     tracker.deleteVisit(req.params.id, req.query.children === 'detach');
     return reply.code(204).send();
   });
+  app.delete<{ Params: { id: string } }>('/api/conversations/:id', async (req, reply) => {
+    tracker.deleteConversation(req.params.id);
+    return reply.code(204).send();
+  });
   // Undo of a node deleted from the canvas.
   app.post<{ Body: Parameters<Tracker['restoreVisit']>[0] }>('/api/visits/restore', async (req) => tracker.restoreVisit(req.body));
   app.delete<{ Params: { id: string; sourceId: string } }>('/api/visits/:id/sources/:sourceId', async (req, reply) => {
