@@ -4,7 +4,7 @@ import { ConversationView } from './ConversationView.tsx';
 import { PersonalView } from './PersonalView.tsx';
 import { DetailPanel } from './DetailPanel.tsx';
 import { ConceptSearch } from './ConceptSearch.tsx';
-import { api } from './api.ts';
+import { api, type Settings } from './api.ts';
 
 /** A tracker event with a sequence number, so views can react to every change. */
 export interface LiveEvent {
@@ -100,7 +100,7 @@ export function App() {
           {tab('conversation', 'Conversazione', '#conversazione')}
           {tab('personal', 'Grafo personale', '#personale')}
         </nav>
-        <DetailSetting />
+        <ModelSettings />
         <span className={`dot ${online ? 'on' : ''}`} title={online ? 'Collegato' : 'Non collegato'} />
       </header>
       <main>
@@ -132,18 +132,29 @@ export function App() {
   );
 }
 
-/** D17: opt-in "Dettaglio approfondito"; when off the server does not even expose the field to the model. */
-function DetailSetting() {
-  const [on, setOn] = useState<boolean | null>(null);
-  useEffect(() => void api.settings().then((s) => setOn(s.detail), () => setOn(null)), []);
-  if (on === null) return null;
-  return (
-    <label
-      className="setting"
-      title="Quando il modello approfondisce un concetto salva anche i 5-10 punti chiave della risposta, con le sue parole. Costa qualche token in più. Vale subito, anche nelle chat già aperte."
-    >
-      <input type="checkbox" checked={on} onChange={(e) => void api.updateSettings({ detail: e.target.checked }).then((s) => setOn(s.detail))} />
-      Dettaglio approfondito
+/** The two canvas settings that change what the server tells the model (D17 detail, D19 memory). */
+function ModelSettings() {
+  const [settings, setSettings] = useState<Settings | null>(null);
+  useEffect(() => void api.settings().then(setSettings, () => setSettings(null)), []);
+  if (!settings) return null;
+  const toggle = (key: keyof Settings, title: string, label: string) => (
+    <label className="setting" title={title}>
+      <input type="checkbox" checked={settings[key]} onChange={(e) => void api.updateSettings({ [key]: e.target.checked }).then(setSettings)} />
+      {label}
     </label>
+  );
+  return (
+    <>
+      {toggle(
+        'memory',
+        "Il modello riceve all'avvio un breve profilo del tuo grafo e, quando un argomento c'è già, lo richiama prima di rispondere. Vale dalla prossima chat, dopo aver riavviato Claude Desktop.",
+        'Memoria automatica',
+      )}
+      {toggle(
+        'detail',
+        'Quando il modello approfondisce un concetto salva anche i 5-10 punti chiave della risposta, con le sue parole. Costa qualche token in più. Vale subito, anche nelle chat già aperte.',
+        'Dettaglio approfondito',
+      )}
+    </>
   );
 }
