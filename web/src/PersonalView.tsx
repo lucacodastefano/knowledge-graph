@@ -163,7 +163,9 @@ function superBubbles(graph: Graph<NodeAttrs>, visible: Set<string>, topicBubble
     }
     x /= parts.length;
     y /= parts.length;
-    const r = parts.reduce((m, p) => Math.max(m, Math.hypot(p.x - x, p.y - y) + p.r), 0) + 16;
+    // The more has been explored inside, the bigger the bubble.
+    const explored = [...nodes].reduce((sum, n) => sum + graph.getNodeAttribute(n, 'visitCount'), 0);
+    const r = parts.reduce((m, p) => Math.max(m, Math.hypot(p.x - x, p.y - y) + p.r), 0) + 16 + Math.min(40, 3 * Math.sqrt(explored));
     const b: Bubble = { id: `super:${id}`, name: graph.getNodeAttribute(id, 'label'), count: nodes.size, slot: -1, x, y, r, depth };
     out.push(b);
     return { b, nodes };
@@ -332,6 +334,8 @@ export function PersonalView({ live, found, onOpenConcept, onBackgroundClick, fo
     supers: [] as Bubble[],
     /** Topics inside a superclass area, drawn as smaller bubbles nested in it. */
     topics: [] as Bubble[],
+    /** Zoomed out: links between concepts of different bubbles, merged into one line per pair of bubbles. */
+    links: [] as { a: Point; b: Point; count: number }[],
     pointer: null as Point | null,
     /** Node size cap at the full view: big graphs are dense, their nodes start as dots and grow with the zoom. */
     maxSize: Infinity,
@@ -461,6 +465,8 @@ export function PersonalView({ live, found, onOpenConcept, onBackgroundClick, fo
         }
         // Free relations drawn by the user keep their own colour, also across topics.
         if (graph.getEdgeAttribute(edge, 'relation')) return { ...data, color: RELATION_COLOR, size: Math.max(data.size as number, 1.6) };
+        // Zoomed out, links between bubbles are drawn once per pair of bubbles instead (see the bubble pass).
+        if (v.overview && graph.getNodeAttribute(s, 'community') !== graph.getNodeAttribute(t, 'community')) return { ...data, hidden: true };
         // Links across topics stay faint, so the communities read as separate groups.
         if (graph.getNodeAttribute(s, 'community') !== graph.getNodeAttribute(t, 'community')) return { ...data, color: faded };
         return data;
@@ -499,6 +505,7 @@ export function PersonalView({ live, found, onOpenConcept, onBackgroundClick, fo
       if (isOverview !== v.overview) {
         v.overview = isOverview;
         setOverview(isOverview);
+        renderer.refresh();
       }
 
       // Bubbles, under the edges.
@@ -528,6 +535,23 @@ export function PersonalView({ live, found, onOpenConcept, onBackgroundClick, fo
           bubbleCtx.stroke();
         }
       }
+      // Zoomed out: one line per pair of bubbles, thicker with the number of links between them.
+      if (isOverview) {
+        const maxCount = v.links.reduce((m, l) => Math.max(m, l.count), 1);
+        bubbleCtx.strokeStyle = muted;
+        bubbleCtx.globalAlpha = 0.45;
+        for (const l of v.links) {
+          const a = renderer.graphToViewport(l.a);
+          const b = renderer.graphToViewport(l.b);
+          bubbleCtx.lineWidth = 1 + (3 * Math.sqrt(l.count)) / Math.sqrt(maxCount);
+          bubbleCtx.beginPath();
+          bubbleCtx.moveTo(a.x, a.y);
+          bubbleCtx.lineTo(b.x, b.y);
+          bubbleCtx.stroke();
+        }
+        bubbleCtx.globalAlpha = 1;
+      }
+
       // Superclass bubbles: a clear rounded area with its name, at every zoom, nested inside one another.
       const superLabels: { b: Bubble; p: { x: number; y: number; r: number } }[] = [];
       for (const b of v.supers) {
@@ -717,6 +741,7 @@ export function PersonalView({ live, found, onOpenConcept, onBackgroundClick, fo
         const d = id ? renderer.getNodeDisplayData(id) : undefined;
         return d && !d.hidden ? renderer.framedGraphToViewport(d) : null;
       },
+      links: () => view.current.links.map((l) => l.count),
       topics: () => view.current.topics.map((b) => ({ id: b.id, name: b.name, count: b.count, ...viewportBubble(b) })),
       supers: () => view.current.supers.map((b) => ({ id: b.id, name: b.name, count: b.count, depth: b.depth ?? 0, ...viewportBubble(b) })),
       bubbles: () => view.current.bubbles.map((b) => ({ name: b.name, count: b.count, ...viewportBubble(b) })),
@@ -854,6 +879,24 @@ export function PersonalView({ live, found, onOpenConcept, onBackgroundClick, fo
           return { id: `topic:${t}`, name: graph.getNodeAttribute(hub, 'label'), count: list.length, slot: -1, x, y, r };
         });
       v.supers = superBubbles(graph, visible, v.topics);
+      // Where each bubble sits, for the lines between bubbles: a superclass area counts as its top bubble.
+      const unitAt = new Map<string, Point>();
+      for (const b of v.bubbles) unitAt.set(b.id, b);
+      for (const b of v.supers) if (b.depth === 0) unitAt.set(`s:${b.id.slice(6)}`, b);
+      const pairs = new Map<string, { a: Point; b: Point; count: number }>();
+      graph.forEachEdge((_, __, src, dst) => {
+        if (!visible.has(src) || !visible.has(dst)) return;
+        const cs = graph.getNodeAttribute(src, 'community');
+        const ct = graph.getNodeAttribute(dst, 'community');
+        const pa = unitAt.get(cs);
+        const pb = unitAt.get(ct);
+        if (cs === ct || !pa || !pb) return;
+        const key = cs < ct ? `${cs}|${ct}` : `${ct}|${cs}`;
+        const entry = pairs.get(key) ?? { a: pa, b: pb, count: 0 };
+        entry.count++;
+        pairs.set(key, entry);
+      });
+      v.links = [...pairs.values()];
       setShown(visible.size);
 
       const renderer = sigmaRef.current;

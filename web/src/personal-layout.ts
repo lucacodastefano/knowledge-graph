@@ -229,7 +229,14 @@ export function layoutPersonalGraph(input: LayoutInput): LayoutOutput {
     .filter((c) => c !== ISOLATED)
     .sort((a, b) => members.get(b)!.length - members.get(a)!.length || a.localeCompare(b));
   if (members.has(ISOLATED)) order.push(ISOLATED);
-  const centre = pack(order, radius, links, rng);
+  // Areas of superclasses form one cluster; concepts without a superclass sit in a neutral zone beside it.
+  const areas = order.filter((c) => c.startsWith('s:'));
+  const rest = order.filter((c) => !c.startsWith('s:'));
+  const centre = pack(areas, radius, links, rng);
+  const others = pack(rest, radius, links, rng);
+  const reach = (ids: string[], c: Map<string, Point>, dir: 1 | -1) => ids.reduce((m, id) => Math.max(m, dir * c.get(id)!.x + radius.get(id)!), -Infinity);
+  const shift = areas.length > 0 && rest.length > 0 ? reach(areas, centre, 1) + reach(rest, others, -1) + GAP * 3 : 0;
+  for (const [c, p] of others) centre.set(c, { x: p.x + shift, y: p.y });
   const position = new Map<string, Point>();
   for (const [c, pos] of local) {
     const o = centre.get(c)!;
