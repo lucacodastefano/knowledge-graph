@@ -26,6 +26,8 @@ import {
   neighbourhood,
   type EdgeData,
   type Half,
+  type Placement,
+  type Side,
   type LayoutKind,
   type VisitNode as VisitNodeType,
 } from './layout.ts';
@@ -103,16 +105,33 @@ interface Step {
   redo: () => Promise<unknown>;
 }
 
+/** The two short ends that would join: the target's (children side) and the dragged node's. */
+interface Drop {
+  drag: string;
+  target: string;
+  targetSide: 'left' | 'right';
+  dragSide: 'left' | 'right';
+}
+
+/** Short ends of a node that children can attach to, by the layout's growth direction. */
+function growth(kind: LayoutKind, n: VisitNodeType, placement: Placement | null, centreX: number): ('left' | 'right')[] {
+  const isRoot = !n.data.visit.parentVisitId;
+  if (kind === 'tree') return ['right'];
+  const own = placement?.side.get(n.id);
+  if (kind === 'mindmap') return isRoot ? ['left', 'right'] : [own === 'left' ? 'left' : 'right'];
+  // Radial: outward from the centre of the picture; the centre itself accepts both ends.
+  const x = n.position.x + (n.measured?.width ?? 190) / 2;
+  return isRoot ? ['left', 'right'] : [x >= centreX ? 'right' : 'left'];
+}
+
 /** The grey dashed edge previewing where a dragged node would attach. */
-function previewEdge(drop: { drag: string; target: string }, nodes: VisitNodeType[]): Edge<EdgeData> {
-  const x = (id: string) => nodes.find((n) => n.id === id)?.position.x ?? 0;
-  const targetOnLeft = x(drop.target) <= x(drop.drag);
+function previewEdge(drop: Drop): Edge<EdgeData> {
   return {
     id: 'preview',
     source: drop.target,
     target: drop.drag,
-    sourceHandle: targetOnLeft ? 's-right' : 's-left',
-    targetHandle: targetOnLeft ? 't-left' : 't-right',
+    sourceHandle: `s-${drop.targetSide}`,
+    targetHandle: `t-${drop.dragSide}`,
     type: 'straight',
     className: 'preview',
     selectable: false,
@@ -242,48 +261,108 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
   // While a node is dragged, the nearest node within DROP_RADIUS (screen px between their edges) is the attach target:
   // it is highlighted and a grey dashed preview edge joins it to the dragged node. Releasing attaches the dragged node
   // (with its subtree) there; out of range it just stays where it was dropped. A node and its descendants never qualify.
-  const [drop, setDrop] = useState<{ drag: string; target: string } | null>(null);
-  const dropRef = useRef<{ drag: string; target: string } | null>(null);
-  const setDropBoth = useCallback((d: { drag: string; target: string } | null) => {
+  const [drop, setDrop] = useState<Drop | null>(null);
+  const dropRef = useRef<Drop | null>(null);
+  const setDropBoth = useCallback((d: Drop | null) => {
     dropRef.current = d;
-    setDrop((prev) => (prev?.drag === d?.drag && prev?.target === d?.target ? prev : d));
+    setDrop((prev) => (prev?.drag === d?.drag && prev?.target === d?.target && prev?.targetSide === d?.targetSide ? prev : d));
   }, []);
+  /** Sides an attach was anchored to, so the final edge leaves and enters exactly where the preview showed. */
+  const attachSides = useRef<Map<string, { parent: string; side: Side }>>(new Map());
+  // Dragging a node carries its whole subtree rigidly, live: the same offsets, so edge lengths and angles stay.
+  // Positions chosen by hand are kept for this page session (`manual`) so a refresh of the tree does not undo them.
+  const manual = useRef<Map<string, { x: number; y: number }>>(new Map());
+  const dragStart = useRef<Map<string, { x: number; y: number }> | null>(null);
+  const subtreeOf = useCallback(
+    (rootId: string) => {
+      const ids = new Set([rootId]);
+      for (let grew = true; grew && tree; ) {
+        grew = false;
+        for (const v of tree.visits) if (v.parentVisitId && ids.has(v.parentVisitId) && !ids.has(v.id)) ids.add(v.id), (grew = true);
+      }
+      return ids;
+    },
+    [tree],
+  );
+  const placeNodes = useCallback((positions: Map<string, { x: number; y: number }>) => {
+    setNodes((ns) => ns.map((n) => (positions.has(n.id) ? { ...n, position: positions.get(n.id)! } : n)));
+  }, []);
+  const onDragStart = useCallback(
+    (_: unknown, node: VisitNodeType) => {
+      const ids = subtreeOf(node.id);
+      dragStart.current = new Map(flow.getNodes().filter((n) => ids.has(n.id)).map((n) => [n.id, { ...n.position }]));
+    },
+    [subtreeOf, flow],
+  );
   const onDrag = useCallback(
     (_: unknown, node: VisitNodeType) => {
       if (!tree) return;
-      const banned = new Set([node.id]);
-      for (let grew = true; grew; ) {
-        grew = false;
-        for (const v of tree.visits) if (v.parentVisitId && banned.has(v.parentVisitId) && !banned.has(v.id)) banned.add(v.id), (grew = true);
+      const start = dragStart.current;
+      const origin = start?.get(node.id);
+      if (start && origin) {
+        const dx = node.position.x - origin.x;
+        const dy = node.position.y - origin.y;
+        placeNodes(new Map([...start].filter(([id]) => id !== node.id).map(([id, p]) => [id, { x: p.x + dx, y: p.y + dy }])));
       }
+      const banned = subtreeOf(node.id);
+      // Magnetic zones: only the short ends (left / right) of a node. The target offers the end facing the direction its
+      // children grow; the dragged node must bring the matching end (opposite in a tree or mind map, the one facing the
+      // target in the radial layout) within DROP_RADIUS.
       const zoom = flow.getZoom();
       const box = (n: VisitNodeType) => ({ x: n.position.x, y: n.position.y, w: n.measured?.width ?? 190, h: n.measured?.height ?? 46 });
+      const end = (n: VisitNodeType, side: Side) => {
+        const b = box(n);
+        return { x: side === 'right' ? b.x + b.w : b.x, y: b.y + b.h / 2 };
+      };
+      const all = flow.getNodes() as VisitNodeType[];
+      const roots = all.filter((n) => !n.data.visit.parentVisitId && !banned.has(n.id));
+      const centreX = roots.length ? roots.reduce((s, n) => s + box(n).x + box(n).w / 2, 0) / roots.length : 0;
       const me = box(node);
-      let best: { id: string; gap: number } | null = null;
-      for (const other of flow.getNodes() as VisitNodeType[]) {
+      let best: (Drop & { gap: number }) | null = null;
+      for (const other of all) {
         if (banned.has(other.id)) continue;
-        const o = box(other);
-        const gx = Math.max(0, Math.max(o.x - (me.x + me.w), me.x - (o.x + o.w)));
-        const gy = Math.max(0, Math.max(o.y - (me.y + me.h), me.y - (o.y + o.h)));
-        const gap = Math.hypot(gx, gy) * zoom;
-        if (gap <= DROP_RADIUS && (!best || gap < best.gap)) best = { id: other.id, gap };
+        for (const targetSide of growth(kind, other, lastPlacement.current, centreX)) {
+          const t = end(other, targetSide);
+          const dragSide: Side = kind === 'radial' ? (t.x >= me.x + me.w / 2 ? 'right' : 'left') : targetSide === 'right' ? 'left' : 'right';
+          const d = end(node, dragSide);
+          const gap = Math.hypot(t.x - d.x, t.y - d.y) * zoom;
+          if (gap <= DROP_RADIUS && (!best || gap < best.gap)) best = { drag: node.id, target: other.id, targetSide, dragSide, gap };
+        }
       }
-      setDropBoth(best ? { drag: node.id, target: best.id } : null);
+      setDropBoth(best);
     },
-    [tree, flow, setDropBoth],
+    [tree, flow, kind, setDropBoth, subtreeOf, placeNodes],
   );
   const onDragStop = useCallback(
     (_: unknown, node: VisitNodeType) => {
       const d = dropRef.current;
       setDropBoth(null);
+      const start = dragStart.current;
+      dragStart.current = null;
       const old = node.data.visit.parentVisitId;
-      if (!d || d.drag !== node.id || d.target === old) return;
-      act({
-        redo: () => api.editVisit(node.id, { parentVisitId: d.target }),
-        undo: () => api.editVisit(node.id, { parentVisitId: old }),
-      });
+      if (d && d.drag === node.id && d.target !== old) {
+        // Attached: the tree is laid out again, the hand-placed positions of this subtree no longer apply.
+        for (const id of start?.keys() ?? []) manual.current.delete(id);
+        attachSides.current.set(node.id, { parent: d.target, side: d.targetSide });
+        act({
+          redo: () => api.editVisit(node.id, { parentVisitId: d.target }),
+          undo: () => api.editVisit(node.id, { parentVisitId: old }),
+        });
+        return;
+      }
+      if (!start) return;
+      // Dropped in place: the subtree stays where it was put, and Ctrl+Z puts all of it back.
+      const now = new Map(flow.getNodes().filter((n) => start.has(n.id)).map((n) => [n.id, { ...n.position }]));
+      const here = start.get(node.id)!;
+      if (now.get(node.id)!.x === here.x && now.get(node.id)!.y === here.y) return;
+      const apply = (positions: Map<string, { x: number; y: number }>) => {
+        for (const [id, p] of positions) manual.current.set(id, p);
+        placeNodes(positions);
+        return Promise.resolve();
+      };
+      act({ redo: () => apply(now), undo: () => apply(start) });
     },
-    [act, setDropBoth],
+    [act, setDropBoth, flow, placeNodes],
   );
   // Pulling a line from one node to another relates their concepts (a different idea, unlike "Unisci a…").
   const onConnect = useCallback(
@@ -354,6 +433,8 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
     [],
   );
   const knownIds = useRef<Set<string>>(new Set());
+  const needsLayout = useRef(false);
+  const lastPlacement = useRef<Placement | null>(null);
   const lastCurrent = useRef<string | null | undefined>(undefined);
   /** Mind map halves of the first-level branches, so a growing map moves a branch only when the balance pays. */
   const halves = useRef<Map<string, Half>>(new Map());
@@ -371,6 +452,9 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
   useEffect(() => void loadConversations(), [loadConversations]);
   useEffect(() => {
     knownIds.current = new Set();
+    lastPlacement.current = null;
+    needsLayout.current = false;
+    manual.current.clear();
     undoStack.current = [];
     redoStack.current = [];
     setArmed(null);
@@ -405,10 +489,42 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
       setTimeout(() => setFresh(new Set()), FRESH_MS);
     }
     let cancelled = false;
-    if (laidOut.current !== kind) fitAll.current = true;
+    const kindChanged = laidOut.current !== kind;
+    if (kindChanged) {
+      fitAll.current = true;
+      manual.current.clear();
+    }
     laidOut.current = kind;
-    void layout(tree.visits, kind, halves.current).then((placement) => {
+    // Auto layout runs for new nodes and when the layout is switched. After any other edit (removing a relation,
+    // moving, attaching, detaching, undo) every node stays exactly where it is: only the edges change.
+    // Two quick reloads can cancel the layout of the first one: keep asking for it until one has been applied.
+    if (added.length > 0) needsLayout.current = true;
+    const keep = !firstLoad && !kindChanged && !needsLayout.current && lastPlacement.current !== null;
+    const kept = (): Placement => {
+      const previous = lastPlacement.current!;
+      const current = new Map(flow.getNodes().map((n) => [n.id, n.position]));
+      const position = new Map(tree.visits.map((v) => [v.id, current.get(v.id) ?? previous.position.get(v.id) ?? { x: 0, y: 0 }]));
+      const side = new Map<string, Side>();
+      for (const v of tree.visits) {
+        if (!v.parentVisitId) continue;
+        const from = position.get(v.parentVisitId);
+        const to = position.get(v.id);
+        const anchored = attachSides.current.get(v.id);
+        if (anchored && anchored.parent === v.parentVisitId) {
+          side.set(v.id, anchored.side);
+          continue;
+        }
+        side.set(v.id, kind === 'radial' ? (previous.side.get(v.id) ?? 'around') : from && to && from.x > to.x ? 'left' : 'right');
+      }
+      return { position, side, branches: previous.branches };
+    };
+    void (keep ? Promise.resolve(kept()) : layout(tree.visits, kind, halves.current)).then((placement) => {
       if (cancelled) return;
+      lastPlacement.current = placement;
+      if (!keep) {
+        needsLayout.current = false;
+        attachSides.current.clear();
+      }
       const pos = placement.position;
       if (kind === 'mindmap') halves.current = placement.branches;
       const also = alsoIn(tree.visits);
@@ -418,7 +534,7 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
           id: v.id,
           measured: measured.get(v.id),
           type: 'visit',
-          position: pos.get(v.id) ?? { x: 0, y: 0 },
+          position: manual.current.get(v.id) ?? pos.get(v.id) ?? { x: 0, y: 0 },
           data: {
             visit: v,
             current: v.id === tree.conversation.currentVisitId,
@@ -516,7 +632,7 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
           ? { ...e, type: 'tree', data: { shape: e.type, armed: e.id === armed, onRemove: () => removeRelation(e.id) } as EdgeData }
           : e,
     );
-    const previewed = drop ? [...edges, previewEdge(drop, nodes)] : edges;
+    const previewed = drop ? [...edges, previewEdge(drop)] : edges;
     if (!near || drop) return previewed;
     const mark = (e: Edge<EdgeData>, cls: string) => ({ ...e, className: [e.className, cls].filter(Boolean).join(' ') });
     return [
@@ -578,6 +694,7 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
           nodesDraggable
           nodesConnectable
           connectionMode={ConnectionMode.Loose}
+          onNodeDragStart={onDragStart}
           onNodeDrag={onDrag}
           onNodeDragStop={onDragStop}
           onConnect={onConnect}

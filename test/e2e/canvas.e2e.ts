@@ -383,10 +383,15 @@ test('XMind gestures: drag a node onto another to move it with its children, pul
   let t = await state();
   const uno = t.visits.find((v) => v.title === 'Ramo uno')!;
   assert.equal(t.visits.find((v) => v.title === 'Figlio del ramo')!.parentVisitId, uno.id, 'the child travels with its node');
-  await page.waitForTimeout(800);
+  // Nodes keep the place they were dropped in; switching layout explicitly tidies them up.
+  await page.getByLabel('Layout').selectOption('tree');
+  await page.waitForTimeout(1000);
 
   // Pull a line from "Radice gesti" to "Figlio del ramo": a free relation, drawn in the tree.
-  await titled(page, 'Radice gesti').hover();
+  // Nodes keep their places now, so the tooltip of the last hovered node may cover this one: close it first.
+  await page.mouse.move(700, 800);
+  await page.waitForTimeout(500);
+  await titled(page, 'Radice gesti').hover({ force: true });
   const handles = titled(page, 'Radice gesti').locator('.react-flow__handle.source');
   const target = await centre('Figlio del ramo');
   const src = await centre('Radice gesti');
@@ -394,7 +399,9 @@ test('XMind gestures: drag a node onto another to move it with its children, pul
   const hb = (await handles.locator(`xpath=self::*[contains(@class,"${side}")]`).boundingBox())!;
   await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2);
   await page.mouse.down();
-  await page.mouse.move(target.x, target.y, { steps: 12 });
+  // Drop on the facing handle of the other node.
+  const facing = (await titled(page, 'Figlio del ramo').locator(`.react-flow__handle.target.${side === 'right' ? 'left' : 'right'}`).boundingBox())!;
+  await page.mouse.move(facing.x + facing.width / 2, facing.y + facing.height / 2, { steps: 12 });
   await page.mouse.up();
   await page.locator('.react-flow__edge.relation').waitFor();
   t = await state();
@@ -409,17 +416,23 @@ test('XMind gestures: drag a node onto another to move it with its children, pul
   assert.equal(await viewport(), before, 'a click does not zoom to another node');
 
   // Click the relation: a red ✕ appears; Canc removes it too; Ctrl+Z brings it back, Ctrl+Y removes it again.
-  // A point on the dotted line itself, away from the nodes at its ends.
-  const mid = await page.locator('.react-flow__edge.relation .react-flow__edge-path').first().evaluate((el) => {
-    const path = el as SVGPathElement;
-    const pt = path.getPointAtLength(path.getTotalLength() * 0.25);
-    const m = path.getScreenCTM()!;
-    return { x: pt.x * m.a + m.e, y: pt.y * m.d + m.f };
-  });
-  await page.mouse.click(mid.x, mid.y);
+  // Click along the dotted line until a point is not covered by a node: the red ✕ appears.
+  // Nodes and their hover toolbars can cover any point of a line, so the click goes straight to the edge.
+  const armEdge = async (path: ReturnType<typeof page.locator>, _button: string) => {
+    await path.locator('xpath=ancestor::*[contains(@class,"react-flow__edge")][1]').locator('.react-flow__edge-interaction').dispatchEvent('click');
+  };
+  await armEdge(page.locator('.react-flow__edge.relation .react-flow__edge-path').first(), 'Rimuovi la relazione');
   await page.getByRole('button', { name: 'Rimuovi la relazione' }).waitFor();
+  const places = async () =>
+    Promise.all(['Radice gesti', 'Ramo uno', 'Figlio del ramo', 'Ramo due'].map(async (n) => {
+      const b = (await titled(page, n).boundingBox())!;
+      return `${Math.round(b.x)},${Math.round(b.y)}`;
+    }));
+  const placesBefore = await places();
   await page.keyboard.press('Delete');
   await page.waitForFunction(() => !document.querySelector('.react-flow__edge.relation'));
+  await page.waitForTimeout(700);
+  assert.deepEqual(await places(), placesBefore, 'removing a relation moves no node');
   assert.equal((await state()).relations.length, 0);
   await page.keyboard.press('Control+z');
   await page.locator('.react-flow__edge.relation').waitFor();
@@ -439,14 +452,9 @@ test('XMind gestures: drag a node onto another to move it with its children, pul
   t = await state();
   const kid = t.visits.find((v) => v.title === 'Figlio del ramo')!;
   const oldParent = kid.parentVisitId;
+  const placesPreDetach = await places();
   const edge = page.locator(`.react-flow__edge[data-id="t-${kid.id}"] .react-flow__edge-path`);
-  const at = await edge.evaluate((el) => {
-    const path = el as SVGPathElement;
-    const pt = path.getPointAtLength(path.getTotalLength() * 0.5);
-    const m = path.getScreenCTM()!;
-    return { x: pt.x * m.a + m.e, y: pt.y * m.d + m.f };
-  });
-  await page.mouse.click(at.x, at.y);
+  await armEdge(edge, 'Scollega il nodo');
   await page.getByRole('button', { name: 'Scollega il nodo' }).waitFor();
   await page.keyboard.press('Delete');
   await page.waitForFunction(async ([base, id, kidId]) => {
@@ -454,6 +462,8 @@ test('XMind gestures: drag a node onto another to move it with its children, pul
     return t.visits.find((v: { id: string }) => v.id === kidId).parentVisitId === null;
   }, [base, conv.id, kid.id]);
   assert.equal((await state()).visits.length, 4, 'nothing is deleted');
+  await page.waitForTimeout(700);
+  assert.deepEqual(await places(), placesPreDetach, 'a detached child stays where it is');
   await page.keyboard.press('Control+z');
   await page.waitForFunction(async ([base, id, kidId, parent]) => {
     const t = await (await fetch(`${base}/api/conversations/${id}/tree`)).json();
@@ -484,15 +494,35 @@ test('dragging a node near another previews the attachment, releasing attaches i
     const b = await box(title);
     return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
   };
+  // A point of the node that nothing (its hover toolbar) covers.
+  const grab = async (title: string) => {
+    await page.mouse.move(5, 5);
+    await page.waitForTimeout(300);
+    const b = await box(title);
+    for (const f of [0.5, 0.3, 0.7, 0.15, 0.85]) {
+      for (const g of [0.5, 0.2, 0.8]) {
+        const x = b.x + b.width * f;
+        const y = b.y + b.height * g;
+        const ok = await page.evaluate(([x, y, t]) => {
+          const e = document.elementFromPoint(x, y);
+          return !!e && !e.closest('.react-flow__node-toolbar') && !!e.closest('.react-flow__node') && (e.closest('.react-flow__node')?.textContent ?? '').includes(t);
+        }, [x, y, title] as [number, number, string]);
+        if (ok) return { x, y };
+      }
+    }
+    throw new Error(`no free point on ${title}`);
+  };
   const preview = page.locator('.react-flow__edge.preview');
   assert.equal(await parentOf('Beta'), 'Alfa');
 
-  // Hold Beta and bring it close to Gamma, without touching it: the grey preview shows, release attaches.
+  // Tree layout: the magnetic zones are the short sides. Hold Beta and bring its left end next to Gamma's right end.
+  await page.getByLabel('Layout').selectOption('tree');
+  await page.waitForTimeout(900);
   const g = await box('Gamma');
-  const b = await centre('Beta');
-  await page.mouse.move(b.x, b.y + 12);
+  const bb = await box('Beta');
+  await page.mouse.move(bb.x + 20, bb.y + bb.height / 2);
   await page.mouse.down();
-  await page.mouse.move(g.x + g.width / 2, g.y + g.height + 70, { steps: 12 });
+  await page.mouse.move(g.x + g.width + 30 + 20, g.y + g.height / 2, { steps: 12 });
   await preview.waitFor();
   assert.equal(await parentOf('Beta'), 'Alfa', 'nothing changes while the button is held');
   await page.screenshot({ path: join(out, '14-anteprima-giunzione.png') });
@@ -505,6 +535,35 @@ test('dragging a node near another previews the attachment, releasing attaches i
   await preview.waitFor({ state: 'detached' });
   await page.waitForTimeout(900);
 
+  // A parent carries its whole subtree rigidly, live and after release; Ctrl+Z puts all of it back.
+  const names = ['Gamma', 'Beta', 'Delta'];
+  const offsets = async () => {
+    const [g0, ...rest] = await Promise.all(names.map(centre));
+    return rest.map((c) => ({ x: Math.round(c.x - g0.x), y: Math.round(c.y - g0.y) }));
+  };
+  const rigidBefore = await offsets();
+  const g1 = await centre('Gamma');
+  const alfa = await box('Alfa');
+  const spot = [{ x: 100, y: 700 }, { x: 1300, y: 700 }, { x: 1300, y: 120 }].find(
+    (q) => Math.hypot(q.x - (alfa.x + alfa.width / 2), q.y - (alfa.y + alfa.height / 2)) > 400,
+  )!;
+  const gp = await grab('Gamma');
+  await page.mouse.move(gp.x, gp.y);
+  await page.mouse.down();
+  await page.mouse.move((g1.x + spot.x) / 2, (g1.y + spot.y) / 2, { steps: 8 });
+  await page.mouse.move(spot.x, spot.y, { steps: 8 });
+  assert.deepEqual(await offsets(), rigidBefore, 'the subtree moves rigidly while dragging');
+  await page.mouse.up();
+  await page.waitForTimeout(600);
+  assert.deepEqual(await offsets(), rigidBefore, 'and stays rigid after the release');
+  assert.ok(Math.abs((await centre('Gamma')).x - g1.x) > 100, 'it really moved');
+  assert.equal(await parentOf('Beta'), 'Gamma');
+  await page.keyboard.press('Control+z');
+  await page.waitForTimeout(400);
+  const g2 = await centre('Gamma');
+  assert.ok(Math.abs(g2.x - g1.x) < 2 && Math.abs(g2.y - g1.y) < 2, 'Ctrl+Z puts the block back');
+  assert.deepEqual(await offsets(), rigidBefore);
+
   // Far from every node: no preview, and releasing changes nothing.
   const boxes = await Promise.all(['Alfa', 'Beta', 'Gamma', 'Delta'].map(box));
   const far = [{ x: 60, y: 760 }, { x: 1340, y: 760 }, { x: 1340, y: 140 }, { x: 700, y: 790 }].find((p) =>
@@ -513,7 +572,8 @@ test('dragging a node near another previews the attachment, releasing attaches i
   assert.ok(far, 'an empty corner exists');
   const d = await centre('Delta');
   const before = await parentOf('Delta');
-  await page.mouse.move(d.x, d.y + 12);
+  const dp = await grab('Delta');
+  await page.mouse.move(dp.x, dp.y);
   await page.mouse.down();
   await page.mouse.move(far.x, far.y, { steps: 14 });
   assert.equal(await preview.count(), 0, 'no preview out of range');
@@ -521,7 +581,9 @@ test('dragging a node near another previews the attachment, releasing attaches i
   await page.waitForTimeout(600);
   assert.equal(await parentOf('Delta'), before);
 
-  // Ctrl+Z undoes the attach.
+  // Ctrl+Z twice: the position of Delta, then the attach.
+  await page.keyboard.press('Control+z');
+  await page.waitForTimeout(300);
   await page.keyboard.press('Control+z');
   await page.waitForFunction(async ([base, id]) => {
     const t = await (await fetch(`${base}/api/conversations/${id}/tree`)).json();
