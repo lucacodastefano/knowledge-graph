@@ -3,7 +3,8 @@ import type { Repository } from './repository.ts';
 import type { Concept, ConceptMatch, Conversation, Settings, Visit } from './types.ts';
 import { normalizeName } from './normalize.ts';
 import { restatesParent, sharesEnough } from './similarity.ts';
-import { normalizeSources } from './sources.ts';
+import { normalizeSources, normalizeSourceUrl } from './sources.ts';
+import { applyDetailEdit, type DetailEdit, DetailEditError } from './node-edit.ts';
 
 export class TrackerError extends Error {}
 
@@ -62,7 +63,15 @@ export interface VisitEdit {
   conceptId?: string;
 }
 
+/** kc_edit: what to change in one node, without resending the rest. */
+export interface NodeEdit extends DetailEdit {
+  summary?: string;
+  addSources?: string[];
+  removeSources?: string[];
+}
+
 const SIMILAR_LIMIT = 3;
+const DEFAULT_TITLE = 'Conversazione';
 
 /**
  * Processing order of a kc_track batch: each node comes after the batch node it hangs under ("#n", or the title
@@ -131,6 +140,28 @@ export class Tracker {
     const conversation = this.repo.createConversation({ title: title?.trim() || 'Conversazione', client });
     this.emit({ type: 'conversation.created', conversation });
     return conversation;
+  }
+
+  /**
+   * kc_start: the map that already has this title (case, accents, plural folded), to resume instead of duplicating.
+   * The default title never matches, since it names nothing.
+   */
+  sameTitle(title: string | undefined): Conversation | undefined {
+    const t = title?.trim();
+    if (!t || t === DEFAULT_TITLE) return undefined;
+    return this.repo.listConversations().find((c) => normalizeName(c.title) === normalizeName(t));
+  }
+
+  /** A conversation by id, by exact title, or by a title sharing enough words (most recent first). */
+  findConversation(ref: string): Conversation {
+    const r = ref.trim();
+    const all = this.repo.listConversations();
+    const found =
+      all.find((c) => c.id === r) ??
+      all.find((c) => normalizeName(c.title) === normalizeName(r)) ??
+      all.find((c) => sharesEnough(r, c.title));
+    if (!found) throw new TrackerError(`No map matches "${r}"`);
+    return found;
   }
 
   requireConversation(id: string): Conversation {
@@ -275,6 +306,50 @@ export class Tracker {
     );
     if (byTitle) return byTitle;
     throw new TrackerError(`Node "${ref}" not found in this conversation: use a title from the tree, "root" or "#n"`);
+  }
+
+  /** Partial edit of a node (kc_edit): text replaced or appended, summary, sources; the rest stays as it is. */
+  editNode(conversationId: string, nodeRef: string, edit: NodeEdit): { visit: Visit; changes: string[] } {
+    const node = this.resolveNode(conversationId, nodeRef);
+    const textEdit = edit.find !== undefined || edit.replace !== undefined || edit.append !== undefined || edit.under !== undefined;
+    const summary = edit.summary?.trim();
+    if (edit.summary !== undefined && !summary) throw new TrackerError('Empty summary');
+    const add = normalizeSources(edit.addSources);
+    if (!textEdit && summary === undefined && add.length === 0 && !edit.removeSources?.length) {
+      throw new TrackerError('Nothing to edit: give find+replace, append, summary, add_sources or remove_sources');
+    }
+    const changes: string[] = [];
+    const visit = this.repo.transaction(() => {
+      let detail = node.detail;
+      if (textEdit) {
+        try {
+          detail = applyDetailEdit(node.detail, edit).trim() || null;
+        } catch (err) {
+          if (err instanceof DetailEditError) throw new TrackerError(`"${node.title}": ${err.message}`);
+          throw err;
+        }
+        changes.push(edit.append !== undefined ? 'text added' : 'text replaced');
+      }
+      const newSummary = summary ?? node.summary;
+      if (summary !== undefined) changes.push('summary');
+      this.keep('visit', node.id, 'summary', node.summary, newSummary);
+      this.keep('visit', node.id, 'detail', node.detail, detail);
+      this.repo.setVisitSummary(node.id, newSummary, node.excerpt, detail);
+      if (add.length) {
+        this.repo.addVisitSources(node.id, add);
+        changes.push(`${add.length} source(s) added`);
+      }
+      for (const raw of edit.removeSources ?? []) {
+        const url = normalizeSourceUrl(raw)?.url;
+        const source = url ? this.repo.listConceptSources(node.conceptId).find((s) => s.url === url && s.visitIds.includes(node.id)) : undefined;
+        if (!source) throw new TrackerError(`"${node.title}" does not cite ${raw}`);
+        this.repo.removeVisitSource(node.id, source.id);
+        changes.push('source removed');
+      }
+      return this.repo.getVisit(node.id)!;
+    });
+    this.emit({ type: 'visit.updated', visit });
+    return { visit, changes };
   }
 
   /** Re-attaches a node (by id or title) under another one, or to the root (kc_move). */

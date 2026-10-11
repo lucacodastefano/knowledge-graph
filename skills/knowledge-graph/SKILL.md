@@ -26,11 +26,13 @@ The knowledge-graph MCP server maps the concepts the user explores with you on a
    - `parent` (required): the title of the node it belongs under, from the tree that `kc_start` and `kc_track` return;
      `"root"` for an unrelated topic; `"#0"`, `"#1"`... (or its title) to hang a node under another node of the same call, in any order.
    - `excerpt`: leave it out unless a formula or code line is worth keeping as is.
-   - `sources`: when your answer uses web search results or documents, put their URLs on the nodes they support (not on every node).
+   - `sources`: when your answer uses web search results or documents, put their URLs on the nodes they support (not on every node): one or two primary sources per node; a URL several nodes cite is written once in the call's `sources` and referenced as `"@0"`, `"@1"`. At most 10 nodes per `kc_track` call.
+   If `kc_start` lists similar maps, or the user says to continue earlier research, call `kc_start` with `resume` (id or title) instead of starting another map.
 3. "On the canvas" means this conversation's map. To go deeper into a node, `kc_track` its parts with `parent` = that node (no `kc_focus` needed); a concept that is only in the user's graph is tracked here, not focused. Use `kc_focus` only to make a node of this map current again, and `kc_read` with a title to reread a node's full text.
    A parent's `detail` holds only what concerns the whole (introduction, comparison, how the parts connect); each child's content lives only in that child.
 4. If `kc_track` reports a `Similar` concept that is clearly the same idea, call `kc_link` to merge.
 5. When the user asks to change the canvas (move, rename, merge, remove, "fix the hierarchy"), use only the editing tools, never `kc_track`:
+   `kc_edit` changes part of a node without resending it (replace a fragment of the detail, append text at the end or under a heading, new summary, add or remove a source): use it for corrections and additions, and rewrite a node with `kc_track` only if almost everything changes.
    `kc_move` hangs a node (with its children) under another one or `"root"`; `kc_rename` renames it; `kc_link` merges two names of the same
    concept; `kc_remove` deletes a node and moves its children up, so removing a wrapper node fixes its branch in one call.
 

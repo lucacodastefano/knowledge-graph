@@ -10,6 +10,8 @@ import { VERSION } from '../version.ts';
 export interface McpSessionState {
   conversationId: string | null;
   client: string | null;
+  /** Title given to kc_start while similar maps were on offer: the map is created on the first kc_track unless one is resumed. */
+  pendingTitle?: string | null;
 }
 
 const ok = (data: unknown): CallToolResult => ({ content: [{ type: 'text', text: JSON.stringify(data) }] });
@@ -18,6 +20,8 @@ export const TRACKED_NOTE = 'Saved in the map. Write your answer now, once.';
 export const START_NOTE = 'Before each answer that explains a concept, call kc_track with its nodes, then write the answer.';
 /** A kc_track error: the batch is atomic, so the model must retry instead of claiming it was recorded. */
 export const TRACK_FAILED = 'Nothing was recorded. Fix this and call kc_track again before answering.';
+/** Nodes per kc_track call: bigger calls risk a client timeout, and nothing is saved if one fails. */
+export const MAX_TRACK_NODES = 10;
 const fail = (message: string): CallToolResult => ({ content: [{ type: 'text', text: message }], isError: true });
 
 function guarded(fn: () => CallToolResult, onError = ''): CallToolResult {
@@ -40,11 +44,26 @@ const trackShape = () => ({
         parent: z.string().describe('Title of the node it belongs under (from the tree, or another node of this call), "root", or "#n" for node n of this call'),
         excerpt: z.string().optional().describe('Rarely: a formula or code line to keep as is'),
         conceptId: z.string().optional().describe('Known concept id to reuse'),
-        sources: z.array(z.string()).optional().describe('URLs of web results or documents this node relies on'),
+        sources: z.array(z.string()).optional().describe('URLs of web results or documents this node relies on, or "@n" for sources[n]'),
       }),
     )
     .min(1),
+  sources: z.array(z.string()).optional().describe('URLs several nodes cite: write each once here and give the nodes "@0", "@1"... in their sources'),
 });
+
+/** "@n" in a node's sources points to sources[n] of the call: each URL is written once. */
+function expandSources(nodes: TrackNodeInput[], shared: string[] | undefined): TrackNodeInput[] {
+  if (!nodes.some((n) => n.sources?.some((u) => /^@\d+$/.test(u)))) return nodes;
+  return nodes.map((n) => ({
+    ...n,
+    sources: n.sources?.flatMap((u) => {
+      if (!/^@\d+$/.test(u)) return [u];
+      const url = shared?.[Number(u.slice(1))];
+      if (!url) throw new TrackerError(`Source ${u} is not in sources`);
+      return [url];
+    }),
+  }));
+}
 
 export function createMcpServer(tracker: Tracker, state: McpSessionState): McpServer {
   // D19: like the server instructions, the memory profile follows the setting as it was when the session opened.
@@ -54,23 +73,46 @@ export function createMcpServer(tracker: Tracker, state: McpSessionState): McpSe
   const reader = new Reader(tracker.repo);
 
   const conversationId = () => {
-    if (!state.conversationId) state.conversationId = tracker.startConversation(undefined, state.client).id;
+    if (!state.conversationId) state.conversationId = tracker.startConversation(state.pendingTitle ?? undefined, state.client).id;
     return state.conversationId;
   };
 
   server.registerTool(
     'kc_start',
     {
-      description: 'Start the canvas conversation at the first real topic of every chat (once per chat; a new topic is kc_track with parent "root"), or resume one by id.',
+      description:
+        'Start the canvas conversation at the first real topic of every chat (once per chat; a new topic is kc_track with parent "root"). To continue an earlier map ("continue the research on X"), pass resume: its id or title.',
       inputSchema: { title: z.string().optional(), resume: z.string().optional() },
     },
     ({ title, resume }) =>
       guarded(() => {
-        const c = resume ? tracker.requireConversation(resume) : tracker.startConversation(title, state.client);
-        state.conversationId = c.id;
-        const result = ok({ conversation: c.id });
-        const profile = instructionsMemory && !resume ? reader.memoryProfile() : '';
-        result.content.push({ type: 'text', text: `${reader.tree(c.id, false, true)}\n${profile ? `${profile}\n` : ''}${START_NOTE}` });
+        let c;
+        let note = START_NOTE;
+        let similar: ReturnType<Reader['similarMaps']> = [];
+        state.pendingTitle = null;
+        const same = resume ? undefined : tracker.sameTitle(title);
+        if (resume) {
+          c = tracker.findConversation(resume);
+        } else if (same) {
+          c = same;
+          note = `Resumed the existing map "${c.title}" instead of creating another. ${START_NOTE}`;
+        } else {
+          similar = title ? reader.similarMaps(title) : [];
+          // With similar maps on offer the new one is held back until the model decides, so no empty duplicate is left.
+          if (similar.length) state.pendingTitle = title;
+          else c = tracker.startConversation(title, state.client);
+        }
+        state.conversationId = c?.id ?? null;
+        const lines = similar.length
+          ? [
+              `Similar maps: ${similar.map((m) => `"${m.title}" [${m.id}] ${m.last}, ${m.nodes} nodes`).join('; ')}`,
+              'To continue one, call kc_start(resume: its id or title) instead of starting another. Otherwise kc_track starts a new map.',
+            ]
+          : [];
+        const result = ok({ conversation: state.conversationId });
+        const profile = instructionsMemory && c && !resume && !same ? reader.memoryProfile() : '';
+        const tree = c ? `${reader.tree(c.id, false, true)}\n` : '';
+        result.content.push({ type: 'text', text: `${tree}${lines.length ? `${lines.join('\n')}\n` : ''}${profile ? `${profile}\n` : ''}${note}` });
         return result;
       }),
   );
@@ -81,10 +123,13 @@ export function createMcpServer(tracker: Tracker, state: McpSessionState): McpSe
       description: 'Add the concept nodes of the answer you are about to write. One call per answer, before writing it.',
       inputSchema: trackShape(),
     },
-    ({ nodes }) =>
+    ({ nodes, sources }) =>
       guarded(() => {
+        if (nodes.length > MAX_TRACK_NODES) {
+          throw new TrackerError(`${nodes.length} nodes in one call, max ${MAX_TRACK_NODES}. Split it: parents first, then the rest with parent = a title already saved`);
+        }
         const id = conversationId();
-        const results = tracker.track(id, nodes as TrackNodeInput[]);
+        const results = tracker.track(id, expandSources(nodes as TrackNodeInput[], sources));
         // Lean result: the touched branch, plus only what needs a decision (no ids, no empty or false fields).
         const known = results.flatMap((r, i) => (r.knownConcept && !r.updated ? [nodes[i].title.trim()] : []));
         const similar = results.flatMap((r, i) => r.similar.map((m) => `"${nodes[i].title.trim()}" ~ "${m.name}" (conceptId ${m.id})`));
@@ -96,6 +141,30 @@ export function createMcpServer(tracker: Tracker, state: McpSessionState): McpSe
         ].join('\n');
         return { content: [{ type: 'text', text }] };
       }, TRACK_FAILED),
+  );
+
+  server.registerTool(
+    'kc_edit',
+    {
+      description:
+        'Change part of a node without resending it: replace a fragment of its detail, append text (at the end or under a heading), set the summary, add or remove sources. For corrections; rewrite the node with kc_track only if almost everything changes.',
+      inputSchema: {
+        node: z.string().describe('Title or id'),
+        find: z.string().optional().describe('Exact fragment of the detail to replace (must occur once)'),
+        replace: z.string().optional().describe('New text for find; "" deletes it'),
+        append: z.string().optional().describe('Markdown added at the end of the detail'),
+        under: z.string().optional().describe('With append: add at the end of the section with this heading'),
+        summary: z.string().optional().describe('New summary (node label)'),
+        add_sources: z.array(z.string()).optional(),
+        remove_sources: z.array(z.string()).optional(),
+      },
+    },
+    ({ node, add_sources, remove_sources, ...edit }) =>
+      guarded(() => {
+        const id = conversationId();
+        const { visit, changes } = tracker.editNode(id, node, { ...edit, addSources: add_sources, removeSources: remove_sources });
+        return text(`Edited "${visit.title}": ${changes.join(', ')}.`);
+      }),
   );
 
   server.registerTool(
