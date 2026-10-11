@@ -244,6 +244,8 @@ export function PersonalView({ live, found, onOpenConcept, onBackgroundClick, fo
   const graphRef = useRef(new Graph<NodeAttrs>());
   const sigmaRef = useRef<Sigma<NodeAttrs> | null>(null);
   const hoverRef = useRef<string | null>(null);
+  /** The edge under the pointer: drawn on top with its label, nodes covering it fade. */
+  const edgeHoverRef = useRef<string | null>(null);
   const foundRef = useRef<string | null>(null);
   const rngRef = useRef(seeded(9));
   const relayoutRef = useRef(true);
@@ -359,6 +361,7 @@ export function PersonalView({ live, found, onOpenConcept, onBackgroundClick, fo
       defaultDrawNodeHover: drawHover,
       hideEdgesOnMove: graph.order > 3000,
       zIndex: true,
+      enableEdgeEvents: true,
       nodeReducer: (node, data) => {
         const v = view.current;
         const h = hoverRef.current;
@@ -367,6 +370,19 @@ export function PersonalView({ live, found, onOpenConcept, onBackgroundClick, fo
         const g = groupOf(node, data);
         const color = g.slot >= 0 ? colors[g.slot] : other;
         const highlighted = node === h || isFound;
+        const eh = edgeHoverRef.current;
+        if (eh && !h && !isFound && sigmaRef.current && graph.hasEdge(eh) && !graph.hasExtremity(eh, node)) {
+          // A node sitting on the hovered edge fades so the edge and its label can be read.
+          const r = sigmaRef.current;
+          const [s, t] = graph.extremities(eh);
+          const a = r.graphToViewport(graph.getNodeAttributes(s) as { x: number; y: number });
+          const b = r.graphToViewport(graph.getNodeAttributes(t) as { x: number; y: number });
+          const p = r.graphToViewport(data as { x: number; y: number });
+          const len2 = (b.x - a.x) ** 2 + (b.y - a.y) ** 2 || 1;
+          const u = Math.max(0, Math.min(1, ((p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y)) / len2));
+          const dist = Math.hypot(p.x - (a.x + u * (b.x - a.x)), p.y - (a.y + u * (b.y - a.y)));
+          if (dist <= r.scaleSize(Math.min(data.size, v.maxSize)) + 2) return { ...data, size: Math.min(data.size, v.maxSize), color: faded, label: '', zIndex: 0 };
+        }
         const dim = h ? node !== h && !graph.areNeighbors(node, h) : v.focus ? g.key !== v.focus && !isFound : false;
         if (dim) return { ...data, size: Math.min(data.size, v.maxSize), color: faded, label: '', zIndex: 0 };
         return { ...data, size: Math.min(data.size, v.maxSize), color, highlighted, zIndex: 1, forceLabel: !!h || isFound || !!data.isSuper };
@@ -376,6 +392,7 @@ export function PersonalView({ live, found, onOpenConcept, onBackgroundClick, fo
         const h = hoverRef.current;
         const [s, t] = graph.extremities(edge);
         if (v.visible && (!v.visible.has(s) || !v.visible.has(t))) return { ...data, hidden: true };
+        if (edge === edgeHoverRef.current && !h) return { ...data, color: RELATION_COLOR, size: Math.max(data.size as number, 1.6) + 2, forceLabel: true, zIndex: 10 };
         if (h)
           return graph.hasExtremity(edge, h) ? { ...data, color: muted, size: (data.size as number) + 0.5 } : { ...data, hidden: true };
         if (v.focus) {
@@ -538,6 +555,16 @@ export function PersonalView({ live, found, onOpenConcept, onBackgroundClick, fo
       if (focusRef.current) return;
       hoverRef.current = null;
       hoverCallback.current?.(null);
+      renderer.refresh({ skipIndexation: true });
+    });
+    renderer.on('enterEdge', ({ edge }) => {
+      if (focusRef.current || hoverRef.current) return;
+      edgeHoverRef.current = edge;
+      renderer.refresh({ skipIndexation: true });
+    });
+    renderer.on('leaveEdge', () => {
+      if (!edgeHoverRef.current) return;
+      edgeHoverRef.current = null;
       renderer.refresh({ skipIndexation: true });
     });
     renderer.on('clickNode', ({ node, event }) => {

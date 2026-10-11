@@ -5,8 +5,8 @@ import { HANDLES, type VisitNode as VisitNodeType } from './layout.ts';
 const POSITION = { left: Position.Left, right: Position.Right, center: Position.Top };
 
 /**
- * A concept visit. Hovering shows the short summary beside the node, on the side with more room, with an
- * "Approfondisci" button (D7, WP6); only one tooltip is open at a time and it never blocks clicks on the canvas.
+ * A concept visit. Hovering shows the short summary beside the node, on the side with more room, with a
+ * note that a double click opens "Approfondisci" (D7, WP6); only one tooltip is open at a time and it never blocks clicks on the canvas.
  * The view highlights the hovered or clicked node with its relatives (`focus`, `related`) and fades the rest (`dim`).
  */
 export function VisitNode({ data }: NodeProps<VisitNodeType>) {
@@ -24,7 +24,7 @@ export function VisitNode({ data }: NodeProps<VisitNodeType>) {
     <div
       ref={ref}
       className={`visit${data.also.length ? ' shared' : ''}${current ? ' current' : ''}${fresh ? ' fresh' : ''}${match ? ' match' : ''}${
-        data.focus ? ' focus' : data.related ? ' related' : data.dim ? ' dim' : ''
+        data.cover ? ' cover' : data.focus ? ' focus' : data.related ? ' related' : data.dim ? ' dim' : ''
       }`}
       onMouseEnter={show}
       onMouseLeave={hide}
@@ -51,14 +51,7 @@ export function VisitNode({ data }: NodeProps<VisitNodeType>) {
       <NodeToolbar isVisible={hovered} position={side} offset={10}>
         <div className="tooltip passive" role="tooltip">
           <p>{visit.summary || 'Nessun testo dalla risposta.'}</p>
-          <button
-            type="button"
-            onMouseEnter={() => data.onHover(visit.id)}
-            onMouseLeave={hide}
-            onClick={() => data.onOpen(visit.conceptId)}
-          >
-            Approfondisci
-          </button>
+          <p className="tooltip-note">Doppio clic sul nodo per approfondire</p>
         </div>
       </NodeToolbar>
     </div>

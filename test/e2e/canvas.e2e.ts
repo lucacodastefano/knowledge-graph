@@ -77,7 +77,9 @@ test('the canvas starts blank and grows live while the model tracks concepts', a
   assert.equal(await page.getByRole('tooltip').count(), 0, 'the previous tooltip closes at once');
   await page.getByRole('tooltip').waitFor();
   assert.equal(await page.getByRole('tooltip').count(), 1, 'only one tooltip at a time');
-  await page.getByRole('tooltip').getByRole('button', { name: 'Approfondisci' }).click();
+  assert.match(await page.getByRole('tooltip').innerText(), /Doppio clic sul nodo per approfondire/);
+  assert.equal(await page.getByRole('tooltip').getByRole('button').count(), 0, 'no Approfondisci button any more');
+  await titled(page, /^Partizioni$/).first().dblclick();
   const panel = page.getByLabel('Dettaglio concetto');
   await panel.waitFor();
   // The panel opens before its data arrives: wait for the list, not just the frame.
@@ -175,7 +177,7 @@ test('search finds a concept and the canvas corrects nodes and concepts (RF17, D
     await page.locator('.react-flow__controls-fitview').click();
     await page.waitForTimeout(300);
     await titled(page, title).hover();
-    await page.getByRole('tooltip').getByRole('button', { name: 'Approfondisci' }).click();
+    await titled(page, title).dblclick();
     await panel.getByRole('heading', { name: title }).waitFor();
     await pencil();
   };
@@ -520,11 +522,34 @@ test('dragging a node near another previews the attachment, releasing attaches i
   await page.waitForTimeout(900);
   const g = await box('Gamma');
   const bb = await box('Beta');
+  // A node that still has a parent never snaps: no preview, even right against the other end.
   await page.mouse.move(bb.x + 20, bb.y + bb.height / 2);
   await page.mouse.down();
-  await page.mouse.move(g.x + g.width + 30 + 20, g.y + g.height / 2, { steps: 12 });
+  await page.mouse.move(g.x + g.width + 8 + 20, g.y + g.height / 2, { steps: 12 });
+  await page.waitForTimeout(200);
+  assert.equal(await preview.count(), 0, 'a node with a parent does not preview an attachment');
+  await page.mouse.up();
+  await page.waitForTimeout(400);
+  await page.keyboard.press('Control+z');
+  await page.waitForTimeout(500);
+  // Detached, Beta has a free end: a 30 px gap is too far, 8 px snaps.
+  const betaId = (await (await fetch(`${base}/api/conversations/${conv.id}/tree`)).json() as { visits: { id: string; title: string }[] }).visits.find((v) => v.title === 'Beta')!.id;
+  await fetch(`${base}/api/visits/${betaId}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ parentVisitId: null }) });
+  await page.waitForFunction(async ([base, id]) => {
+    const t = await (await fetch(`${base}/api/conversations/${id}/tree`)).json();
+    return t.visits.find((v: { title: string }) => v.title === 'Beta').parentVisitId === null;
+  }, [base, conv.id]);
+  await page.waitForTimeout(900);
+  const bf = await box('Beta');
+  const gf = await box('Gamma');
+  await page.mouse.move(bf.x + 20, bf.y + bf.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(gf.x + gf.width + 60 + 20, gf.y + gf.height / 2, { steps: 12 });
+  await page.waitForTimeout(200);
+  assert.equal(await preview.count(), 0, 'no snap 60 px away');
+  await page.mouse.move(gf.x + gf.width + 8 + 20, gf.y + gf.height / 2, { steps: 6 });
   await preview.waitFor();
-  assert.equal(await parentOf('Beta'), 'Alfa', 'nothing changes while the button is held');
+  assert.equal(await parentOf('Beta'), null, 'nothing changes while the button is held');
   await page.screenshot({ path: join(out, '14-anteprima-giunzione.png') });
   await page.mouse.up();
   await page.waitForFunction(async ([base, id]) => {
@@ -581,15 +606,56 @@ test('dragging a node near another previews the attachment, releasing attaches i
   await page.waitForTimeout(600);
   assert.equal(await parentOf('Delta'), before);
 
-  // Ctrl+Z twice: the position of Delta, then the attach.
+  // Ctrl+Z twice: the position of Delta, then the attach (Beta is free again).
   await page.keyboard.press('Control+z');
   await page.waitForTimeout(300);
   await page.keyboard.press('Control+z');
   await page.waitForFunction(async ([base, id]) => {
     const t = await (await fetch(`${base}/api/conversations/${id}/tree`)).json();
     const byTitle = (n: string) => t.visits.find((v: { title: string }) => v.title === n);
-    return byTitle('Beta').parentVisitId === byTitle('Alfa').id;
+    return byTitle('Beta').parentVisitId === null;
   }, [base, conv.id]);
+  await page.close();
+});
+
+test('hovering an edge lifts it with its label and fades what covers it; dragging a node closes the panel and the tooltip', async () => {
+  const conv = tracker.startConversation('Archi', null);
+  tracker.track(conv.id, [
+    { title: 'Radice archi', summary: 'r' },
+    { title: 'Ramo uno', summary: 'u', parent: '#0' },
+    { title: 'Ramo due', summary: 'd', parent: '#0' },
+  ]);
+  const ids = (await (await fetch(`${base}/api/conversations/${conv.id}/tree`)).json() as { visits: { title: string; conceptId: string }[] }).visits;
+  const c = (t: string) => ids.find((v) => v.title === t)!.conceptId;
+  await fetch(`${base}/api/relations`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ from: c('Ramo uno'), to: c('Ramo due'), label: 'si oppone a' }),
+  });
+  const page = await browser.newPage({ viewport: { width: 1400, height: 820 } });
+  await page.goto(base);
+  await titled(page, 'Ramo due').waitFor();
+  await page.waitForTimeout(900);
+  const rel = page.locator('.react-flow__edge.relation .react-flow__edge-path').first();
+  await rel.waitFor({ state: 'attached' });
+  await rel.hover({ force: true });
+  await page.locator('.react-flow__edge.hover').waitFor({ state: 'attached', timeout: 5000 });
+  assert.ok((await page.locator('.relation-label.hover').innerText()).includes('si oppone a'));
+  assert.equal(await titled(page, 'Ramo uno').evaluate((e) => e.classList.contains('cover')), false, 'endpoints stay opaque');
+  await page.mouse.move(5, 5);
+  await page.waitForFunction(() => !document.querySelector('.react-flow__edge.hover'));
+
+  // Double click opens the panel; starting a drag closes it, and no tooltip stays.
+  await titled(page, 'Ramo uno').dblclick();
+  const panel = page.getByLabel('Dettaglio concetto');
+  await panel.waitFor();
+  const b = (await titled(page, 'Ramo due').boundingBox())!;
+  await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(b.x + b.width / 2 + 40, b.y + 160, { steps: 6 });
+  await panel.waitFor({ state: 'detached' });
+  assert.equal(await page.getByRole('tooltip').count(), 0);
+  await page.mouse.up();
   await page.close();
 });
 
