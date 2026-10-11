@@ -47,7 +47,8 @@ The **[user manual](docs/MANUAL.md)** covers every client (Claude Code, Claude D
 | `kc_rename` | Rename a node |
 | `kc_remove` | Remove a node; its children move up |
 | `kc_recall` | What the user already explored about a topic |
-| `kc_tree` | Outline of a conversation |
+| `kc_tree` | Outline of a conversation, with its relations |
+| `kc_read` | Full text of one node, with its children's titles |
 | `kc_profile` | Overview of the user's knowledge |
 
 The server sends its tracking instructions to the client automatically; they are also available as the `kc_instructions` prompt.

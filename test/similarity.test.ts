@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { restatesParent, similarityKey } from '../src/core/similarity.ts';
+import { restatesParent, sharesEnough, similarityKey } from '../src/core/similarity.ts';
 import { SqliteRepository } from '../src/core/sqlite-repository.ts';
 import { Tracker } from '../src/core/tracker.ts';
 
@@ -39,4 +39,12 @@ test('kc_track reports near-duplicate concepts first', () => {
   tracker.track(conv.id, [{ title: 'Diagrammi di dati', summary: 's', parent: 'root' }]);
   const [res] = tracker.track(conv.id, [{ title: 'Diagramma dei dati', summary: 's', parent: 'root' }]);
   assert.equal(res.similar[0].name, 'Diagrammi di dati');
+});
+
+test('sharesEnough: a stray common word is not a duplicate', () => {
+  assert.equal(sharesEnough('Event sourcing', 'Event notification'), false);
+  assert.equal(sharesEnough('Event sourcing', 'Architettura event-driven'), false);
+  assert.equal(sharesEnough('Kafka', 'Apache Kafka'), true);
+  assert.equal(sharesEnough('Partizioni Kafka', 'Partizionamento Kafka'), true);
+  assert.equal(sharesEnough('Diagramma dei dati', 'Diagrammi di dati'), true);
 });

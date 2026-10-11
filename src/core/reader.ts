@@ -41,8 +41,6 @@ export interface Profile {
 }
 
 const RECALL_LIMIT = 5;
-/** Sub-concept levels shown as sections in "Approfondisci" (D17). */
-const SECTION_DEPTH = 2;
 const NOTES_PER_CONCEPT = 3;
 const NEAR_PER_CONCEPT = 5;
 const NOTE_MAX = 300;
@@ -133,13 +131,14 @@ export class Reader {
       .sort((a, b) => b.n - a.n)
       .slice(0, MEMORY_AREAS)
       .map((g) => `${g.name} (${g.n})`);
-    const top = this.repo.rankConcepts('visits', MEMORY_TOPICS);
+    // Counts of 1 say nothing: only concepts seen at least twice are "most explored".
+    const top = this.repo.rankConcepts('visits', MEMORY_TOPICS).filter((c) => c.visitCount >= 2);
     const seen = new Set(top.map((c) => c.id));
     const recent = this.repo.rankConcepts('recent', MEMORY_TOPICS).filter((c) => !seen.has(c.id)).slice(0, MEMORY_TOPICS);
     return [
       `User's graph (${total} concepts).`,
       ...(areas.length ? [`Areas: ${areas.join(', ')}`] : []),
-      `Most explored: ${top.map((c) => `${c.name} ×${c.visitCount}`).join(', ')}`,
+      ...(top.length ? [`Most explored: ${top.map((c) => `${c.name} ×${c.visitCount}`).join(', ')}`] : []),
       ...(recent.length ? [`Recent: ${recent.map((c) => c.name).join(', ')}`] : []),
     ].join('\n');
   }
@@ -162,26 +161,28 @@ export class Reader {
       members: this.repo.listMembers(conceptId),
       visits: detail.visits.map((v) => {
         const all = visitsOf(v.conversationId);
-        const sections = (parentId: string, depth: number): ConceptSection[] =>
-          depth === 0
-            ? []
-            : all
-                .filter((c) => c.parentVisitId === parentId)
-                .map((c) => ({ id: c.id, title: c.title, summary: c.summary, detail: c.detail, children: sections(c.id, depth - 1) }));
+        // Every descendant is a section, however deep: a parent never has to repeat its children's text.
+        const sections = (parentId: string): ConceptSection[] =>
+          all
+            .filter((c) => c.parentVisitId === parentId)
+            .map((c) => ({ id: c.id, title: c.title, summary: c.summary, detail: c.detail, children: sections(c.id) }));
+        const parentTitle = all.find((p) => p.id === v.parentVisitId)?.title ?? null;
         return {
           ...v,
-          parentTitle: all.find((p) => p.id === v.parentVisitId)?.title ?? null,
-          sections: sections(v.id, SECTION_DEPTH),
+          // Same name as the conversation: "X · sotto «X»" says nothing.
+          parentTitle: parentTitle !== null && normalizeName(parentTitle) === normalizeName(v.conversationTitle) ? null : parentTitle,
+          sections: sections(v.id),
         };
       }),
     };
   }
 
   /**
-   * Compact indented outline of a conversation (RF9): one line per node with its id,
-   * so the model can kc_focus on it. Defaults to the most recent conversation.
+   * Indented outline of a conversation (RF9), titles only (the tools accept them); an id only where two nodes share
+   * a title. `touched` narrows it to the branches leading to those nodes (the kc_track result); otherwise the free
+   * relations (the dashed lines of the canvas) close the outline. Defaults to the most recent conversation.
    */
-  tree(conversationId: string | null, withSummaries: boolean, compact = false): string {
+  tree(conversationId: string | null, withSummaries: boolean, compact = false, touched?: Set<string>): string {
     const id = conversationId ?? this.repo.listConversations()[0]?.id;
     if (!id) return 'No conversations yet.';
     const tree = this.repo.getTree(id);
@@ -189,27 +190,61 @@ export class Reader {
 
     const { conversation, visits } = tree;
     if (compact && visits.length === 0) return 'Tree: empty';
+    const byId = new Map(visits.map((v) => [v.id, v]));
     const children = new Map<string | null, Visit[]>();
-    const ids = new Set(visits.map((v) => v.id));
     for (const v of visits) {
-      const parent = v.parentVisitId && ids.has(v.parentVisitId) ? v.parentVisitId : null;
+      const parent = v.parentVisitId && byId.has(v.parentVisitId) ? v.parentVisitId : null;
       children.set(parent, [...(children.get(parent) ?? []), v]);
     }
+    const shown = new Set<string>();
+    for (const t of touched ?? []) for (let v = byId.get(t); v && !shown.has(v.id); v = byId.get(v.parentVisitId ?? '')) shown.add(v.id);
+    const titles = new Map<string, number>();
+    for (const v of visits) titles.set(normalizeName(v.title), (titles.get(normalizeName(v.title)) ?? 0) + 1);
 
-    // Compact: the outline returned after kc_start/kc_track, titles only, so the model sees where it is (D15).
-    const lines = compact
-      ? ['Tree:']
-      : [`${conversation.title} [${conversation.id}] ${day(conversation.lastActivityAt)}, ${visits.length} nodes`];
+    const lines = compact ? ['Tree:'] : [`${conversation.title} [${conversation.id}] ${day(conversation.lastActivityAt)}, ${visits.length} nodes`];
     const walk = (parent: string | null, depth: number) => {
       for (const v of children.get(parent) ?? []) {
-        const current = v.id === conversation.currentVisitId ? ' *current' : '';
+        if (touched && !shown.has(v.id)) continue;
+        const dup = (titles.get(normalizeName(v.title)) ?? 0) > 1 ? ` [${v.id}]` : '';
+        const current = !compact && v.id === conversation.currentVisitId ? ' *current' : '';
         const summary = withSummaries && v.summary ? `: ${v.summary}` : '';
-        lines.push(compact ? `${'  '.repeat(depth)}- ${v.title}` : `${'  '.repeat(depth)}- ${v.title} [${v.id}]${current}${summary}`);
+        lines.push(`${'  '.repeat(depth)}- ${v.title}${dup}${current}${summary}`);
         walk(v.id, depth + 1);
       }
     };
     walk(null, 0);
+
+    if (!compact) {
+      const titleOf = new Map(visits.map((v) => [v.conceptId, v.title]));
+      const rels = tree.relations.filter((r) => titleOf.has(r.from) && titleOf.has(r.to));
+      if (rels.length) {
+        lines.push('Relations:');
+        for (const r of rels) lines.push(`- ${titleOf.get(r.from)} → ${titleOf.get(r.to)}${r.label ? ` (${r.label})` : ''}`);
+      }
+    }
     return lines.join('\n');
+  }
+
+  /**
+   * kc_read: the full text of one node of this conversation, or of a concept from the user's graph (latest visit that
+   * has text), with the titles of its children.
+   */
+  read(conversationId: string | null, ref: string): string {
+    const q = ref.trim();
+    const visits = conversationId ? (this.repo.getTree(conversationId)?.visits ?? []) : [];
+    const norm = normalizeName(q);
+    let visit = visits.find((v) => v.id === q) ?? visits.findLast((v) => normalizeName(v.title) === norm);
+    if (!visit) {
+      const concept = this.repo.findConceptByNorm(norm);
+      if (!concept) throw new TrackerError(`"${q}" not found in this conversation or in the user's graph`);
+      const all = this.repo.getConceptDetail(concept.id)?.visits ?? [];
+      visit = all.find((v) => v.detail) ?? all[0];
+      if (!visit) throw new TrackerError(`"${q}" has no text yet`);
+    }
+    const kids = (this.repo.getTree(visit.conversationId)?.visits ?? []).filter((v) => v.parentVisitId === visit.id).map((v) => v.title);
+    return [`# ${visit.title}`, visit.summary, visit.detail ?? '', kids.length ? `Children: ${kids.join(', ')}` : '']
+      .filter(Boolean)
+      .join('\n\n');
   }
 
   /** Most explored and most recent themes, plus the last conversations (RF10). */

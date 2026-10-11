@@ -50,7 +50,7 @@ main { position: relative; flex: 1; min-height: 0; overflow: hidden; }
 /* Number of sources the model cited for the node (details in Approfondisci). */
 .visit .source-badge { position: absolute; top: -7px; right: -7px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; font-size: 10px; line-height: 16px; text-align: center; color: #fff; background: var(--accent); }
 .sections h3 { margin: 10px 0 2px; font-size: 15px; }
-.sections h4 { margin: 8px 0 2px; font-size: 13px; }
+.sections h4, .sections h5, .sections h6 { margin: 8px 0 2px; font-size: 13px; }
 .sections .sections { padding-left: 12px; border-left: 2px solid var(--border); }
 .markdown { margin: 6px 0; line-height: 1.5; overflow-wrap: anywhere; }
 .markdown > :first-child { margin-top: 0; }
@@ -152,7 +152,7 @@ button.icon:hover { color: var(--text); }
 .editable:focus { outline: 2px solid var(--accent); }
 .editable.title { font-size: 18px; font-weight: 600; margin: 0; }
 .editable.h3 { font-size: 15px; font-weight: 600; margin-top: 10px; }
-.editable.h4 { font-size: 13px; font-weight: 600; margin-top: 8px; }
+.editable.h4, .editable.h5, .editable.h6 { font-size: 13px; font-weight: 600; margin-top: 8px; }
 .editable.inline { display: inline-block; width: auto; max-width: 60%; margin: 0; padding: 0 2px; font-size: 12px; }
 .sources h3 { font-size: 15px; margin: 16px 0 6px; }
 .sources ul { margin: 0; padding: 0; list-style: none; }

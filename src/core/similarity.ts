@@ -56,3 +56,14 @@ export function restatesParent(child: string, parent: string, hasOwnChildren: bo
   if (core.length < words.length) return subset(core, p);
   return hasOwnChildren && subset(core, p);
 }
+
+/** Same stem, or the same long root ("partizion" in "partizioni" and "partizionamento"). */
+const sameWord = (a: string, b: string) => a === b || (a.length >= 6 && b.length >= 6 && a.slice(0, 6) === b.slice(0, 6));
+
+/** Whether two different titles overlap enough to be the same idea: two shared words, or all words of the shorter one. */
+export function sharesEnough(a: string, b: string): boolean {
+  const x = [...new Set(titleStems(a))];
+  const y = [...new Set(titleStems(b))];
+  const shared = x.filter((w) => y.some((v) => sameWord(w, v))).length;
+  return shared >= 2 || (shared > 0 && shared === Math.min(x.length, y.length));
+}

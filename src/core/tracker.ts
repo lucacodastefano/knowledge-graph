@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import type { Repository } from './repository.ts';
 import type { Concept, ConceptMatch, Conversation, Settings, Visit } from './types.ts';
 import { normalizeName } from './normalize.ts';
-import { restatesParent } from './similarity.ts';
+import { restatesParent, sharesEnough } from './similarity.ts';
 import { normalizeSources } from './sources.ts';
 
 export class TrackerError extends Error {}
@@ -158,6 +158,7 @@ export class Tracker {
     const results = this.repo.transaction(() => {
       let current = this.requireConversation(conversationId).currentVisitId;
       const out: TrackNodeResult[] = new Array(nodes.length);
+      const fresh: number[] = [];
 
       for (const { index, parentIndex } of order) {
         const node = nodes[index];
@@ -205,8 +206,22 @@ export class Tracker {
           conceptId: concept.id,
           knownConcept,
           revisit,
-          similar: knownConcept ? [] : this.similar(title, concept.id),
+          similar: [],
         };
+        fresh.push(index);
+      }
+
+      // Possible duplicates of brand-new concepts, never the other nodes of this call or the node's own ancestors.
+      const batch = new Set(out.map((r) => r.conceptId));
+      for (const index of fresh) {
+        const ancestors = new Set<string>();
+        for (let v = this.repo.getVisit(out[index].id)?.parentVisitId; v; ) {
+          const p = this.repo.getVisit(v);
+          if (!p) break;
+          ancestors.add(p.conceptId);
+          v = p.parentVisitId;
+        }
+        out[index].similar = this.similar(nodes[index].title.trim(), out[index].conceptId).filter((m) => !batch.has(m.id) && !ancestors.has(m.id));
       }
 
       // The caller's last node is where the next topics hang.
@@ -236,7 +251,8 @@ export class Tracker {
   similar(name: string, excludeId: string): ConceptMatch[] {
     const found = new Map<string, ConceptMatch>();
     for (const c of this.repo.findConceptsByKey(name, excludeId)) found.set(c.id, c);
-    for (const c of this.repo.similarConcepts(name, excludeId, SIMILAR_LIMIT)) found.set(c.id, c);
+    // Full-text neighbours must share more than one stray word ("event" alone is not enough).
+    for (const c of this.repo.similarConcepts(name, excludeId, SIMILAR_LIMIT * 3)) if (sharesEnough(name, c.name)) found.set(c.id, c);
     return [...found.values()].slice(0, SIMILAR_LIMIT);
   }
 
