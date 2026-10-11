@@ -117,11 +117,12 @@ export function createMcpServer(tracker: Tracker, state: McpSessionState): McpSe
     'kc_link',
     {
       description: 'Merge a node into an existing concept: same idea under two names (e.g. kc_track reported it as similar). To re-attach a node elsewhere use kc_move.',
-      inputSchema: { node: z.string(), conceptId: z.string() },
+      inputSchema: { node: z.string().describe('Title of the node'), conceptId: z.string().describe('conceptId from the Similar line') },
     },
     ({ node, conceptId }) =>
       guarded(() => {
-        const v = tracker.link(conversationId(), node, conceptId);
+        const id = conversationId();
+        const v = tracker.link(id, tracker.resolveNode(id, node).id, conceptId);
         return text(`Linked: ${v.title}`);
       }),
   );
