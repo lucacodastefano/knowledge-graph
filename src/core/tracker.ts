@@ -561,17 +561,43 @@ export class Tracker {
     return visit;
   }
 
-  /** Deletes one node; its children move up to its parent and an unused concept is dropped. */
-  deleteVisit(visitId: string): void {
+  /**
+   * Deletes one node and drops an unused concept. Its children move up to its parent, or with `detachChildren`
+   * (the canvas) become roots of their own, like deleting the edge to each of them.
+   */
+  deleteVisit(visitId: string, detachChildren = false): void {
     const visit = this.requireVisit(visitId);
-    const removedConceptId = this.repo.transaction(() => this.removeVisit(visitId));
+    const removedConceptId = this.repo.transaction(() => this.removeVisit(visitId, detachChildren));
     this.emit({ type: 'visit.deleted', visitId, conversationId: visit.conversationId, removedConceptId });
   }
 
-  private removeVisit(visitId: string): string | null {
+  /**
+   * Puts back a node deleted from the canvas (undo): same text, parent and children. The concept is the original one
+   * if it survived, otherwise it is recreated by name (the canvas re-applies its relations and superclass).
+   */
+  restoreVisit(input: { conversationId: string; conceptId: string; conceptName: string; parentVisitId: string | null; childIds: string[]; title: string; summary: string; excerpt: string | null; detail: string | null }): Visit {
+    this.requireConversation(input.conversationId);
+    if (input.parentVisitId !== null) this.requireVisitIn(input.conversationId, input.parentVisitId);
+    const visit = this.repo.transaction(() => {
+      const concept =
+        this.repo.getConcept(input.conceptId) ??
+        this.repo.findConceptByNorm(normalizeName(input.conceptName)) ??
+        this.repo.createConcept({ name: input.conceptName, nameNorm: normalizeName(input.conceptName) });
+      const created = this.repo.createVisit({ conversationId: input.conversationId, conceptId: concept.id, parentVisitId: input.parentVisitId, title: input.title, summary: input.summary, excerpt: input.excerpt, detail: input.detail });
+      for (const id of input.childIds) {
+        const child = this.repo.getVisit(id);
+        if (child && child.conversationId === input.conversationId) this.repo.setVisitParent(id, created.id);
+      }
+      return this.repo.getVisit(created.id)!;
+    });
+    this.emit({ type: 'visit.created', visit, concept: this.repo.getConcept(visit.conceptId)! });
+    return visit;
+  }
+
+  private removeVisit(visitId: string, detachChildren = false): string | null {
     const visit = this.repo.getVisit(visitId)!;
     const conversation = this.repo.getConversation(visit.conversationId)!;
-    this.repo.reparentChildren(visitId, visit.parentVisitId);
+    this.repo.reparentChildren(visitId, detachChildren ? null : visit.parentVisitId);
     this.repo.deleteVisit(visitId);
     if (conversation.currentVisitId === visitId) this.repo.setCurrentVisit(visit.conversationId, visit.parentVisitId);
     if (!this.isUnused(visit.conceptId)) return null;

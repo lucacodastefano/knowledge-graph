@@ -58,7 +58,9 @@ export const api = {
   mergeConcept: (id: string, into: string) => send<Concept>('POST', `/api/concepts/${id}/merge`, { into }),
   deleteConcept: (id: string) => send<void>('DELETE', `/api/concepts/${id}`),
   editVisit: (id: string, edit: VisitEdit) => send<Visit>('PATCH', `/api/visits/${id}`, edit),
-  deleteVisit: (id: string) => send<void>('DELETE', `/api/visits/${id}`),
+  /** `detach`: the children become roots instead of moving up to the parent. */
+  deleteVisit: (id: string, detach = false) => send<void>('DELETE', `/api/visits/${id}${detach ? '?children=detach' : ''}`),
+  restoreVisit: (input: object) => send<Visit>('POST', '/api/visits/restore', input),
   relate: (from: string, to: string, label?: string | null) => send<void>('POST', '/api/relations', { from, to, label }),
   setSuperclass: (id: string, superclassId: string | null) => send<void>('PATCH', `/api/concepts/${id}/superclass`, { superclassId }),
   group: (name: string, conceptIds: string[]) => send<Concept>('POST', '/api/groups', { name, conceptIds }),

@@ -17,7 +17,7 @@ import {
   type Connection,
   type NodeChange,
 } from '@xyflow/react';
-import { api, explain, type Conversation, type ConversationTree } from './api.ts';
+import { api, explain, type Conversation, type Visit, type ConversationTree } from './api.ts';
 import type { Found, LiveEvent } from './App.tsx';
 import {
   alsoIn,
@@ -437,6 +437,41 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
   const onEdgeClick = useCallback((_: unknown, edge: Edge<EdgeData>) => {
     if (edge.className?.includes('relation') || edge.id.startsWith('t-')) setArmed((a) => (a === edge.id ? null : edge.id));
   }, []);
+  /** Deletes a node (children detached as roots, positions kept); undo restores it with its links. */
+  const deleteNode = useCallback(
+    async (v: Visit) => {
+      for (const n of flow.getNodes()) manual.current.set(n.id, { ...n.position });
+      const old = { ...(manual.current.get(v.id) ?? { x: 0, y: 0 }) };
+      const childIds = (tree?.visits ?? []).filter((x) => x.parentVisitId === v.id).map((x) => x.id);
+      const page = await api.concept(v.conceptId).catch(() => null);
+      let current = v.id;
+      setSelected(null);
+      act({
+        redo: () => api.deleteVisit(current, true),
+        undo: async () => {
+          const back = await api.restoreVisit({
+            conversationId: v.conversationId,
+            conceptId: v.conceptId,
+            conceptName: page?.name ?? v.title,
+            parentVisitId: v.parentVisitId,
+            childIds,
+            title: v.title,
+            summary: v.summary,
+            excerpt: v.excerpt,
+            detail: v.detail,
+          });
+          current = back.id;
+          manual.current.set(back.id, old);
+          // A concept that was dropped comes back by name: its relations and superclass are re-applied.
+          if (page && back.conceptId !== v.conceptId) {
+            for (const r of page.related) await api.relate(back.conceptId, r.id, r.label ?? null);
+            if (page.superclass) await api.setSuperclass(back.conceptId, page.superclass.id);
+          }
+        },
+      });
+    },
+    [flow, tree, act],
+  );
   // Canc removes the armed relation; Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z) walk back and forth through the actions.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -448,13 +483,10 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
         e.preventDefault();
         removeRelation(armed);
       } else if ((e.key === 'Delete' || e.key === 'Backspace') && selected) {
-        // The selected node goes (its children move up to its parent); the concept is dropped if nothing else uses it.
+        // The selected node goes; its children become roots of their own, nothing moves, Ctrl+Z puts it all back.
         e.preventDefault();
         const v = tree?.visits.find((x) => x.id === selected);
-        if (!v || !window.confirm(`Eliminare il nodo «${v.title}»? I suoi figli salgono al padre.`)) return;
-        setSelected(null);
-        setNotice(null);
-        api.deleteVisit(v.id).catch(fail);
+        if (v) deleteNode(v);
       } else if (mod && key === 'z' && !e.shiftKey) {
         e.preventDefault();
         travel(undoStack.current, redoStack.current, 'undo');
@@ -465,7 +497,7 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
     };
     addEventListener('keydown', onKey);
     return () => removeEventListener('keydown', onKey);
-  }, [armed, selected, tree, fail, removeRelation, travel]);
+  }, [armed, selected, tree, deleteNode, removeRelation, travel]);
   // Keeps React Flow's measured sizes in our state: without them every rebuild resets nodes to
   // unmeasured (hidden), and a rebuild racing the resize observer can leave them hidden for good.
   const onNodesChange = useCallback(

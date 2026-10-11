@@ -186,10 +186,12 @@ export async function buildApp({ tracker, webRoot, logger = false, onShutdown }:
     tracker.setRelation(req.body.from, req.body.to, false);
     return reply.code(204).send();
   });
-  app.delete<{ Params: { id: string } }>('/api/visits/:id', async (req, reply) => {
-    tracker.deleteVisit(req.params.id);
+  app.delete<{ Params: { id: string }; Querystring: { children?: string } }>('/api/visits/:id', async (req, reply) => {
+    tracker.deleteVisit(req.params.id, req.query.children === 'detach');
     return reply.code(204).send();
   });
+  // Undo of a node deleted from the canvas.
+  app.post<{ Body: Parameters<Tracker['restoreVisit']>[0] }>('/api/visits/restore', async (req) => tracker.restoreVisit(req.body));
   app.delete<{ Params: { id: string; sourceId: string } }>('/api/visits/:id/sources/:sourceId', async (req, reply) => {
     tracker.removeVisitSource(req.params.id, req.params.sourceId);
     return reply.code(204).send();
