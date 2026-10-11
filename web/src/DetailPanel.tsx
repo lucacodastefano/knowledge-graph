@@ -323,34 +323,36 @@ export function DetailPanel({ conceptId, version, onClose, pinned = true, onPin,
           {page.related.length > 0 && (
             <section className="related" aria-label="Relazioni">
               <h3>Relazioni</h3>
-              <ul>
+              <ul className="relations">
                 {page.related.map((r) => (
                   <li key={r.id}>
-                    <button type="button" className="link" onClick={() => onOpen(r.id)}>
+                    <button type="button" className="rel-name" onClick={() => onOpen(r.id)}>
                       {r.name}
                     </button>
-                    {r.label && <em className="small"> ({r.label})</em>}{' '}
-                    <button
-                      type="button"
-                      className="ghost icon"
-                      aria-label={`Etichetta della relazione con ${r.name}`}
-                      title="Etichetta"
-                      onClick={() => {
-                        const label = window.prompt('Etichetta della relazione (vuota per toglierla)', r.label ?? '');
-                        if (label !== null) void run(api.relate(conceptId, r.id, label.trim() || null));
-                      }}
-                    >
-                      ✎
-                    </button>{' '}
-                    <button
-                      type="button"
-                      className="ghost icon"
-                      aria-label={`Rimuovi la relazione con ${r.name}`}
-                      title="Rimuovi la relazione"
-                      onClick={() => void run(api.unrelate(conceptId, r.id))}
-                    >
-                      ✕
-                    </button>
+                    {r.label && <em className="rel-label">{r.label}</em>}
+                    <span className="rel-actions">
+                      <button
+                        type="button"
+                        className="rel-icon"
+                        aria-label={`Etichetta della relazione con ${r.name}`}
+                        title="Etichetta"
+                        onClick={() => {
+                          const label = window.prompt('Etichetta della relazione (vuota per toglierla)', r.label ?? '');
+                          if (label !== null) void run(api.relate(conceptId, r.id, label.trim() || null));
+                        }}
+                      >
+                        ✎
+                      </button>
+                      <button
+                        type="button"
+                        className="rel-icon danger"
+                        aria-label={`Rimuovi la relazione con ${r.name}`}
+                        title="Rimuovi la relazione"
+                        onClick={() => void run(api.unrelate(conceptId, r.id))}
+                      >
+                        ✕
+                      </button>
+                    </span>
                   </li>
                 ))}
               </ul>

@@ -34,6 +34,22 @@ after(async () => {
 const titled = (page: import('playwright').Page, title: string | RegExp) =>
   page.locator('[data-testid=visit]').filter({ has: page.locator('.visit-title', { hasText: title }) });
 
+/** A screen point on the first dashed relation that no node covers (a label may lie under a node, so the middle is not safe). */
+const freePoint = (page: import('playwright').Page) =>
+  page.evaluate(() => {
+    const path = document.querySelector<SVGPathElement>('.react-flow__edge.relation .react-flow__edge-path')!;
+    const m = path.getScreenCTM()!;
+    const boxes = [...document.querySelectorAll('[data-testid=visit]')].map((n) => n.getBoundingClientRect());
+    const len = path.getTotalLength();
+    for (let at = len * 0.02; at < len; at += 4) {
+      const q = path.getPointAtLength(at);
+      const x = q.x * m.a + m.e;
+      const y = q.y * m.d + m.f;
+      if (!boxes.some((b) => x >= b.left - 6 && x <= b.right + 6 && y >= b.top - 6 && y <= b.bottom + 6)) return { x, y };
+    }
+    return { x: 0, y: 0 };
+  });
+
 function simulate(delayMs: number): Promise<string> {
   return new Promise((resolve, reject) => {
     const p = spawn(process.execPath, [join(import.meta.dirname, '..', '..', 'scripts', 'simulate.ts'), base, String(delayMs)]);
@@ -67,18 +83,13 @@ test('the canvas starts blank and grows live while the model tracks concepts', a
   await page.waitForTimeout(300);
   const node = titled(page, 'Consumer group');
   await node.hover();
-  const tooltip = page.getByRole('tooltip');
-  await tooltip.waitFor();
-  assert.match(await tooltip.innerText(), /ogni partizione è letta da un solo membro/);
   await page.screenshot({ path: join(out, '4-hover.png') });
 
-  // WP6: entering another node closes the open tooltip at once; the new one opens after a short dwell.
+  // No tooltip any more: the hint lives in the toolbar and a double click opens Approfondisci.
   await titled(page, /^Partizioni$/).first().hover();
-  assert.equal(await page.getByRole('tooltip').count(), 0, 'the previous tooltip closes at once');
-  await page.getByRole('tooltip').waitFor();
-  assert.equal(await page.getByRole('tooltip').count(), 1, 'only one tooltip at a time');
-  assert.match(await page.getByRole('tooltip').innerText(), /Doppio clic sul nodo per approfondire/);
-  assert.equal(await page.getByRole('tooltip').getByRole('button').count(), 0, 'no Approfondisci button any more');
+  await page.waitForTimeout(900);
+  assert.equal(await page.getByRole('tooltip').count(), 0, 'no tooltip');
+  assert.match(await page.locator('.overlay-bar').innerText(), /Doppio clic su un nodo per approfondire/);
   await titled(page, /^Partizioni$/).first().dblclick();
   const panel = page.getByLabel('Dettaglio concetto');
   await panel.waitFor();
@@ -636,9 +647,9 @@ test('hovering an edge lifts it with its label and fades what covers it; draggin
   await page.goto(base);
   await titled(page, 'Ramo due').waitFor();
   await page.waitForTimeout(900);
-  const rel = page.locator('.react-flow__edge.relation .react-flow__edge-path').first();
-  await rel.waitFor({ state: 'attached' });
-  await rel.hover({ force: true });
+  await page.locator('.react-flow__edge.relation .react-flow__edge-path').first().waitFor({ state: 'attached' });
+  const free = await freePoint(page);
+  await page.mouse.move(free.x, free.y);
   await page.locator('.react-flow__edge.hover').waitFor({ state: 'attached', timeout: 5000 });
   assert.ok((await page.locator('.relation-label.hover').innerText()).includes('si oppone a'));
   assert.equal(await titled(page, 'Ramo uno').evaluate((e) => e.classList.contains('cover')), false, 'endpoints stay opaque');
@@ -670,6 +681,80 @@ test('hovering an edge lifts it with its label and fades what covers it; draggin
   const back = await tree();
   assert.equal(back.visits.find((v) => v.title === 'Ramo due')!.parentVisitId, back.visits.find((v) => v.title === 'Radice archi')!.id, 'children are back under it');
   assert.equal(await page.locator('.react-flow__edge.relation').count(), 1, 'the relation is still there');
+  await page.close();
+});
+
+test('dashed relations can be bent, hidden and survive a refresh; Riordina undoes hand-placed nodes', async () => {
+  const conv = tracker.startConversation('Forme', null);
+  tracker.track(conv.id, [
+    { title: 'Radice forme', summary: 'r' },
+    { title: 'Forma uno', summary: 'u', parent: '#0' },
+    { title: 'Forma due', summary: 'd', parent: '#0' },
+  ]);
+  const visits = (await (await fetch(`${base}/api/conversations/${conv.id}/tree`)).json() as { visits: { title: string; conceptId: string }[] }).visits;
+  const c = (t: string) => visits.find((v) => v.title === t)!.conceptId;
+  await fetch(`${base}/api/relations`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ from: c('Forma uno'), to: c('Forma due'), label: 'contrasta' }),
+  });
+  const page = await browser.newPage({ viewport: { width: 1400, height: 820 } });
+  await page.goto(base);
+  await titled(page, 'Forma due').waitFor();
+  await page.waitForTimeout(900);
+  const pathD = () => page.locator('.react-flow__edge.relation .react-flow__edge-path').first().getAttribute('d');
+  const before = await pathD();
+
+  // Arm the relation and drag its grip: the curve bends and the shape is saved on the server.
+  const free = await freePoint(page);
+  await page.mouse.click(free.x, free.y);
+  const grip = page.locator('.relation-grip');
+  await grip.waitFor();
+  const g = (await grip.boundingBox())!;
+  await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(g.x + g.width / 2 + 10, g.y + g.height / 2 + 120, { steps: 8 });
+  await page.mouse.up();
+  await page.waitForTimeout(400);
+  assert.notEqual(await pathD(), before, 'the curve was bent');
+  const saved = (await (await fetch(`${base}/api/layout`)).json()) as { kind: string }[];
+  assert.ok(saved.some((e) => e.kind === 'relation'), 'the bend is stored');
+
+  // Hand-placed nodes survive a reload; Riordina puts them back, Ctrl+Z restores them.
+  // Relative to the root and to its size: the view is framed again after a reload.
+  const pos = async (t: string) => {
+    const b = (await titled(page, t).boundingBox())!;
+    const r = (await titled(page, 'Radice forme').boundingBox())!;
+    return [Math.round(((b.x - r.x) / r.width) * 10), Math.round(((b.y - r.y) / r.width) * 10)];
+  };
+  const home = await pos('Forma uno');
+  const nb = (await titled(page, 'Forma uno').boundingBox())!;
+  await page.mouse.move(nb.x + nb.width / 2, nb.y + nb.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(nb.x + nb.width / 2 + 120, nb.y + nb.height / 2 + 150, { steps: 8 });
+  await page.mouse.up();
+  await page.waitForTimeout(400);
+  const moved = await pos('Forma uno');
+  assert.notDeepEqual(moved, home);
+  await page.reload();
+  await titled(page, 'Forma uno').waitFor();
+  await page.waitForTimeout(900);
+  assert.deepEqual(await pos('Forma uno'), moved, 'the hand-placed position survives a refresh');
+  assert.notEqual(await pathD(), before, 'and so does the bend');
+  await page.getByRole('button', { name: 'Riordina' }).click();
+  await page.waitForTimeout(900);
+  assert.notDeepEqual(await pos('Forma uno'), moved, 'Riordina re-applies the layout');
+  await page.mouse.click(5, 300);
+  await page.keyboard.press('Control+z');
+  await page.waitForTimeout(900);
+  assert.deepEqual(await pos('Forma uno'), moved, 'Ctrl+Z puts the hand-placed node back');
+
+  // The toolbar toggle hides every dashed relation.
+  await page.getByRole('button', { name: /Nascondi relazioni tratteggiate/ }).click();
+  await page.waitForTimeout(300);
+  assert.equal(await page.locator('.react-flow__edge.relation').count(), 0);
+  await page.getByRole('button', { name: /Mostra relazioni tratteggiate/ }).click();
+  await page.locator('.react-flow__edge.relation').first().waitFor({ state: 'attached' });
   await page.close();
 });
 

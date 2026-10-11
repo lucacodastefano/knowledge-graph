@@ -1,4 +1,5 @@
 import { DeleteConversation } from './DeleteConversation.tsx';
+import { createPortal } from 'react-dom';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   applyNodeChanges,
@@ -41,31 +42,85 @@ function CrossEdge({ id, data, sourceX, sourceY, targetX, targetY }: EdgeProps<E
 
 /**
  * A free relation between two concepts: dotted line with its label. Clicking it arms it: a red ✕ (or Canc) removes
- * it, ✎ sets the label.
+ * it, ✎ sets the label, ⠿ drags the curve (so does dragging the line or the label) and ↺ straightens it again.
+ * The label sits under the nodes, and above everything while the relation is hovered, armed or being bent.
  */
 function RelationEdge({ id, data, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition }: EdgeProps<Edge<EdgeData>>) {
-  const [path, x, y] = getBezierPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition });
+  const flow = useReactFlow();
+  const [live, setLive] = useState<{ x: number; y: number } | null>(null);
+  const [bezier, bx, by] = getBezierPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition });
   const d = data as unknown as RelationData;
+  const midX = (sourceX + targetX) / 2;
+  const midY = (sourceY + targetY) / 2;
+  // A bent relation is a quadratic curve whose control point sits `bend` away from the middle of the two ends.
+  const bend = live ?? d.bend ?? null;
+  const path = bend ? `M${sourceX},${sourceY} Q${midX + bend.x},${midY + bend.y} ${targetX},${targetY}` : bezier;
+  const x = bend ? midX + bend.x / 2 : bx;
+  const y = bend ? midY + bend.y / 2 : by;
+  const startDrag = (e: React.PointerEvent) => {
+    if (e.button !== 0) return;
+    const from = bend ?? { x: 2 * (bx - midX), y: 2 * (by - midY) };
+    const zoom = flow.getZoom();
+    const x0 = e.clientX;
+    const y0 = e.clientY;
+    let moved = false;
+    const target = e.currentTarget;
+    const at = (ev: PointerEvent) => ({ x: from.x + (2 * (ev.clientX - x0)) / zoom, y: from.y + (2 * (ev.clientY - y0)) / zoom });
+    const move = (ev: PointerEvent) => {
+      if (!moved && Math.hypot(ev.clientX - x0, ev.clientY - y0) < 4) return;
+      moved = true;
+      setLive(at(ev));
+    };
+    const up = (ev: PointerEvent) => {
+      target.removeEventListener('pointermove', move as EventListener);
+      target.removeEventListener('pointerup', up as EventListener);
+      (target as Element).releasePointerCapture?.(e.pointerId);
+      if (moved) {
+        const next = at(ev);
+        d.onBend(next);
+        // Hold the dropped shape until the saved one arrives, so the curve does not flicker back.
+        setTimeout(() => setLive(null), 600);
+      }
+    };
+    (target as Element).setPointerCapture?.(e.pointerId);
+    target.addEventListener('pointermove', move as EventListener);
+    target.addEventListener('pointerup', up as EventListener);
+  };
+  const top = d.hover || d.armed || live !== null;
+  const label = (
+    <div
+      className={`relation-label nodrag nopan${top ? ' top' : ''}${d.hover ? ' hover' : ''}${d.label ? ' has-text' : ''}`}
+      style={{ transform: `translate(-50%, -50%) translate(${x}px, ${y}px)` }}
+      onPointerDown={startDrag}
+    >
+      {d.label && <span>{d.label}</span>}
+      {d.armed && (
+        <>
+          <span className="relation-grip" title="Trascina per piegare la relazione" aria-hidden>
+            ⠿
+          </span>
+          <button type="button" className="relation-edit" aria-label="Etichetta" title="Etichetta" onPointerDown={(e) => e.stopPropagation()} onClick={d.onLabel}>
+            ✎
+          </button>
+          {d.bend && (
+            <button type="button" className="relation-reset" aria-label="Raddrizza la relazione" title="Raddrizza" onPointerDown={(e) => e.stopPropagation()} onClick={() => { setLive(null); d.onBend(null); }}>
+              ↺
+            </button>
+          )}
+          <button type="button" className="relation-remove" aria-label="Rimuovi la relazione" title="Rimuovi (Canc)" onPointerDown={(e) => e.stopPropagation()} onClick={d.onRemove}>
+            ✕
+          </button>
+        </>
+      )}
+    </div>
+  );
+  // The label layer lies under the nodes; a lifted label goes into the viewport itself, over everything.
+  const viewport = top ? document.querySelector('.react-flow__viewport') : null;
   return (
     <>
       <BaseEdge id={id} path={path} interactionWidth={24} />
-      {(d.label || d.armed) && (
-        <EdgeLabelRenderer>
-          <div className={`relation-label nodrag nopan${(d as { hover?: boolean }).hover ? ' hover' : ''}`} style={{ transform: `translate(-50%, -50%) translate(${x}px, ${y}px)` }}>
-            {d.label && <span>{d.label}</span>}
-            {d.armed && (
-              <>
-                <button type="button" className="relation-edit" aria-label="Etichetta" title="Etichetta" onClick={d.onLabel}>
-                  ✎
-                </button>
-                <button type="button" className="relation-remove" aria-label="Rimuovi la relazione" title="Rimuovi (Canc)" onClick={d.onRemove}>
-                  ✕
-                </button>
-              </>
-            )}
-          </div>
-        </EdgeLabelRenderer>
-      )}
+      <path d={path} className="relation-drag nodrag nopan" fill="none" stroke="transparent" strokeWidth={16} onPointerDown={startDrag} />
+      {(d.label || d.armed) && (viewport ? createPortal(label, viewport) : <EdgeLabelRenderer>{label}</EdgeLabelRenderer>)}
     </>
   );
 }
@@ -96,6 +151,10 @@ interface RelationData {
   to: string;
   label?: string;
   armed: boolean;
+  hover?: boolean;
+  /** Offset of the curve's control point from the middle of the two ends (see RelationEdge). */
+  bend?: { x: number; y: number };
+  onBend: (next: { x: number; y: number } | null) => void;
   onRemove: () => void;
   onLabel: () => void;
 }
@@ -143,11 +202,8 @@ function previewEdge(drop: Drop): Edge<EdgeData> {
 const nodeTypes = { visit: VisitNode };
 const edgeTypes = { cross: CrossEdge, relation: RelationEdge, tree: TreeEdge };
 const FRESH_MS = 1600;
-/** WP6: the tooltip opens after a short dwell and closes at once, with a grace period to reach its button. */
 /** How close (screen px between short ends) a free-ended node must get to another one to preview attaching to it. */
 const DROP_RADIUS = 20;
-const OPEN_DELAY_MS = 700;
-const CLOSE_GRACE_MS = 150;
 const AUTO = '';
 const LAYOUTS: { kind: LayoutKind; label: string }[] = [
   { kind: 'radial', label: 'Radiale' },
@@ -155,6 +211,16 @@ const LAYOUTS: { kind: LayoutKind; label: string }[] = [
   { kind: 'tree', label: 'Albero' },
 ];
 const LAYOUT_KEY = 'kg.layout';
+const HIDE_DASHED_KEY = 'kg.hideDashed';
+
+/** Whether dashed relations are hidden: remembered in this browser, shown by default. */
+function savedHideDashed(): boolean {
+  try {
+    return localStorage.getItem(HIDE_DASHED_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
 
 /** The chosen layout is remembered in this browser; storage may be unavailable, radial is the default (WP7). */
 function savedLayout(): LayoutKind {
@@ -187,32 +253,13 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
   const laidOut = useRef<LayoutKind>(kind);
   /** The whole tree is framed on a new conversation or layout; later updates only move to the current node. */
   const fitAll = useRef(true);
-  const [hovered, setHovered] = useState<string | null>(null);
-  // The node under the pointer, at once (the tooltip waits for a dwell), and the one clicked: both highlight
-  // their neighbourhood, the pointer first.
+  // The node under the pointer and the one clicked both highlight their neighbourhood, the pointer first.
   const [pointed, setPointed] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
-  const hoverTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  // Entering a node closes any other tooltip at once and opens its own after a dwell; staying on the open
-  // tooltip's button keeps it; leaving closes it after a short grace period.
-  const onHover = useCallback((id: string | null) => {
-    clearTimeout(hoverTimer.current);
-    if (id === null) {
-      hoverTimer.current = setTimeout(() => {
-        setHovered(null);
-        setPointed(null);
-      }, CLOSE_GRACE_MS);
-      return;
-    }
-    setPointed(id);
-    setHovered((prev) => (prev === id ? prev : null));
-    hoverTimer.current = setTimeout(() => setHovered(id), OPEN_DELAY_MS);
-  }, []);
+  const onHover = useCallback((id: string | null) => setPointed(id), []);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        clearTimeout(hoverTimer.current);
-        setHovered(null);
         setSelected(null);
         setPointed(null);
       }
@@ -220,6 +267,9 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
     addEventListener('keydown', onKey);
     return () => removeEventListener('keydown', onKey);
   }, []);
+  const [hideDashed, setHideDashed] = useState(savedHideDashed);
+  /** Bent dashed relations: key `r-from-to` -> offset of the curve's control point. */
+  const [bends, setBends] = useState<Map<string, { x: number; y: number }>>(new Map());
   const flow = useReactFlow();
   const fail = useCallback((e: unknown) => setNotice(explain((e as Error).message)), []);
   /** Back to the laid-out positions after a drag that moved nothing. */
@@ -285,14 +335,18 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
     },
     [tree],
   );
+  /** Saves where the user put nodes (null forgets one), so the places survive a refresh. */
+  const persist = useCallback(
+    (positions: Map<string, { x: number; y: number } | null>) =>
+      api.saveLayout([...positions].map(([id, p]) => ({ kind: 'visit' as const, id, ...(p ?? {}) }))).catch(fail),
+    [fail],
+  );
   const placeNodes = useCallback((positions: Map<string, { x: number; y: number }>) => {
     setNodes((ns) => ns.map((n) => (positions.has(n.id) ? { ...n, position: positions.get(n.id)! } : n)));
   }, []);
   const onDragStart = useCallback(
     (_: unknown, node: VisitNodeType) => {
-      // Dragging closes the tooltip and the Approfondisci panel at once.
-      clearTimeout(hoverTimer.current);
-      setHovered(null);
+      // Dragging closes the Approfondisci panel at once.
       onBackgroundClick?.();
       const ids = subtreeOf(node.id);
       dragStart.current = new Map(flow.getNodes().filter((n) => ids.has(n.id)).map((n) => [n.id, { ...n.position }]));
@@ -353,6 +407,7 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
       if (d && d.drag === node.id && d.target !== old) {
         // Attached: the tree is laid out again, the hand-placed positions of this subtree no longer apply.
         for (const id of start?.keys() ?? []) manual.current.delete(id);
+        void persist(new Map([...(start?.keys() ?? [])].map((id) => [id, null])));
         attachSides.current.set(node.id, { parent: d.target, side: d.targetSide });
         act({
           redo: () => api.editVisit(node.id, { parentVisitId: d.target }),
@@ -368,11 +423,11 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
       const apply = (positions: Map<string, { x: number; y: number }>) => {
         for (const [id, p] of positions) manual.current.set(id, p);
         placeNodes(positions);
-        return Promise.resolve();
+        return persist(positions);
       };
       act({ redo: () => apply(now), undo: () => apply(start) });
     },
-    [act, setDropBoth, flow, placeNodes],
+    [act, setDropBoth, flow, placeNodes, persist],
   );
   // Pulling a line from one node to another relates their concepts (a different idea, unlike "Unisci a…").
   const onConnect = useCallback(
@@ -412,10 +467,55 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
     },
     [relationOf, act],
   );
+  /** Saves the shape of a dashed relation (null straightens it); undoable. */
+  const bendRelation = useCallback(
+    (id: string, next: { x: number; y: number } | null) => {
+      const old = bends.get(id) ?? null;
+      const apply = (v: { x: number; y: number } | null) => {
+        setBends((m) => {
+          const copy = new Map(m);
+          if (v) copy.set(id, v);
+          else copy.delete(id);
+          return copy;
+        });
+        return api.saveLayout([{ kind: 'relation', id, ...(v ?? {}) }]);
+      };
+      act({ redo: () => apply(next), undo: () => apply(old) });
+    },
+    [bends, act],
+  );
+  /** "Riordina": every node goes back to the layout; Ctrl+Z puts the hand-placed ones back. */
+  const reorder = useCallback(() => {
+    const before = new Map(flow.getNodes().map((n) => [n.id, { ...n.position }]));
+    const bendsBefore = new Map(bends);
+    const saveBends = (m: Map<string, { x: number; y: number }>, gone: Iterable<string>) => {
+      setBends(m);
+      return api.saveLayout([...[...gone].map((id) => ({ kind: 'relation' as const, id })), ...[...m].map(([id, p]) => ({ kind: 'relation' as const, id, ...p }))]).catch(fail);
+    };
+    act({
+      redo: async () => {
+        await saveBends(new Map(), bendsBefore.keys());
+        manual.current.clear();
+        attachSides.current.clear();
+        needsLayout.current = true;
+        fitAll.current = true;
+        await persist(new Map([...before.keys()].map((id) => [id, null])));
+        relayout();
+      },
+      undo: async () => {
+        await saveBends(bendsBefore, []);
+        for (const [id, p] of before) manual.current.set(id, p);
+        await persist(before);
+        relayout();
+      },
+    });
+  }, [flow, act, persist, relayout, bends, fail]);
   // Hovering an edge lifts it (with its label) above the nodes that cover it, which fade; its endpoints stay opaque.
   const [edgeHover, setEdgeHover] = useState<{ id: string; covering: Set<string> } | null>(null);
   const onEdgeEnter = useCallback(
     (_: unknown, edge: Edge<EdgeData>) => {
+      // Only dashed relations are lifted; the solid parent-child lines are never highlighted by hovering them.
+      if (!/\b(relation|cross-link)\b/.test(edge.className ?? '')) return;
       const path = document.querySelector<SVGPathElement>(`.react-flow__edge[data-id="${CSS.escape(edge.id)}"] .react-flow__edge-path`);
       const covering = new Set<string>();
       if (path?.getTotalLength) {
@@ -442,6 +542,7 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
   const deleteNode = useCallback(
     async (v: Visit) => {
       for (const n of flow.getNodes()) manual.current.set(n.id, { ...n.position });
+      void persist(new Map(flow.getNodes().map((n) => [n.id, { ...n.position }])));
       const old = { ...(manual.current.get(v.id) ?? { x: 0, y: 0 }) };
       const childIds = (tree?.visits ?? []).filter((x) => x.parentVisitId === v.id).map((x) => x.id);
       const page = await api.concept(v.conceptId).catch(() => null);
@@ -463,6 +564,7 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
           });
           current = back.id;
           manual.current.set(back.id, old);
+          void persist(new Map([[back.id, old]]));
           // A concept that was dropped comes back by name: its relations and superclass are re-applied.
           if (page && back.conceptId !== v.conceptId) {
             for (const r of page.related) await api.relate(back.conceptId, r.id, r.label ?? null);
@@ -471,7 +573,7 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
         },
       });
     },
-    [flow, tree, act],
+    [flow, tree, act, persist],
   );
   // Canc removes the armed relation; Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z) walk back and forth through the actions.
   useEffect(() => {
@@ -518,8 +620,15 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
 
   const loadConversations = useCallback(() => api.conversations().then(setConversations), []);
   const loadTree = useCallback(() => {
-    if (activeId) api.tree(activeId).then(setTree);
-    else setTree(null);
+    if (!activeId) return setTree(null);
+    // The positions and bends the user chose come from the server, so they survive a refresh. Hand-placed
+    // nodes of this page session win over what was saved.
+    Promise.all([api.tree(activeId), api.layout().catch(() => [])]).then(([t, saved]) => {
+      const ids = new Set(t.visits.map((v) => v.id));
+      for (const e of saved) if (e.kind === 'visit' && ids.has(e.id) && !manual.current.has(e.id)) manual.current.set(e.id, { x: e.x, y: e.y });
+      setBends(new Map(saved.filter((e) => e.kind === 'relation').map((e) => [e.id, { x: e.x, y: e.y }])));
+      setTree(t);
+    });
   }, [activeId]);
 
   useEffect(() => void loadConversations(), [loadConversations]);
@@ -563,10 +672,8 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
     }
     let cancelled = false;
     const kindChanged = laidOut.current !== kind;
-    if (kindChanged) {
-      fitAll.current = true;
-      manual.current.clear();
-    }
+    // Places chosen by the user stay across layout changes; "Riordina" is how they go back to the layout.
+    if (kindChanged) fitAll.current = true;
     laidOut.current = kind;
     // Auto layout runs for new nodes and when the layout is switched. After any other edit (removing a relation,
     // moving, attaching, detaching, undo) every node stays exactly where it is: only the edges change.
@@ -598,7 +705,23 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
         needsLayout.current = false;
         attachSides.current.clear();
       }
-      const pos = placement.position;
+      // Nodes the user never placed follow a parent that was moved by hand (so a new child appears next to it).
+      const pos = new Map(placement.position);
+      const parentOf = new Map(tree.visits.map((v) => [v.id, v.parentVisitId]));
+      const shift = (id: string): { x: number; y: number } => {
+        const hand = manual.current.get(id);
+        const auto = placement.position.get(id);
+        if (hand && auto) return { x: hand.x - auto.x, y: hand.y - auto.y };
+        const parent = parentOf.get(id);
+        return parent ? shift(parent) : { x: 0, y: 0 };
+      };
+      for (const [id, p] of placement.position) {
+        if (manual.current.has(id)) continue;
+        const d = shift(id);
+        if (d.x || d.y) pos.set(id, { x: p.x + d.x, y: p.y + d.y });
+      }
+      for (const [id, p] of manual.current) if (pos.has(id)) pos.set(id, p);
+      const placed: Placement = { ...placement, position: pos };
       if (kind === 'mindmap') halves.current = placement.branches;
       const also = alsoIn(tree.visits);
       setNodes((prev) => {
@@ -612,7 +735,6 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
             visit: v,
             current: v.id === tree.conversation.currentVisitId,
             fresh: false,
-            hovered: false,
             match: false,
             focus: false,
             related: false,
@@ -640,10 +762,10 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
           targetHandle: leftToRight ? 't-left' : 't-right',
           type: 'relation',
           className: 'relation',
-          data: { from: r.from, to: r.to, label: r.label, armed: false, onRemove: () => undefined, onLabel: () => undefined },
+          data: { from: r.from, to: r.to, label: r.label, armed: false, onBend: () => undefined, onRemove: () => undefined, onLabel: () => undefined },
         });
       }
-      setEdges([...buildEdges(tree.visits, kind, placement), ...relEdges]);
+      setEdges([...buildEdges(tree.visits, kind, placed), ...relEdges]);
       // Only a new node or a new current node moves the view: touching nodes or editing relations never does.
       const current = tree.conversation.currentVisitId;
       pendingFit.current = fitAll.current ? 'all' : added.length > 0 || current !== lastCurrent.current ? 'current' : null;
@@ -691,17 +813,29 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
         const related = !focus && !!near?.nodes.has(n.id);
         const dim = !!near && !focus && !related;
         const cover = !!edgeHover?.covering.has(n.id);
-        return fresh.has(n.id) || hovered === n.id || match || near || cover
-          ? { ...n, data: { ...n.data, fresh: fresh.has(n.id), hovered: hovered === n.id, match, focus, related, dim, cover } }
+        return fresh.has(n.id) || match || near || cover
+          ? { ...n, data: { ...n.data, fresh: fresh.has(n.id), match, focus, related, dim, cover } }
           : n;
       }),
-    [nodes, fresh, hovered, matchConcept, near, focusId, drop, edgeHover],
+    [nodes, fresh, matchConcept, near, focusId, drop, edgeHover],
   );
   const base = edges;
   const shownEdges = useMemo(() => {
-    const edges = base.map((e) =>
+    const edges = base
+      .filter((e) => !hideDashed || (e.className !== 'relation' && e.className !== 'cross-link'))
+      .map((e) =>
       e.className === 'relation'
-        ? { ...e, data: { ...e.data, armed: e.id === armed, onRemove: () => removeRelation(e.id), onLabel: () => labelRelation(e.id) } as EdgeData }
+        ? {
+            ...e,
+            data: {
+              ...e.data,
+              armed: e.id === armed,
+              bend: bends.get(e.id),
+              onBend: (next: { x: number; y: number } | null) => bendRelation(e.id, next),
+              onRemove: () => removeRelation(e.id),
+              onLabel: () => labelRelation(e.id),
+            } as EdgeData,
+          }
         : e.id.startsWith('t-')
           ? { ...e, type: 'tree', data: { shape: e.type, armed: e.id === armed, onRemove: () => removeRelation(e.id) } as EdgeData }
           : e,
@@ -718,7 +852,7 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
       ...edges.filter((e) => !near.edges.has(e.id)).map((e) => mark(e, 'dim')),
       ...edges.filter((e) => near.edges.has(e.id)).map((e) => mark(e, 'related')),
     ];
-  }, [base, near, armed, removeRelation, labelRelation, drop, nodes, edgeHover]);
+  }, [base, near, armed, removeRelation, labelRelation, bendRelation, bends, hideDashed, drop, nodes, edgeHover]);
 
   return (
     <>
@@ -758,6 +892,26 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
             </option>
           ))}
         </select>
+        <button type="button" className="bar-button" onClick={reorder} title="Rimette nodi e relazioni nel layout scelto (Ctrl+Z annulla)">
+          Riordina
+        </button>
+        <button
+          type="button"
+          className="bar-button"
+          aria-pressed={hideDashed}
+          title="Nasconde le relazioni tratteggiate"
+          onClick={() => {
+            setHideDashed(!hideDashed);
+            try {
+              localStorage.setItem(HIDE_DASHED_KEY, hideDashed ? '0' : '1');
+            } catch {
+              // Not remembered: the choice still applies to this page.
+            }
+          }}
+        >
+          {hideDashed ? 'Mostra relazioni tratteggiate' : 'Nascondi relazioni tratteggiate'}
+        </button>
+        <span className="bar-hint">Doppio clic su un nodo per approfondire</span>
         {notice && (
           <span className="notice error" role="alert" onClick={() => setNotice(null)}>
             {notice}

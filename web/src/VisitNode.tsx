@@ -1,28 +1,19 @@
-import { useRef, useState } from 'react';
-import { Handle, NodeToolbar, Position, type NodeProps } from '@xyflow/react';
+import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { HANDLES, type VisitNode as VisitNodeType } from './layout.ts';
 
 const POSITION = { left: Position.Left, right: Position.Right, center: Position.Top };
 
 /**
- * A concept visit. Hovering shows the short summary beside the node, on the side with more room, with a
- * note that a double click opens "Approfondisci" (D7, WP6); only one tooltip is open at a time and it never blocks clicks on the canvas.
- * The view highlights the hovered or clicked node with its relatives (`focus`, `related`) and fades the rest (`dim`).
+ * A concept visit. Hovering highlights the node with its relatives (`focus`, `related`) and fades the rest (`dim`);
+ * a double click opens "Approfondisci" (D7).
  */
 export function VisitNode({ data }: NodeProps<VisitNodeType>) {
-  const { visit, current, fresh, hovered, match } = data;
-  const ref = useRef<HTMLDivElement>(null);
-  const [side, setSide] = useState<Position>(Position.Right);
-  const show = () => {
-    const box = ref.current?.getBoundingClientRect();
-    if (box) setSide(box.left + box.width / 2 > innerWidth / 2 ? Position.Left : Position.Right);
-    data.onHover(visit.id);
-  };
+  const { visit, current, fresh, match } = data;
+  const show = () => data.onHover(visit.id);
   const hide = () => data.onHover(null);
 
   return (
     <div
-      ref={ref}
       className={`visit${data.also.length ? ' shared' : ''}${current ? ' current' : ''}${fresh ? ' fresh' : ''}${match ? ' match' : ''}${
         data.cover ? ' cover' : data.focus ? ' focus' : data.related ? ' related' : data.dim ? ' dim' : ''
       }`}
@@ -48,12 +39,6 @@ export function VisitNode({ data }: NodeProps<VisitNodeType>) {
           anche in: {data.also.join(', ')}
         </span>
       )}
-      <NodeToolbar isVisible={hovered} position={side} offset={10}>
-        <div className="tooltip passive" role="tooltip">
-          <p>{visit.summary || 'Nessun testo dalla risposta.'}</p>
-          <p className="tooltip-note">Doppio clic sul nodo per approfondire</p>
-        </div>
-      </NodeToolbar>
     </div>
   );
 }
