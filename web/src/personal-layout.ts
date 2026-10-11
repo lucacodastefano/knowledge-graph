@@ -23,14 +23,10 @@ export interface LayoutInput {
   sortKey?: (node: string) => string;
   /** Concepts under a superclass (D18): node -> group, replacing Louvain for them. Louvain still sorts the rest. */
   groups?: Map<string, string>;
-  /** The superclass links (member -> superclass): they pull an area together but do not make topics. */
-  groupEdges?: { source: string; target: string; weight: number }[];
 }
 
 export interface LayoutOutput {
   community: Map<string, string>;
-  /** The topic (community of the plain links) of each concept: inside a superclass area, topics stay visible as nested bubbles. */
-  topic: Map<string, string>;
   position: Map<string, Point>;
 }
 
@@ -181,16 +177,8 @@ function pack(ids: string[], radius: Map<string, number>, links: Map<string, Map
 /** Full layout: communities, a force layout inside each, communities packed apart, isolated grid last. */
 export function layoutPersonalGraph(input: LayoutInput): LayoutOutput {
   const rng = seeded(42);
-  const g = undirected({ ...input, edges: [...input.edges, ...(input.groupEdges ?? [])] });
-  const topic = detectCommunities(undirected(input));
-  // A superclass area gathers whole topics: every concept of a topic that has a member joins that area.
-  const forced = new Map(input.groups ?? []);
-  const areaOfTopic = new Map<string, string>();
-  for (const [n, top] of [...forced].sort((a, b) => a[1].localeCompare(b[1]))) {
-    const t = topic.get(n)!;
-    if (t !== ISOLATED && !areaOfTopic.has(t)) areaOfTopic.set(t, top);
-  }
-  for (const n of input.nodes) if (!forced.has(n) && areaOfTopic.has(topic.get(n)!)) forced.set(n, areaOfTopic.get(topic.get(n)!)!);
+  const g = undirected(input);
+  const forced = input.groups ?? new Map<string, string>();
   const community = detectCommunities(undirected({ ...input, nodes: input.nodes.filter((n) => !forced.has(n)) }));
   for (const n of input.nodes) if (forced.has(n)) community.set(n, `s:${forced.get(n)}`);
   const members = new Map<string, string[]>();
@@ -208,8 +196,7 @@ export function layoutPersonalGraph(input: LayoutInput): LayoutOutput {
     }
     const pos = c === ISOLATED ? layoutGrid(list) : layoutCommunity(g, list, rng);
     local.set(c, pos);
-    // A superclass area is drawn as a bubble around its members: it needs room, so neighbours do not overlap it.
-    radius.set(c, radiusOf(pos) + (c.startsWith('s:') ? 60 : 0));
+    radius.set(c, radiusOf(pos));
   }
   // Links between communities pull them next to each other.
   const links = new Map<string, Map<string, number>>();
@@ -229,21 +216,13 @@ export function layoutPersonalGraph(input: LayoutInput): LayoutOutput {
     .filter((c) => c !== ISOLATED)
     .sort((a, b) => members.get(b)!.length - members.get(a)!.length || a.localeCompare(b));
   if (members.has(ISOLATED)) order.push(ISOLATED);
-  // Areas of superclasses form one cluster; concepts without a superclass sit in a neutral zone beside it.
-  const areas = order.filter((c) => c.startsWith('s:'));
-  const rest = order.filter((c) => !c.startsWith('s:'));
-  const centre = pack(areas, radius, links, rng);
-  const others = pack(rest, radius, links, rng);
-  const reach = (ids: string[], c: Map<string, Point>, dir: 1 | -1) => ids.reduce((m, id) => Math.max(m, dir * c.get(id)!.x + radius.get(id)!), -Infinity);
-  const shift = areas.length > 0 && rest.length > 0 ? reach(areas, centre, 1) + reach(rest, others, -1) + GAP * 3 : 0;
-  for (const [c, p] of others) centre.set(c, { x: p.x + shift, y: p.y });
+  const centre = pack(order, radius, links, rng);
   const position = new Map<string, Point>();
   for (const [c, pos] of local) {
     const o = centre.get(c)!;
     for (const [n, p] of pos) position.set(n, { x: o.x + p.x, y: o.y + p.y });
   }
-  for (const n of input.nodes) if (forced.has(n) && topic.get(n) === ISOLATED) topic.set(n, `i:${n}`);
-  return { community, topic, position };
+  return { community, position };
 }
 
 /**

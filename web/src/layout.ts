@@ -19,6 +19,8 @@ export interface VisitNodeData extends Record<string, unknown> {
   focus: boolean;
   related: boolean;
   dim: boolean;
+  /** Under the hovered edge: faded to ~15% so the edge and its label can be read. */
+  cover?: boolean;
   onHover: (visitId: string | null) => void;
   onOpen: (conceptId: string) => void;
 }

@@ -200,3 +200,9 @@ button.icon:hover { color: var(--text); }
 /* Preview of where a dragged node would attach. */
 .react-flow__edge.preview .react-flow__edge-path { stroke: #9ca3af; stroke-width: 2; stroke-dasharray: 6 5; opacity: 0.8; pointer-events: none; }
 .panel .pin { align-self: center; font-size: 12px; color: var(--accent); white-space: nowrap; }
+
+.tooltip-note { margin: 0; font-size: 11px; font-style: italic; color: var(--muted, var(--text)); opacity: 0.7; }
+.react-flow__edge.hover .react-flow__edge-path { stroke: var(--accent); stroke-width: 3.5; opacity: 1; }
+.react-flow__edgelabel-renderer { z-index: 5; }
+.relation-label.hover { z-index: 10; font-weight: 600; }
+.visit.cover { opacity: 0.15; }

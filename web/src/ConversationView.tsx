@@ -50,7 +50,7 @@ function RelationEdge({ id, data, sourceX, sourceY, targetX, targetY, sourcePosi
       <BaseEdge id={id} path={path} interactionWidth={24} />
       {(d.label || d.armed) && (
         <EdgeLabelRenderer>
-          <div className="relation-label nodrag nopan" style={{ transform: `translate(-50%, -50%) translate(${x}px, ${y}px)` }}>
+          <div className={`relation-label nodrag nopan${(d as { hover?: boolean }).hover ? ' hover' : ''}`} style={{ transform: `translate(-50%, -50%) translate(${x}px, ${y}px)` }}>
             {d.label && <span>{d.label}</span>}
             {d.armed && (
               <>
@@ -143,8 +143,8 @@ const nodeTypes = { visit: VisitNode };
 const edgeTypes = { cross: CrossEdge, relation: RelationEdge, tree: TreeEdge };
 const FRESH_MS = 1600;
 /** WP6: the tooltip opens after a short dwell and closes at once, with a grace period to reach its button. */
-/** How close (screen px between edges) a dragged node must get to another one to preview attaching to it. */
-const DROP_RADIUS = 120;
+/** How close (screen px between short ends) a free-ended node must get to another one to preview attaching to it. */
+const DROP_RADIUS = 20;
 const OPEN_DELAY_MS = 700;
 const CLOSE_GRACE_MS = 150;
 const AUTO = '';
@@ -258,7 +258,7 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
     },
     [fail],
   );
-  // While a node is dragged, the nearest node within DROP_RADIUS (screen px between their edges) is the attach target:
+  // While a node without a parent is dragged, the nearest node within DROP_RADIUS (screen px between their edges) is the attach target:
   // it is highlighted and a grey dashed preview edge joins it to the dragged node. Releasing attaches the dragged node
   // (with its subtree) there; out of range it just stays where it was dropped. A node and its descendants never qualify.
   const [drop, setDrop] = useState<Drop | null>(null);
@@ -289,10 +289,14 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
   }, []);
   const onDragStart = useCallback(
     (_: unknown, node: VisitNodeType) => {
+      // Dragging closes the tooltip and the Approfondisci panel at once.
+      clearTimeout(hoverTimer.current);
+      setHovered(null);
+      onBackgroundClick?.();
       const ids = subtreeOf(node.id);
       dragStart.current = new Map(flow.getNodes().filter((n) => ids.has(n.id)).map((n) => [n.id, { ...n.position }]));
     },
-    [subtreeOf, flow],
+    [subtreeOf, flow, onBackgroundClick],
   );
   const onDrag = useCallback(
     (_: unknown, node: VisitNodeType) => {
@@ -303,6 +307,11 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
         const dx = node.position.x - origin.x;
         const dy = node.position.y - origin.y;
         placeNodes(new Map([...start].filter(([id]) => id !== node.id).map(([id, p]) => [id, { x: p.x + dx, y: p.y + dy }])));
+      }
+      // Only a node with a free end (no parent) snaps: one that has a parent moves rigidly with its subtree.
+      if (node.data.visit.parentVisitId) {
+        setDropBoth(null);
+        return;
       }
       const banned = subtreeOf(node.id);
       // Magnetic zones: only the short ends (left / right) of a node. The target offers the end facing the direction its
@@ -402,6 +411,29 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
     },
     [relationOf, act],
   );
+  // Hovering an edge lifts it (with its label) above the nodes that cover it, which fade; its endpoints stay opaque.
+  const [edgeHover, setEdgeHover] = useState<{ id: string; covering: Set<string> } | null>(null);
+  const onEdgeEnter = useCallback(
+    (_: unknown, edge: Edge<EdgeData>) => {
+      const path = document.querySelector<SVGPathElement>(`.react-flow__edge[data-id="${CSS.escape(edge.id)}"] .react-flow__edge-path`);
+      const covering = new Set<string>();
+      if (path?.getTotalLength) {
+        const len = path.getTotalLength();
+        const pts: DOMPoint[] = [];
+        for (let at = 0; at <= len; at += 8) pts.push(path.getPointAtLength(at));
+        pts.push(path.getPointAtLength(len));
+        for (const n of flow.getNodes()) {
+          if (n.id === edge.source || n.id === edge.target) continue;
+          const w = n.measured?.width ?? 190;
+          const h = n.measured?.height ?? 46;
+          if (pts.some((p) => p.x >= n.position.x && p.x <= n.position.x + w && p.y >= n.position.y && p.y <= n.position.y + h)) covering.add(n.id);
+        }
+      }
+      setEdgeHover({ id: edge.id, covering });
+    },
+    [flow],
+  );
+  const onEdgeLeave = useCallback(() => setEdgeHover(null), []);
   const onEdgeClick = useCallback((_: unknown, edge: Edge<EdgeData>) => {
     if (edge.className?.includes('relation') || edge.id.startsWith('t-')) setArmed((a) => (a === edge.id ? null : edge.id));
   }, []);
@@ -617,11 +649,12 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
         const focus = n.id === focusId || n.id === drop?.target;
         const related = !focus && !!near?.nodes.has(n.id);
         const dim = !!near && !focus && !related;
-        return fresh.has(n.id) || hovered === n.id || match || near
-          ? { ...n, data: { ...n.data, fresh: fresh.has(n.id), hovered: hovered === n.id, match, focus, related, dim } }
+        const cover = !!edgeHover?.covering.has(n.id);
+        return fresh.has(n.id) || hovered === n.id || match || near || cover
+          ? { ...n, data: { ...n.data, fresh: fresh.has(n.id), hovered: hovered === n.id, match, focus, related, dim, cover } }
           : n;
       }),
-    [nodes, fresh, hovered, matchConcept, near, focusId, drop],
+    [nodes, fresh, hovered, matchConcept, near, focusId, drop, edgeHover],
   );
   const base = edges;
   const shownEdges = useMemo(() => {
@@ -633,13 +666,18 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
           : e,
     );
     const previewed = drop ? [...edges, previewEdge(drop)] : edges;
+    if (edgeHover && !drop) {
+      // The hovered edge goes last and on top, thicker and in full colour, with its label raised.
+      const lift = (e: Edge<EdgeData>) => ({ ...e, className: [e.className, 'hover'].filter(Boolean).join(' '), zIndex: 1000, data: { ...e.data, hover: true } as EdgeData });
+      return [...edges.filter((e) => e.id !== edgeHover.id), ...edges.filter((e) => e.id === edgeHover.id).map(lift)];
+    }
     if (!near || drop) return previewed;
     const mark = (e: Edge<EdgeData>, cls: string) => ({ ...e, className: [e.className, cls].filter(Boolean).join(' ') });
     return [
       ...edges.filter((e) => !near.edges.has(e.id)).map((e) => mark(e, 'dim')),
       ...edges.filter((e) => near.edges.has(e.id)).map((e) => mark(e, 'related')),
     ];
-  }, [base, near, armed, removeRelation, labelRelation, drop, nodes]);
+  }, [base, near, armed, removeRelation, labelRelation, drop, nodes, edgeHover]);
 
   return (
     <>
@@ -699,6 +737,10 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
           onNodeDragStop={onDragStop}
           onConnect={onConnect}
           onEdgeClick={onEdgeClick}
+          onEdgeMouseEnter={onEdgeEnter}
+          onEdgeMouseLeave={onEdgeLeave}
+          onNodeDoubleClick={(_, n) => onOpenConcept(n.data.visit.conceptId)}
+          zoomOnDoubleClick={false}
           elementsSelectable={false}
           proOptions={{ hideAttribution: true }}
           minZoom={0.1}
