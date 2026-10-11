@@ -133,3 +133,17 @@ test('a free relation links two different concepts, shows in the tree, page and 
   assert.equal(again.statusCode, 404);
   await app.close();
 });
+
+test('deleting a node can detach its children, and restoring puts it back with them', () => {
+  const tracker = new Tracker(new SqliteRepository(':memory:'));
+  const conv = tracker.startConversation('Canc', null);
+  tracker.track(conv.id, [{ title: 'Padre', summary: 'p' }, { title: 'Figlio', summary: 'f', parent: '#0' }]);
+  const visits = () => tracker.repo.getTree(conv.id)!.visits;
+  const parent = visits().find((v) => v.title === 'Padre')!;
+  const child = visits().find((v) => v.title === 'Figlio')!;
+  tracker.deleteVisit(parent.id, true);
+  assert.equal(visits().find((v) => v.id === child.id)!.parentVisitId, null);
+  const back = tracker.restoreVisit({ conversationId: conv.id, conceptId: parent.conceptId, conceptName: 'Padre', parentVisitId: null, childIds: [child.id], title: 'Padre', summary: 'p', excerpt: null, detail: null });
+  assert.equal(visits().find((v) => v.id === child.id)!.parentVisitId, back.id);
+  assert.equal(tracker.repo.getConcept(back.conceptId)!.name, 'Padre');
+});

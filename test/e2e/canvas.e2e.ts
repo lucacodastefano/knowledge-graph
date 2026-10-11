@@ -657,11 +657,19 @@ test('hovering an edge lifts it with its label and fades what covers it; draggin
   assert.equal(await page.getByRole('tooltip').count(), 0);
   await page.mouse.up();
 
-  // Canc deletes the selected node after a confirmation; its children move up.
-  await titled(page, 'Ramo uno').click();
-  page.once('dialog', (d) => void d.accept());
+  // Canc deletes the selected node: its children become roots, nothing else moves; Ctrl+Z restores it with its links.
+  const tree = async () =>
+    (await (await fetch(`${base}/api/conversations/${conv.id}/tree`)).json()) as { visits: { id: string; title: string; parentVisitId: string | null }[] };
+  const kid = (await tree()).visits.find((v) => v.title === 'Ramo due')!;
+  await titled(page, 'Radice archi').click({ position: { x: 20, y: 10 } });
   await page.keyboard.press('Delete');
-  await titled(page, 'Ramo uno').waitFor({ state: 'detached' });
+  await titled(page, 'Radice archi').waitFor({ state: 'detached' });
+  assert.equal((await tree()).visits.find((v) => v.id === kid.id)!.parentVisitId, null, 'children become roots');
+  await page.keyboard.press('Control+z');
+  await titled(page, 'Radice archi').waitFor();
+  const back = await tree();
+  assert.equal(back.visits.find((v) => v.title === 'Ramo due')!.parentVisitId, back.visits.find((v) => v.title === 'Radice archi')!.id, 'children are back under it');
+  assert.equal(await page.locator('.react-flow__edge.relation').count(), 1, 'the relation is still there');
   await page.close();
 });
 
