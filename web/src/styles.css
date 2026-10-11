@@ -199,3 +199,4 @@ button.icon:hover { color: var(--text); }
 
 /* Preview of where a dragged node would attach. */
 .react-flow__edge.preview .react-flow__edge-path { stroke: #9ca3af; stroke-width: 2; stroke-dasharray: 6 5; opacity: 0.8; pointer-events: none; }
+.panel .pin { align-self: center; font-size: 12px; color: var(--accent); white-space: nowrap; }

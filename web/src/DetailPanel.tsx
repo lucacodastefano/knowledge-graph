@@ -23,6 +23,11 @@ interface Props {
   conceptId: string;
   version: number;
   onClose: () => void;
+  /** Panel opened by hovering (not locked): editing or the menu lock it on this concept. */
+  pinned?: boolean;
+  onPin?: () => void;
+  /** The pointer entered or left the panel, so the hover panel does not vanish under it. */
+  onPointer?: (inside: boolean) => void;
   /** Called after a merge, to show the concept that absorbed this one. */
   onOpen: (conceptId: string) => void;
 }
@@ -45,7 +50,7 @@ function collect(sections: ConceptSection[], into: Record<string, NodeDraft>) {
  * "Approfondisci" (D16, D17): every occurrence of a concept with its sub-concepts as sections.
  * The pencil makes the same texts editable in place; merge and delete live in the menu.
  */
-export function DetailPanel({ conceptId, version, onClose, onOpen }: Props) {
+export function DetailPanel({ conceptId, version, onClose, pinned = true, onPin, onPointer, onOpen }: Props) {
   const [page, setPage] = useState<ConceptPage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [menu, setMenu] = useState<Menu>('closed');
@@ -56,6 +61,17 @@ export function DetailPanel({ conceptId, version, onClose, onOpen }: Props) {
   useEffect(() => {
     api.concept(conceptId).then(setPage, (e: Error) => setError(e.message));
   }, [conceptId, version]);
+  // Esc cancels an edit first; only then does it reach the app, which leaves focus mode.
+  useEffect(() => {
+    if (!draft) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.stopImmediatePropagation();
+      setDraft(null);
+    };
+    addEventListener('keydown', onKey, true);
+    return () => removeEventListener('keydown', onKey, true);
+  }, [draft !== null]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     setMenu('closed');
     setDraft(null);
@@ -64,6 +80,7 @@ export function DetailPanel({ conceptId, version, onClose, onOpen }: Props) {
 
   const startEditing = () => {
     if (!page) return;
+    onPin?.();
     const nodes: Record<string, NodeDraft> = {};
     for (const v of page.visits) {
       nodes[v.id] = draftOf(v);
@@ -122,7 +139,12 @@ export function DetailPanel({ conceptId, version, onClose, onOpen }: Props) {
     setDraft((d) => (d ? { ...d, nodes: { ...d.nodes, [id]: { ...d.nodes[id], ...patch } } } : d));
 
   return (
-    <aside className={`panel${draft ? ' editing' : ''}`} aria-label="Dettaglio concetto">
+    <aside
+      className={`panel${draft ? ' editing' : ''}`}
+      aria-label="Dettaglio concetto"
+      onMouseEnter={() => onPointer?.(true)}
+      onMouseLeave={() => onPointer?.(false)}
+    >
       <header>
         {draft ? (
           <input
@@ -136,6 +158,11 @@ export function DetailPanel({ conceptId, version, onClose, onOpen }: Props) {
           <h2>{page?.name ?? '…'}</h2>
         )}
         <div className="panel-tools">
+          {pinned && (
+            <span className="pin" title="Fissato su questo concetto: clic nel vuoto, Esc o ✕ per sbloccare">
+              📌 fissato
+            </span>
+          )}
           {page && !draft && (
             <>
               <button type="button" className="ghost icon" onClick={startEditing} aria-label="Modifica" title="Modifica">
@@ -146,7 +173,10 @@ export function DetailPanel({ conceptId, version, onClose, onOpen }: Props) {
                 className="ghost icon"
                 aria-label="Altre azioni"
                 aria-expanded={menu === 'open'}
-                onClick={() => setMenu(menu === 'open' ? 'closed' : 'open')}
+                onClick={() => {
+                  onPin?.();
+                  setMenu(menu === 'open' ? 'closed' : 'open');
+                }}
               >
                 ⋯
               </button>
