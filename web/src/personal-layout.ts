@@ -181,6 +181,17 @@ export function layoutPersonalGraph(input: LayoutInput): LayoutOutput {
   const forced = input.groups ?? new Map<string, string>();
   const community = detectCommunities(undirected({ ...input, nodes: input.nodes.filter((n) => !forced.has(n)) }));
   for (const n of input.nodes) if (forced.has(n)) community.set(n, `s:${forced.get(n)}`);
+  // A concept linked only to grouped ones (the children of a superclass member) joins their area instead of the far isolated grid.
+  for (const n of input.nodes) {
+    if (community.get(n) !== ISOLATED || g.degree(n) === 0) continue;
+    const pull = new Map<string, number>();
+    g.forEachEdge(n, (_, a, s, t) => {
+      const other = s === n ? t : s;
+      if (forced.has(other)) pull.set(forced.get(other)!, (pull.get(forced.get(other)!) ?? 0) + ((a.weight as number | undefined) ?? 1));
+    });
+    const best = [...pull.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0];
+    if (best) community.set(n, `s:${best[0]}`);
+  }
   const members = new Map<string, string[]>();
   for (const n of input.nodes) {
     const c = community.get(n)!;

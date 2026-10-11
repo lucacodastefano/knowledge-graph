@@ -503,7 +503,8 @@ function Texts({ id, summary, detail, draft, onChange }: TextsProps) {
 
 interface SectionsProps {
   sections: ConceptSection[];
-  level: 3 | 4;
+  /** Heading level: 3 for the children of the concept, one deeper per generation (capped at h6). */
+  level: number;
   draft: Record<string, NodeDraft> | undefined;
   onChange: (id: string, patch: Partial<NodeDraft>) => void;
 }
@@ -511,7 +512,7 @@ interface SectionsProps {
 /** Sub-concepts as sections (D17): the real content of "Approfondisci" without extra tokens. */
 function Sections({ sections, level, draft, onChange }: SectionsProps) {
   if (sections.length === 0) return null;
-  const H = level === 3 ? 'h3' : 'h4';
+  const H = `h${Math.min(level, 6)}` as 'h3' | 'h4' | 'h5' | 'h6';
   return (
     <div className="sections">
       {sections.map((s) => {
@@ -529,7 +530,7 @@ function Sections({ sections, level, draft, onChange }: SectionsProps) {
               <H>{s.title}</H>
             )}
             <Texts id={s.id} summary={s.summary} detail={s.detail} draft={d} onChange={onChange} />
-            {level === 3 && <Sections sections={s.children} level={4} draft={draft} onChange={onChange} />}
+            <Sections sections={s.children} level={level + 1} draft={draft} onChange={onChange} />
           </section>
         );
       })}

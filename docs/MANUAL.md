@@ -111,7 +111,7 @@ Just chat. Before each answer that explains something new, the model adds its co
 - "attach *X* under *Y*": the model moves node *X* (with its children) under *Y* (`kc_move`); merging two names of the same concept is a different tool (`kc_link`);
 - "rename *X* to *Z*", "remove *X*", "fix the hierarchy": the model only edits the canvas (`kc_rename`, `kc_remove`, `kc_link`, `kc_move`) and adds no new concepts; removing a node moves its children up to its parent.
 - "what have I already studied about *Y*?": the model reads your graph (`kc_recall`) before answering;
-- "pick up where we left off": the model reads the outline of the last conversation (`kc_tree`) and continues from the current node;
+- "pick up where we left off": the model reads the outline of the last conversation (`kc_tree`, titles and relations, no ids) and continues from the current node; `kc_read` gives it the full text of a single node (or of a concept from another chat) when it needs to reread it;
 - "what have I been studying lately?": overview of your graph (`kc_profile`).
 
 The model also checks what you already know before explaining a topic in depth, so it can build on it instead of starting from zero.
@@ -142,7 +142,7 @@ Every concept you ever explored, across conversations. Bigger nodes were visited
 
 ### Concept panel
 
-Opened from **Approfondisci**, from the personal graph or from search. It lists every place the concept appears (newest first): conversation, the node it sits under, date and the text from the answer, followed by its sub-concepts as sections (two levels), which is where the real depth of an explanation lives.
+Opened from **Approfondisci**, from the personal graph or from search. It lists every place the concept appears (newest first): conversation, the node it sits under, date and the text from the answer, followed by all its sub-concepts as sections, however deep, which is where the real depth of an explanation lives.
 
 **Full text per node.** Every node carries two texts: a 1-2 sentence `summary` (the label) and the `detail`, the full part of the answer about that concept in markdown (explanations, lists, tables, numbers, examples, caveats), as complete as what the model wrote in the chat. The model is told to format it to fit the content: tables for comparisons, numbered lists for steps, **bold** for key terms, *italic* for definitions, `##` headings for sub-topics, `>` quotes for warnings, code blocks for code. The panel renders full markdown: three heading sizes, bold, italic, ~~strikethrough~~, nested bullet and numbered lists, tables (scroll sideways when wide, alternating rows), quotes as highlighted notes, inline code and code blocks in monospace, links (http/https/mailto only) and rules. Raw HTML from the model is never rendered, only shown as text. It is always on (the old "Dettaglio approfondito" checkbox is gone): the model writes the answer twice, once in the chat and once in the node, so expect roughly the size of the explanation again in output tokens per answer, about +500-1500 tokens for a typical answer. The model is told the map is your personal knowledge base and that it is saved so you can reread it; it may talk about it freely when asked.
 

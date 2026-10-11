@@ -36,7 +36,7 @@ const trackShape = () => ({
       z.looseObject({
         title: z.string().describe('Concept name, 1-5 words'),
         summary: z.string().describe('1-2 short sentences: what the concept is (node label)'),
-        detail: z.string().optional().describe('Full text of your answer on this concept, markdown formatted to fit: tables for comparisons, numbered lists for steps, **bold** key terms, *italic* definitions, ## headings, > warnings, code blocks'),
+        detail: z.string().optional().describe('Full text of your answer on this concept, in markdown (tables, lists, **bold**, code); only what concerns this node, not its children'),
         parent: z.string().describe('Title of the node it belongs under (from the tree, or another node of this call), "root", or "#n" for node n of this call'),
         excerpt: z.string().optional().describe('Rarely: a formula or code line to keep as is'),
         conceptId: z.string().optional().describe('Known concept id to reuse'),
@@ -84,16 +84,24 @@ export function createMcpServer(tracker: Tracker, state: McpSessionState): McpSe
     ({ nodes }) =>
       guarded(() => {
         const id = conversationId();
-        const result = ok(tracker.track(id, nodes as TrackNodeInput[]));
-        result.content.push({ type: 'text', text: `${reader.tree(id, false, true)}\n${TRACKED_NOTE}` });
-        return result;
+        const results = tracker.track(id, nodes as TrackNodeInput[]);
+        // Lean result: the touched branch, plus only what needs a decision (no ids, no empty or false fields).
+        const known = results.flatMap((r, i) => (r.knownConcept && !r.updated ? [nodes[i].title.trim()] : []));
+        const similar = results.flatMap((r, i) => r.similar.map((m) => `"${nodes[i].title.trim()}" ~ "${m.name}" (conceptId ${m.id})`));
+        const text = [
+          reader.tree(id, false, true, new Set(results.map((r) => r.id))),
+          ...(known.length ? [`Known: ${known.join(', ')}`] : []),
+          ...(similar.length ? [`Similar: ${similar.join('; ')}`] : []),
+          TRACKED_NOTE,
+        ].join('\n');
+        return { content: [{ type: 'text', text }] };
       }, TRACK_FAILED),
   );
 
   server.registerTool(
     'kc_focus',
     {
-      description: 'Move back to a node already on the canvas; it becomes the current node.',
+      description: 'Make a node of this conversation\'s map current again. To go deeper, kc_track its parts instead.',
       inputSchema: { node: z.string().describe('Title or id') },
     },
     ({ node }) =>
@@ -101,20 +109,21 @@ export function createMcpServer(tracker: Tracker, state: McpSessionState): McpSe
         const id = conversationId();
         const visit = tracker.resolveNode(id, node);
         tracker.focus(id, visit.id);
-        return ok({ current: visit.id });
-      }),
+        return text(`Current: ${visit.title}`);
+      }, 'If it is only in the user\'s graph, kc_track it here instead.'),
   );
 
   server.registerTool(
     'kc_link',
     {
       description: 'Merge a node into an existing concept: same idea under two names (e.g. kc_track reported it as similar). To re-attach a node elsewhere use kc_move.',
-      inputSchema: { node: z.string(), conceptId: z.string() },
+      inputSchema: { node: z.string().describe('Title of the node'), conceptId: z.string().describe('conceptId from the Similar line') },
     },
     ({ node, conceptId }) =>
       guarded(() => {
-        const v = tracker.link(conversationId(), node, conceptId);
-        return ok({ node: v.id, conceptId: v.conceptId });
+        const id = conversationId();
+        const v = tracker.link(id, tracker.resolveNode(id, node).id, conceptId);
+        return text(`Linked: ${v.title}`);
       }),
   );
 
@@ -166,7 +175,7 @@ export function createMcpServer(tracker: Tracker, state: McpSessionState): McpSe
   server.registerTool(
     'kc_recall',
     {
-      description: 'What the user already explored about a topic: concepts, past summaries, dates; thin = only superficial. Use when a topic first comes up.',
+      description: 'What the user already explored about a topic: concepts, past summaries, dates (thin:true in a result = superficial). Use when a topic first comes up.',
       inputSchema: { query: z.string().describe('Topic or concept name') },
     },
     ({ query }) => guarded(() => ok(reader.recall(query))),
@@ -191,7 +200,7 @@ export function createMcpServer(tracker: Tracker, state: McpSessionState): McpSe
   server.registerTool(
     'kc_tree',
     {
-      description: 'Outline of a conversation (default: this one, else the latest) with node ids.',
+      description: 'Outline of a conversation (default: this one, else the latest), with its relations.',
       inputSchema: {
         conversation: z.string().optional().describe('Conversation id'),
         summaries: z.boolean().optional().describe('Include node texts'),
@@ -199,6 +208,15 @@ export function createMcpServer(tracker: Tracker, state: McpSessionState): McpSe
     },
     ({ conversation, summaries }) =>
       guarded(() => text(reader.tree(conversation ?? state.conversationId, summaries ?? false))),
+  );
+
+  server.registerTool(
+    'kc_read',
+    {
+      description: 'Full text of one node (title in this conversation, or a concept of the user\'s graph) and its children\'s titles.',
+      inputSchema: { node: z.string().describe('Title') },
+    },
+    ({ node }) => guarded(() => text(reader.read(state.conversationId, node))),
   );
 
   server.registerTool(

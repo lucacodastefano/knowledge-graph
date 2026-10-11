@@ -63,12 +63,15 @@ test('the personal graph spans conversations (D2)', () => {
 
 test('new concepts come back with similar existing ones, and kc_link merges them', () => {
   const { tracker, conv } = setup();
-  const [a] = tracker.track(conv.id, [{ title: 'Partizioni Kafka', summary: 's' }]);
-  const [b] = tracker.track(conv.id, [{ title: 'Partizionamento Kafka', summary: 's' }]);
+  const [a] = tracker.track(conv.id, [{ title: 'Partizioni Kafka', summary: 's', parent: 'root' }]);
+  const [b] = tracker.track(conv.id, [{ title: 'Partizionamento Kafka', summary: 's', parent: 'root' }]);
   assert.deepEqual(
     b.similar.map((s) => s.id),
     [a.conceptId],
   );
+  // Its own parent is never reported as similar.
+  const [child] = tracker.track(conv.id, [{ title: 'Partizioni Kafka replicate', summary: 's', parent: 'Partizioni Kafka' }]);
+  assert.ok(!child.similar.some((s) => s.id === a.conceptId));
   tracker.link(conv.id, b.id, a.conceptId);
   assert.equal(tracker.repo.getVisit(b.id)!.conceptId, a.conceptId);
   assert.equal(tracker.repo.getConcept(b.conceptId), undefined, 'orphan concept is removed');

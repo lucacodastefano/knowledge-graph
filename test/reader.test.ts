@@ -34,13 +34,12 @@ test('recall also matches what was said, not only names', () => {
   assert.throws(() => reader.recall('  '), TrackerError);
 });
 
-test('tree is an indented outline with ids and the current node', () => {
+test('tree is an indented outline without ids and with the current node', () => {
   const { tracker, reader, kafka } = setup();
-  const visits = tracker.repo.getTree(kafka.id)!.visits;
   const outline = reader.tree(kafka.id, false).split('\n');
   assert.match(outline[0], /^Kafka \[.+\] \d{4}-\d{2}-\d{2}, 2 nodes$/);
-  assert.equal(outline[1], `- Kafka [${visits[0].id}]`);
-  assert.equal(outline[2], `  - Consumer group [${visits[1].id}] *current`);
+  assert.equal(outline[1], `- Kafka`);
+  assert.equal(outline[2], `  - Consumer group *current`);
   assert.match(reader.tree(kafka.id, true), /Consumer group .*: Consumer che si dividono/);
 });
 

@@ -62,6 +62,8 @@ const SLOTS = 8;
 /** Above this many concepts on screen the view shows communities instead of single labels. */
 const LABEL_BUDGET = 150;
 const MIN_BUBBLE = 3;
+/** Up to this many concepts on screen every label is drawn, nudged aside if needed, never hidden. */
+const SMALL_GRAPH = 40;
 const PERIODS = [
   { value: '', label: 'Sempre' },
   { value: '1', label: 'Ultime 24 ore' },
@@ -164,6 +166,13 @@ function merge(graph: Graph<NodeAttrs>, data: PersonalGraph, relayout: boolean, 
     }
   }
 
+  for (const [child, parent] of up) {
+    if (!graph.hasNode(child) || !graph.hasNode(parent) || child === parent) continue;
+    if (graph.hasEdge(child, parent)) graph.setEdgeAttribute(child, parent, 'isa', true);
+    else if (graph.hasEdge(parent, child)) graph.setEdgeAttribute(parent, child, 'isa', true);
+    else graph.addEdge(child, parent, { size: 1.4, relation: false, isa: true });
+  }
+
   if (relayout) {
     const { community, position } = layoutPersonalGraph({
       nodes: graph.nodes(),
@@ -233,6 +242,8 @@ function merge(graph: Graph<NodeAttrs>, data: PersonalGraph, relayout: boolean, 
 
 /** Every concept ever explored, across conversations (D2), as a WebGL graph grouped by topic. */
 const RELATION_COLOR = '#f59e0b';
+/** Superclass links (concept to its group): a hue of their own, so they read apart from drill-downs and free relations. */
+const SUPER_COLOR = '#8b5cf6';
 
 export function PersonalView({ live, found, onOpenConcept, onBackgroundClick, focusId = null, onHoverConcept }: Props) {
   const focusRef = useRef(focusId);
@@ -386,7 +397,7 @@ export function PersonalView({ live, found, onOpenConcept, onBackgroundClick, fo
         }
         const dim = h ? node !== h && !graph.areNeighbors(node, h) : v.focus ? g.key !== v.focus && !isFound : false;
         if (dim) return { ...data, size: Math.min(data.size, v.maxSize), color: faded, label: '', zIndex: 0 };
-        return { ...data, size: Math.min(data.size, v.maxSize), color, highlighted, zIndex: 1, forceLabel: !!h || isFound || !!data.isSuper };
+        return { ...data, size: Math.min(data.size, v.maxSize), color, highlighted, zIndex: 1, forceLabel: !!h || isFound || !!data.isSuper || graph.order <= SMALL_GRAPH };
       },
       edgeReducer: (edge, data) => {
         const v = view.current;
@@ -401,6 +412,7 @@ export function PersonalView({ live, found, onOpenConcept, onBackgroundClick, fo
           const b = graph.getNodeAttributes(t);
           if (groupOf(s, a).key !== v.focus || groupOf(t, b).key !== v.focus) return { ...data, hidden: true };
         }
+        if (graph.getEdgeAttribute(edge, 'isa')) return { ...data, color: SUPER_COLOR, size: Math.max(data.size as number, 1.6) };
         // Free relations drawn by the user keep their own colour, also across topics.
         if (graph.getEdgeAttribute(edge, 'relation')) return { ...data, color: RELATION_COLOR, size: Math.max(data.size as number, 1.6) };
         // Links across topics stay faint, so the communities read as separate groups.
@@ -531,8 +543,9 @@ export function PersonalView({ live, found, onOpenConcept, onBackgroundClick, fo
 
       const pointer = v.pointer;
       const near = (l: { x: number; y: number }) => (pointer ? Math.hypot(l.x - pointer.x, l.y - pointer.y) : Infinity);
+      const small = graph.order <= SMALL_GRAPH;
       const candidates = pending
-        .filter((l) => l.forced || !isOverview)
+        .filter((l) => l.forced || !isOverview || small)
         .sort((a, b) => {
           if (a.must !== b.must) return a.must ? -1 : 1;
           if (a.forced !== b.forced) return a.forced ? -1 : 1;
@@ -555,11 +568,23 @@ export function PersonalView({ live, found, onOpenConcept, onBackgroundClick, fo
       for (const l of candidates) {
         if (l.x < -100 || l.x > width + 20 || l.y < -20 || l.y > height + 20) continue;
         const w = labelCtx.measureText(l.label).width;
-        const x = l.x + l.size + 4;
-        const box = { x0: x - 2, y0: l.y - 9, x1: x + w + 2, y1: l.y + 9 };
-        if (!l.must && (!free(box) || covers(box, l))) continue;
+        let x = l.x + l.size + 4;
+        let y = l.y;
+        let box = { x0: x - 2, y0: y - 9, x1: x + w + 2, y1: y + 9 };
+        if (small && !l.must) {
+          // Few concepts: try right, left, below, above; if all are taken, draw it on the right anyway.
+          const tries = [
+            { x, y },
+            { x: l.x - l.size - 4 - w, y },
+            { x: l.x - w / 2, y: l.y + l.size + 14 },
+            { x: l.x - w / 2, y: l.y - l.size - 8 },
+          ];
+          const spot = tries.find((t) => free({ x0: t.x - 2, y0: t.y - 9, x1: t.x + w + 2, y1: t.y + 9 })) ?? tries[0];
+          ({ x, y } = spot);
+          box = { x0: x - 2, y0: y - 9, x1: x + w + 2, y1: y + 9 };
+        } else if (!l.must && (!free(box) || covers(box, l))) continue;
         taken.push(box);
-        halo(l.label, x, l.y + 4.5);
+        halo(l.label, x, y + 4.5);
       }
       pending.length = 0;
     };

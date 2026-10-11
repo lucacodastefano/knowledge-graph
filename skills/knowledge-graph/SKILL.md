@@ -27,8 +27,9 @@ The knowledge-graph MCP server maps the concepts the user explores with you on a
      `"root"` for an unrelated topic; `"#0"`, `"#1"`... (or its title) to hang a node under another node of the same call, in any order.
    - `excerpt`: leave it out unless a formula or code line is worth keeping as is.
    - `sources`: when your answer uses web search results or documents, put their URLs on the nodes they support (not on every node).
-3. When the conversation goes back to a node already on the canvas, call `kc_focus` with its title instead of tracking it again.
-4. If `kc_track` returns `similar` concepts and one is clearly the same idea, call `kc_link` to merge.
+3. "On the canvas" means this conversation's map. To go deeper into a node, `kc_track` its parts with `parent` = that node (no `kc_focus` needed); a concept that is only in the user's graph is tracked here, not focused. Use `kc_focus` only to make a node of this map current again, and `kc_read` with a title to reread a node's full text.
+   A parent's `detail` holds only what concerns the whole (introduction, comparison, how the parts connect); each child's content lives only in that child.
+4. If `kc_track` reports a `Similar` concept that is clearly the same idea, call `kc_link` to merge.
 5. When the user asks to change the canvas (move, rename, merge, remove, "fix the hierarchy"), use only the editing tools, never `kc_track`:
    `kc_move` hangs a node (with its children) under another one or `"root"`; `kc_rename` renames it; `kc_link` merges two names of the same
    concept; `kc_remove` deletes a node and moves its children up, so removing a wrapper node fixes its branch in one call.
@@ -40,7 +41,7 @@ Never create nodes about the graph, the tools or the conversation itself; do not
 - When a topic first comes up in the conversation (not on follow-ups), call `kc_recall` with the topic. If the user has seen it, build on their notes
   instead of starting from zero, and point out links to earlier topics (`near`) when they help. `sources` lists pages already cited on it.
 - When the user asks to pick up where they left off, call `kc_tree` (optionally with `summaries: true`) and continue from the `*current` node.
-- When the user asks what they know or what is missing on a topic, read `kc_recall` (`thin: true` = only superficial) or `kc_profile` and answer from it.
+- When the user asks what they know or what is missing on a topic, read `kc_recall` (a result with `thin: true` is superficial) or `kc_profile` and answer from it.
 - When the user asks what they have been studying, or you need context at the start of a session, call `kc_profile`.
 - `kc_relate` (`concept`, then `superclass` or `related_to`, optional `label`) groups a concept under a superclass (one per concept) or relates two concepts. Use it after `kc_track` when `kc_recall` shows the topic belongs to an existing group (`in`), or when the user asks to tidy their graph (see `groups` and `ungrouped` in `kc_profile`).
 
