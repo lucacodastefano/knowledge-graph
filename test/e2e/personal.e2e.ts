@@ -71,6 +71,7 @@ after(async () => {
 
 interface Probe {
   position(label: string): { x: number; y: number } | null;
+  links(): number[];
   topics(): { id: string; name: string; count: number; x: number; y: number; r: number }[];
   supers(): { id: string; name: string; count: number; depth: number; x: number; y: number; r: number }[];
   bubbles(): { name: string; count: number; x: number; y: number; r: number }[];
@@ -204,6 +205,7 @@ test('a superclass gathers topics of different conversations into one named area
   const nested = (await probe(page, (k) => k.topics())).filter((t) => Math.hypot(t.x - area.x, t.y - area.y) + t.r <= area.r + 1);
   assert.ok(nested.length >= 2, 'the topics of its members sit nested inside the bubble');
   const other = (await probe(page, (k) => k.position('Microservizi 3')))!;
+  assert.ok((await probe(page, (k) => k.links())).length > 0, 'zoomed out, links between bubbles are merged into one line per pair');
   assert.ok(Math.hypot(other.x - area.x, other.y - area.y) > area.r, 'other concepts stay outside');
   await page.screenshot({ path: join(out, '13-superclasse.png') });
   await page.close();
