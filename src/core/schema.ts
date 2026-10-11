@@ -81,6 +81,23 @@ CREATE TABLE IF NOT EXISTS canvas_layout (
   PRIMARY KEY (kind, id)
 );
 
+-- One row per MCP tool call: the traffic between the model and the graph (see core/metrics.ts).
+CREATE TABLE IF NOT EXISTS tool_calls (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  at TEXT NOT NULL,
+  tool TEXT NOT NULL,
+  conversation_id TEXT,
+  arg_chars INTEGER NOT NULL,
+  result_chars INTEGER NOT NULL,
+  duration_ms INTEGER NOT NULL,
+  ok INTEGER NOT NULL,
+  error TEXT,
+  nodes_created INTEGER NOT NULL DEFAULT 0,
+  nodes_changed INTEGER NOT NULL DEFAULT 0,
+  hit INTEGER
+);
+CREATE INDEX IF NOT EXISTS tool_calls_at ON tool_calls(at);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS concepts_fts USING fts5(
   concept_id UNINDEXED, name, tokenize = 'trigram remove_diacritics 1'
 );

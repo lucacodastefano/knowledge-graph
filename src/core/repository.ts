@@ -8,6 +8,8 @@ import type {
   PersonalGraph,
   TextHit,
   Revision,
+  ToolCall,
+  GraphSnapshot,
   Visit,
 } from './types.ts';
 
@@ -91,6 +93,13 @@ export interface Repository {
   listSuperclasses(): ConceptMatch[];
   /** Concepts directly under a superclass, by name. */
   listMembers(superId: string): ConceptMatch[];
+
+  /** Metrics (core/metrics.ts): one row per MCP tool call, and the raw graph facts the quality charts are computed from. */
+  recordToolCall(call: ToolCall): void;
+  listToolCalls(since?: string): ToolCall[];
+  /** Row counts the metering compares before and after a call to see what it created or changed. */
+  counters(): { visits: number; revisions: number };
+  graphSnapshot(): GraphSnapshot;
 
   addRevision(revision: Omit<Revision, 'createdAt'>): void;
   listRevisions(targetKind: Revision['targetKind'], targetId: string): Revision[];

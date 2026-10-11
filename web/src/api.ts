@@ -12,10 +12,11 @@ import type {
   TextHit,
   Visit,
 } from '../../src/core/types.ts';
+import type { Metrics, Period } from '../../src/core/metrics.ts';
 import type { LayoutEntry } from '../../src/core/repository.ts';
 import type { TrackerEvent, VisitEdit } from '../../src/core/tracker.ts';
 
-export type { GroupSuggestion, Concept, ConceptOccurrence, ConceptPage, ConceptSection, ConceptSource, Conversation, ConversationTree, PersonalGraph, Settings, TextHit, TrackerEvent, Visit, VisitEdit };
+export type { Metrics, Period, GroupSuggestion, Concept, ConceptOccurrence, ConceptPage, ConceptSection, ConceptSource, Conversation, ConversationTree, PersonalGraph, Settings, TextHit, TrackerEvent, Visit, VisitEdit };
 
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(path);
@@ -56,6 +57,8 @@ export const api = {
   layout: () => get<LayoutEntry[]>('/api/layout'),
   /** An item without x / y is forgotten. */
   saveLayout: (items: Partial<LayoutEntry>[]) => send<void>('POST', '/api/layout', { items }),
+  metrics: (conversation: string, period: Period) =>
+    get<Metrics>(`/api/metrics?period=${period}${conversation ? `&conversation=${encodeURIComponent(conversation)}` : ''}`),
   settings: () => get<Settings>('/api/settings'),
   updateSettings: (patch: Partial<Settings>) => send<Settings>('PATCH', '/api/settings', patch),
   graph: () => get<PersonalGraph>('/api/graph'),

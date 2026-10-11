@@ -5,6 +5,7 @@ import { type TrackNodeInput, type Tracker, TrackerError } from '../core/tracker
 import { Reader } from '../core/reader.ts';
 import { trackingInstructions } from './instructions.ts';
 import { VERSION } from '../version.ts';
+import { meterTools } from './metering.ts';
 
 /** Per MCP session: which conversation this client is writing to. */
 export interface McpSessionState {
@@ -70,6 +71,7 @@ export function createMcpServer(tracker: Tracker, state: McpSessionState): McpSe
   const instructionsMemory = tracker.settings().memory;
   const server = new McpServer({ name: 'knowledge-graph', version: VERSION }, { instructions: trackingInstructions({ memory: instructionsMemory }) });
 
+  meterTools(server, tracker, state);
   const reader = new Reader(tracker.repo);
 
   const conversationId = () => {
