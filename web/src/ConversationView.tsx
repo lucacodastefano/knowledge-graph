@@ -5,6 +5,8 @@ import {
   BaseEdge,
   EdgeLabelRenderer,
   getBezierPath,
+  getSmoothStepPath,
+  getStraightPath,
   Controls,
   ReactFlow,
   ReactFlowProvider,
@@ -65,6 +67,27 @@ function RelationEdge({ id, data, sourceX, sourceY, targetX, targetY, sourcePosi
   );
 }
 
+/** A parent-child edge of the tree: clicking it arms a red ✕ (or Canc) that detaches the child with its subtree. */
+function TreeEdge({ id, data, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition }: EdgeProps<Edge<EdgeData>>) {
+  const d = data as unknown as { shape?: string; armed: boolean; onRemove: () => void };
+  const args = { sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition };
+  const [path, x, y] = d.shape === 'straight' ? getStraightPath(args) : d.shape === 'smoothstep' ? getSmoothStepPath(args) : getBezierPath(args);
+  return (
+    <>
+      <BaseEdge id={id} path={path} interactionWidth={24} />
+      {d.armed && (
+        <EdgeLabelRenderer>
+          <div className="relation-label nodrag nopan" style={{ transform: `translate(-50%, -50%) translate(${x}px, ${y}px)` }}>
+            <button type="button" className="relation-remove" aria-label="Scollega il nodo" title="Scollega dal padre (Canc)" onClick={d.onRemove}>
+              ✕
+            </button>
+          </div>
+        </EdgeLabelRenderer>
+      )}
+    </>
+  );
+}
+
 interface RelationData {
   from: string;
   to: string;
@@ -81,7 +104,7 @@ interface Step {
 }
 
 const nodeTypes = { visit: VisitNode };
-const edgeTypes = { cross: CrossEdge, relation: RelationEdge };
+const edgeTypes = { cross: CrossEdge, relation: RelationEdge, tree: TreeEdge };
 const FRESH_MS = 1600;
 /** WP6: the tooltip opens after a short dwell and closes at once, with a grace period to reach its button. */
 const OPEN_DELAY_MS = 700;
@@ -224,12 +247,20 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
   const relationOf = useCallback((id: string) => tree?.relations.find((r) => `r-${r.from}-${r.to}` === id), [tree]);
   const removeRelation = useCallback(
     (id: string) => {
+      if (id.startsWith('t-')) {
+        // A parent-child edge: the child leaves its parent with its whole subtree and becomes a top-level node.
+        const child = tree?.visits.find((v) => `t-${v.id}` === id);
+        if (!child) return;
+        const old = child.parentVisitId;
+        setArmed(null);
+        return act({ redo: () => api.editVisit(child.id, { parentVisitId: null }), undo: () => api.editVisit(child.id, { parentVisitId: old }) });
+      }
       const r = relationOf(id);
       if (!r) return;
       setArmed(null);
       act({ redo: () => api.unrelate(r.from, r.to), undo: () => api.relate(r.from, r.to, r.label) });
     },
-    [relationOf, act],
+    [relationOf, act, tree],
   );
   const labelRelation = useCallback(
     (id: string) => {
@@ -242,7 +273,7 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
     [relationOf, act],
   );
   const onEdgeClick = useCallback((_: unknown, edge: Edge<EdgeData>) => {
-    if (edge.className?.includes('relation')) setArmed((a) => (a === edge.id ? null : edge.id));
+    if (edge.className?.includes('relation') || edge.id.startsWith('t-')) setArmed((a) => (a === edge.id ? null : edge.id));
   }, []);
   // Canc removes the armed relation; Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z) walk back and forth through the actions.
   useEffect(() => {
@@ -430,7 +461,9 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
     const edges = base.map((e) =>
       e.className === 'relation'
         ? { ...e, data: { ...e.data, armed: e.id === armed, onRemove: () => removeRelation(e.id), onLabel: () => labelRelation(e.id) } as EdgeData }
-        : e,
+        : e.id.startsWith('t-')
+          ? { ...e, type: 'tree', data: { shape: e.type, armed: e.id === armed, onRemove: () => removeRelation(e.id) } as EdgeData }
+          : e,
     );
     if (!near) return edges;
     const mark = (e: Edge<EdgeData>, cls: string) => ({ ...e, className: [e.className, cls].filter(Boolean).join(' ') });

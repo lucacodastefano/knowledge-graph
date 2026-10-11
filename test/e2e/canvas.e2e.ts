@@ -434,5 +434,31 @@ test('XMind gestures: drag a node onto another to move it with its children, pul
     const byTitle = (n: string) => t.visits.find((v: { title: string }) => v.title === n);
     return byTitle('Ramo uno').parentVisitId === byTitle('Radice gesti').id;
   }, [base, conv.id]);
+
+  // A solid parent-child edge can be removed too: the child leaves its parent with its subtree; Ctrl+Z restores it.
+  await page.waitForTimeout(800);
+  t = await state();
+  const kid = t.visits.find((v) => v.title === 'Figlio del ramo')!;
+  const oldParent = kid.parentVisitId;
+  const edge = page.locator(`.react-flow__edge[data-id="t-${kid.id}"] .react-flow__edge-path`);
+  const at = await edge.evaluate((el) => {
+    const path = el as SVGPathElement;
+    const pt = path.getPointAtLength(path.getTotalLength() * 0.5);
+    const m = path.getScreenCTM()!;
+    return { x: pt.x * m.a + m.e, y: pt.y * m.d + m.f };
+  });
+  await page.mouse.click(at.x, at.y);
+  await page.getByRole('button', { name: 'Scollega il nodo' }).waitFor();
+  await page.keyboard.press('Delete');
+  await page.waitForFunction(async ([base, id, kidId]) => {
+    const t = await (await fetch(`${base}/api/conversations/${id}/tree`)).json();
+    return t.visits.find((v: { id: string }) => v.id === kidId).parentVisitId === null;
+  }, [base, conv.id, kid.id]);
+  assert.equal((await state()).visits.length, 4, 'nothing is deleted');
+  await page.keyboard.press('Control+z');
+  await page.waitForFunction(async ([base, id, kidId, parent]) => {
+    const t = await (await fetch(`${base}/api/conversations/${id}/tree`)).json();
+    return t.visits.find((v: { id: string }) => v.id === kidId).parentVisitId === parent;
+  }, [base, conv.id, kid.id, oldParent]);
   await page.close();
 });
