@@ -21,7 +21,7 @@ The knowledge-graph MCP server maps the concepts the user explores with you on a
      tracking it again under the same parent updates it instead of duplicating it.
    - `summary`: 1-2 short sentences saying what the concept is (the node label).
    - `detail`: the full text of your answer about this concept, in markdown (explanations, lists, tables, numbers, examples, caveats),
-     as complete as what you write to the user: the map keeps the same content so they can reread it. Not a summary. Fill it for every
+     as complete as what you write to the user: the map keeps the same content so they can reread it. Not a summary. Format it to fit the content: tables for comparisons, numbered lists for steps, **bold** for key terms, *italic* for definitions, `##` headings for sub-topics, `>` quotes for warnings, code blocks for code. Fill it for every
      node you explain, and also when you review or expand nodes already on the canvas (track them again with the same title).
    - `parent` (required): the title of the node it belongs under, from the tree that `kc_start` and `kc_track` return;
      `"root"` for an unrelated topic; `"#0"`, `"#1"`... (or its title) to hang a node under another node of the same call, in any order.

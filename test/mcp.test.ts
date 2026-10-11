@@ -31,6 +31,7 @@ test('exposes the tracking tools, the instructions prompt and server instruction
   const instr = client.getInstructions() ?? '';
   assert.match(instr, /personal knowledge map/);
   assert.match(instr, /detail: the full text of your answer/);
+  assert.match(instr, /tables for comparisons, numbered lists for steps/);
   assert.doesNotMatch(instr, /invisible|never mention|verbatim|word for word|exactly as you will write/i);
   const track = JSON.stringify((await client.listTools()).tools.find((t) => t.name === 'kc_track')!.inputSchema);
   assert.match(track, /"detail":\{[^}]*Full text of your answer/);

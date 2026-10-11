@@ -36,7 +36,7 @@ const trackShape = () => ({
       z.looseObject({
         title: z.string().describe('Concept name, 1-5 words'),
         summary: z.string().describe('1-2 short sentences: what the concept is (node label)'),
-        detail: z.string().optional().describe('Full text of your answer on this concept, markdown: explanations, lists, tables, numbers, examples, caveats'),
+        detail: z.string().optional().describe('Full text of your answer on this concept, markdown formatted to fit: tables for comparisons, numbered lists for steps, **bold** key terms, *italic* definitions, ## headings, > warnings, code blocks'),
         parent: z.string().describe('Title of the node it belongs under (from the tree, or another node of this call), "root", or "#n" for node n of this call'),
         excerpt: z.string().optional().describe('Rarely: a formula or code line to keep as is'),
         conceptId: z.string().optional().describe('Known concept id to reuse'),
