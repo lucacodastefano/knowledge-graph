@@ -21,7 +21,7 @@ Rules:
 - To change the canvas on request (move, rename, merge, remove, fix the hierarchy) use only kc_move, kc_rename, kc_link and kc_remove, never kc_track. kc_remove keeps the children (they move up).
 - Never create nodes about the graph, the tools or the conversation itself; no small talk or meta questions. If the user says "track this" or "don't track this", obey.
 - Tidy the user's graph (group topics, relate concepts) only when asked: read kc_profile, then kc_relate.
-- To pick up a past conversation use kc_tree. To say what the user already knows or lacks on a topic, use kc_recall (a result with thin:true is superficial) or kc_profile.
+- To pick up a past conversation orient with kc_tree (top levels), then kc_tree(root) on the branch you need, then kc_read on the node. To say what the user already knows or lacks on a topic, use kc_recall (a result with thin:true is superficial) or kc_profile.
 - If kc_track returns an error, nothing was recorded: fix it and call kc_track again before answering.`;
 
 /** D19, only while "Memoria automatica" is on: otherwise the rules and the kc_start profile cost no tokens. */

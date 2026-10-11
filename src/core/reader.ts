@@ -56,6 +56,8 @@ const SEARCH_LIMIT = 20;
 const TEXT_HITS = 30;
 /** Outline nodes shown at once (about 1,000 tokens): a bigger map is shown down to the depth that fits, branches opened on request. */
 export const TREE_MAX_NODES = 150;
+/** kc_tree shows only the top two levels of a map bigger than this, to orient before drilling down. */
+const ORIENT_MIN_NODES = 40;
 const SIMILAR_MAPS = 3;
 
 const MEMBERS_SHOWN = 8;
@@ -187,7 +189,7 @@ export class Reader {
    * a title. `touched` narrows it to the branches leading to those nodes (the kc_track result); otherwise the free
    * relations (the dashed lines of the canvas) close the outline. Defaults to the most recent conversation.
    */
-  tree(conversationId: string | null, withSummaries: boolean, compact = false, touched?: Set<string>, open?: { node?: string; depth?: number }): string {
+  tree(conversationId: string | null, withSummaries: boolean, compact = false, touched?: Set<string>, open?: { root?: string; depth?: number; relations?: boolean; orient?: boolean }): string {
     const id = conversationId ?? this.repo.listConversations()[0]?.id;
     if (!id) return 'No conversations yet.';
     const tree = this.repo.getTree(id);
@@ -207,10 +209,10 @@ export class Reader {
     for (const v of visits) titles.set(normalizeName(v.title), (titles.get(normalizeName(v.title)) ?? 0) + 1);
 
     const lines = compact ? ['Tree:'] : [`${conversation.title} [${conversation.id}] ${day(conversation.lastActivityAt)}, ${visits.length} nodes`];
-    // A big outline is cut at the depth that fits TREE_MAX_NODES; a branch (open.node) is outlined from its own root.
+    // A big outline is cut at the depth that fits TREE_MAX_NODES; a branch (open.root) is outlined from its own root.
     let top: string | null = null;
-    if (open?.node) {
-      const ref = open.node.trim();
+    if (open?.root) {
+      const ref = open.root.trim();
       const norm = normalizeName(ref);
       const root = byId.get(ref) ?? visits.findLast((v) => normalizeName(v.title) === norm);
       if (!root) throw new TrackerError(`Node "${ref}" not found in this conversation`);
@@ -227,16 +229,16 @@ export class Reader {
     if (top) ((perDepth[0] = 1), subtree(top, 1, perDepth));
     else subtree(null, 0, perDepth);
     const total = perDepth.reduce((a, b) => a + b, 0);
-    let maxDepth = open?.depth !== undefined ? Math.max(0, open.depth - 1) : perDepth.length - 1;
-    if (open?.depth === undefined && !touched) {
-      let acc = 0;
-      maxDepth = 0;
-      for (let d = 0; d < perDepth.length; d++) {
-        acc += perDepth[d];
-        if (acc > TREE_MAX_NODES && d > 0) break;
-        maxDepth = d;
-      }
+    // Deepest level that keeps the outline within TREE_MAX_NODES; the caller's depth (or, to orient, 2 levels on a
+    // big map) can only make it shallower.
+    let fit = 0;
+    for (let d = 0, acc = 0; d < perDepth.length; d++) {
+      acc += perDepth[d];
+      if (acc > TREE_MAX_NODES && d > 0) break;
+      fit = d;
     }
+    const wanted = open?.depth !== undefined ? open.depth - 1 : open?.orient && total > ORIENT_MIN_NODES ? 1 : Infinity;
+    const maxDepth = touched ? perDepth.length : Math.min(wanted, fit);
     let listed = 0;
     const hidden = (id: string): number => (children.get(id) ?? []).reduce((n, c) => n + 1 + hidden(c.id), 0);
     const walk = (parent: string | null, depth: number) => {
@@ -259,9 +261,9 @@ export class Reader {
     } else {
       walk(null, 0);
     }
-    if (listed < total) lines.push(`Showing ${listed} of ${total} nodes; (+n) = hidden below. kc_tree(node: "<title>") opens a branch, kc_read gives one node's text.`);
+    if (listed < total) lines.push(`Showing ${listed} of ${total} nodes; (+n) = hidden below. kc_tree(root: "<title>", depth) opens a branch, kc_read gives one node's text.`);
 
-    if (!compact) {
+    if (!compact && open?.relations) {
       const titleOf = new Map(visits.map((v) => [v.conceptId, v.title]));
       const rels = tree.relations.filter((r) => titleOf.has(r.from) && titleOf.has(r.to));
       if (rels.length) {

@@ -304,7 +304,9 @@ test('kc_tree has no ids unless titles repeat, lists relations; kc_read returns 
     },
   });
   await client.callTool({ name: 'kc_relate', arguments: { concept: 'Foglia albero', related_to: 'Altra albero', label: 'usa' } });
-  const tree = (await client.callTool({ name: 'kc_tree', arguments: {} })) as { content: { text: string }[] };
+  const plain = (await client.callTool({ name: 'kc_tree', arguments: {} })) as { content: { text: string }[] };
+  assert.doesNotMatch(plain.content[0].text, /Relations:/, 'dashed relations only on request');
+  const tree = (await client.callTool({ name: 'kc_tree', arguments: { relations: true } })) as { content: { text: string }[] };
   assert.doesNotMatch(tree.content[0].text, /\[[0-9a-f]{8}-.*\]\n|\n.*- .*\[[0-9a-f]{8}-/);
   assert.match(tree.content[0].text, /Relations:\n- Foglia albero → Altra albero \(usa\)$/);
   const read = (await client.callTool({ name: 'kc_read', arguments: { node: 'Radice albero' } })) as { content: { text: string }[] };
