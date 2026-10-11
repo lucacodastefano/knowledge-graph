@@ -86,8 +86,6 @@ export interface ConceptPage extends Concept {
 
 /** Canvas settings that change what the server exposes to the model. */
 export interface Settings {
-  /** D17: the model may write a `detail` field (costs output tokens). Applies at once, also to open chats. */
-  detail: boolean;
   /** D19: kc_start carries a compact profile of the user's graph and the model recalls known topics on its own. Default on. */
   memory: boolean;
 }

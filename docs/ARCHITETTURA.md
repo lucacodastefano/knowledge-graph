@@ -66,14 +66,14 @@ fts_concepts(name, summaries)                            -- FTS5 per ricerca e s
 revisions(target_kind, target_id, field, old_value, created_at)  -- valori precedenti a ogni modifica (D16), senza UI
 sources(id, url UNIQUE, domain, first_seen)  -- fonti citate, una per URL normalizzato (niente utm_*, #frammento, / finale)
 visit_sources(visit_id, source_id)  -- quali nodi citano quale fonte; una fonte che nessuno cita più viene cancellata
-settings(key, value)                                     -- impostazioni del canvas, es. detail (D17)
+settings(key, value)                                     -- impostazioni del canvas, es. memory (D19)
 ```
 
 - **Albero della conversazione** = `visits` con `parent_visit_id`.
 - **Collegamento tratteggiato** (D1) = due visite della stessa conversazione con lo stesso `concept_id`; sul nodo il badge "anche in" (D16).
 - **Approfondisci** = tutte le visite del concetto, ciascuna con il padre e i figli fino a 2 livelli come sezioni (D17).
 - **Grafo personale** = `concepts` + archi derivati dalle visite (genitore → figlio) + `concept_links`.
-- Il **testo di un nodo** (`summary`) non è un riassunto: sono le 1-3 frasi chiave della risposta, scritte dal modello in `kc_track` esattamente come le scrive poi nella risposta (lo chiedono istruzioni e descrizione del campo); `detail` sono i punti chiave della risposta, con le stesse parole. Il testo di un concetto è la lista dei testi delle sue visite, più recente prima. Nessun LLM lato server.
+- Il **testo di un nodo** è `summary` (1-2 frasi, l'etichetta) più `detail`: la parte della risposta su quel concetto, per intero e in markdown (D20; sempre disponibile, il modello la scrive in `kc_track`). Il testo di un concetto è la lista dei testi delle sue visite, più recente prima. Nessun LLM lato server.
 
 ## 5. Strumenti MCP (pochi e brevi, per il costo in token)
 
@@ -85,7 +85,7 @@ settings(key, value)                                     -- impostazioni del can
 | `kc_link(visit_id, concept_id)` | Conferma che una visita è un concetto già noto (unisce) | RF6 |
 | `kc_move(node, parent)` | Sposta un nodo (con i figli) sotto un altro nodo o alla radice, indicati per titolo o id; non unisce concetti | RF18 |
 | `sources` in `kc_track` | URL delle ricerche web o dei documenti su cui si basa il nodo, solo quando la risposta li usa: il campo costa token solo in quelle chiamate. Massimo 10 per nodo, URL non validi ignorati, deduplica per URL normalizzato. `kc_recall` restituisce fino a 3 fonti per concetto; la pagina del concetto (Approfondisci) le elenca tutte, e dal pannello si possono togliere | Fonti (analisi/07) |
-| (opzione) `detail` in `kc_track` | I 5-10 punti chiave della risposta, con le sue parole, quando approfondisce un nodo; esposto con la sua regola solo se l'impostazione del canvas "Dettaglio approfondito" è accesa (tabella `settings`). Vale subito: le istruzioni del server sono fisse per sessione (Claude Desktop, via bridge, ne apre una sola per tutta la vita dell'app), quindi al cambio ogni sessione aperta registra di nuovo `kc_track` (notifica `tools/list_changed`, inoltrata dal bridge) e il risultato del successivo `kc_start`/`kc_track` porta una riga con la regola o con "spento". Da spento nessun costo in token; un `detail` inviato da spento viene ignorato | D17 |
+| `detail` in `kc_track` | Il testo pieno della risposta su quel nodo, in markdown; sempre esposto (D20) | D20 |
 | `kc_rename(node, title)` | Rinomina un nodo; un titolo già usato da un altro concetto lo collega a quel concetto (D1) | D16 |
 | `kc_remove(node)` | Elimina un nodo; i figli salgono al suo padre | D16 |
 | `kc_recall(query)` | "Cosa sa già Luca di X?": concetti, testi, date | RF8 |

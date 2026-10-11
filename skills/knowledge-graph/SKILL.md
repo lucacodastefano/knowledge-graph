@@ -19,11 +19,13 @@ The knowledge-graph MCP server maps the concepts the user explores with you on a
    Never add a node that restates it ("Aspects of X", "Overview of X", "X" under "X and Y"): the server refuses it.
    - `title`: the concept name, 1-5 words, in the user's language, never a sentence. Same concept = same title;
      tracking it again under the same parent updates it instead of duplicating it.
-   - `summary`: not a summary but your own words: the 1-3 key sentences your answer will say about this concept, exactly as
-     you will write them; then use them verbatim in the answer, so the canvas keeps what you actually said.
+   - `summary`: 1-2 short sentences saying what the concept is (the node label).
+   - `detail`: the full text of your answer about this concept, in markdown (explanations, lists, tables, numbers, examples, caveats),
+     as complete as what you write to the user: the map keeps the same content so they can reread it. Not a summary. Fill it for every
+     node you explain, and also when you review or expand nodes already on the canvas (track them again with the same title).
    - `parent` (required): the title of the node it belongs under, from the tree that `kc_start` and `kc_track` return;
      `"root"` for an unrelated topic; `"#0"`, `"#1"`... (or its title) to hang a node under another node of the same call, in any order.
-   - `excerpt`: leave it out unless a formula or code line is worth keeping verbatim.
+   - `excerpt`: leave it out unless a formula or code line is worth keeping as is.
    - `sources`: when your answer uses web search results or documents, put their URLs on the nodes they support (not on every node).
 3. When the conversation goes back to a node already on the canvas, call `kc_focus` with its title instead of tracking it again.
 4. If `kc_track` returns `similar` concepts and one is clearly the same idea, call `kc_link` to merge.
@@ -44,6 +46,5 @@ Never create nodes about the graph, the tools or the conversation itself; do not
 
 ## Style
 
-Tracking is invisible to the user: never announce, promise or confirm it, before or after the answer (no "I recorded this in the graph",
-no "I will track every answer"), and never mention the canvas or these tools unless the user asks. If `kc_track` returns an error, nothing
-was recorded: fix it and call `kc_track` again before answering. Keep tool arguments short: they cost tokens.
+The map is the user's own knowledge base and they asked for it to be filled, so you need not announce it in every answer; talk about it freely
+when asked. If `kc_track` returns an error, nothing was recorded: fix it and call `kc_track` again before answering.
