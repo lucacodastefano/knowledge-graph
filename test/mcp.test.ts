@@ -27,13 +27,13 @@ test('exposes the tracking tools, the instructions prompt and server instruction
   assert.deepEqual(tools, ['kc_edit', 'kc_focus', 'kc_link', 'kc_move', 'kc_profile', 'kc_read', 'kc_recall', 'kc_relate', 'kc_remove', 'kc_rename', 'kc_start', 'kc_track', 'kc_tree']);
   assert.equal((await client.listPrompts()).prompts[0].name, 'kc_instructions');
   assert.match(client.getInstructions() ?? '', /kc_track/);
-  // Transparent wording: the map is explained to the model, nothing asks to hide it or to copy words verbatim.
+  // Transparent wording: the graph is explained to the model, nothing asks to hide it or to copy words verbatim.
   const instr = client.getInstructions() ?? '';
-  assert.match(instr, /personal knowledge map/);
+  assert.match(instr, /knowledge graph/);
   assert.match(instr, /detail: the full text of your answer/);
   assert.match(instr, /tables for comparisons, numbered lists for steps/);
   assert.match(instr, /no kc_focus needed/);
-  assert.match(instr, /"On the canvas" means this conversation's map/);
+  assert.match(instr, /"On the canvas" means this chat's graph/);
   assert.match(instr, /A parent's detail holds only what concerns the whole/);
   assert.doesNotMatch(instr, /thin: true/);
   assert.doesNotMatch(instr, /invisible|never mention|verbatim|word for word|exactly as you will write/i);
@@ -127,7 +127,7 @@ test('kc_track returns the tree and a reminder; parents and kc_move work by titl
   });
   const extra = (res.content as { text: string }[])[0].text;
   assert.match(extra, /^Tree:\n- Acqua giusta\n/);
-  assert.match(extra, /Saved in the map\. Write your answer now, once\./);
+  assert.match(extra, /Saved in the graph\. Write your answer now, once\./);
   assert.doesNotMatch(extra, /never mention|silently/i);
 
   const moved = await client.callTool({ name: 'kc_move', arguments: { node: 'Acqua giusta', parent: 'Annaffiatura' } });
@@ -240,12 +240,12 @@ test('memory (D19): kc_start carries a compact profile and the recall rule only 
 
   const on = await connect();
   const withMemory = await startText(on);
-  assert.match(withMemory, /User's graph \(\d+ concepts\)/);
+  assert.match(withMemory, /Global graph \(\d+ concepts\)/);
   assert.match(withMemory, /Areas: Architettura software \(1\)/);
   assert.match(withMemory, /Most explored: .*Event sourcing/);
-  assert.match(on.getInstructions() ?? '', /The user's graph is your memory/);
+  assert.match(on.getInstructions() ?? '', /The global graph is your memory/);
   assert.match(on.getInstructions() ?? '', /thin:true/);
-  const profileLines = withMemory.split('\n').filter((l) => /^(User's graph|Areas|Most explored|Recent)/.test(l));
+  const profileLines = withMemory.split('\n').filter((l) => /^(Global graph|Areas|Most explored|Recent)/.test(l));
   assert.ok(profileLines.length <= 4 && profileLines.join('\n').length < 700, 'the profile stays within its cap');
   // A concept with a sub-concept is not superficial; a lone one is.
   const recall = json(await on.callTool({ name: 'kc_recall', arguments: { query: 'Saga' } }));
@@ -255,7 +255,7 @@ test('memory (D19): kc_start carries a compact profile and the recall rule only 
   assert.deepEqual(await (await patch({ memory: false })).json(), { memory: false });
   const off = await connect();
   const without = await startText(off);
-  assert.ok(!/User's graph|Areas:/.test(without), 'no profile when off');
+  assert.ok(!/Global graph|Areas:/.test(without), 'no profile when off');
   assert.ok(!/is your memory|kc_relate\(concept, superclass\)/.test(off.getInstructions() ?? ''), 'no memory rule when off');
   console.log(
     `memory tokens (~chars/4): instructions on=${Math.round((on.getInstructions() ?? '').length / 4)} off=${Math.round((off.getInstructions() ?? '').length / 4)}; ` +
@@ -282,7 +282,7 @@ test('kc_track answers lean: touched branch, no ids, only what needs a decision'
     { title: 'Zorbio separato', summary: 's', parent: '#0' },
   ]);
   assert.doesNotMatch(first, /[0-9a-f]{8}-[0-9a-f]{4}|false|Similar|Known/);
-  assert.match(first, /Saved in the map/);
+  assert.match(first, /Saved in the graph/);
   // Only the branch touched comes back.
   const second = await track([{ title: 'Zorbio istantanea', summary: 's', parent: 'Zorbio registro' }]);
   assert.match(second, /^Tree:\n- Zorbio generale\n {2}- Zorbio registro\n {4}- Zorbio istantanea\n/);

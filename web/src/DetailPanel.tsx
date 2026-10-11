@@ -51,6 +51,15 @@ function collect(sections: ConceptSection[], into: Record<string, NodeDraft>) {
  * "Approfondisci" (D16, D17): every occurrence of a concept with its sub-concepts as sections.
  * The pencil makes the same texts editable in place; merge and delete live in the menu.
  */
+const EXPANDED_KEY = 'kg.panelExpanded';
+const readExpanded = () => {
+  try {
+    return localStorage.getItem(EXPANDED_KEY) === '1';
+  } catch {
+    return false;
+  }
+};
+
 export function DetailPanel({ conceptId, version, onClose, pinned = true, onPin, onPointer, onOpen }: Props) {
   const [page, setPage] = useState<ConceptPage | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -58,6 +67,16 @@ export function DetailPanel({ conceptId, version, onClose, pinned = true, onPin,
   const [draft, setDraft] = useState<Draft | null>(null);
   const [trees, setTrees] = useState<Record<string, Visit[]>>({});
   const [saving, setSaving] = useState(false);
+  const [expanded, setExpanded] = useState(readExpanded);
+  const toggleExpanded = () =>
+    setExpanded((e) => {
+      try {
+        localStorage.setItem(EXPANDED_KEY, e ? '0' : '1');
+      } catch {
+        /* private mode: the choice just isn't remembered */
+      }
+      return !e;
+    });
 
   useEffect(() => {
     api.concept(conceptId).then(setPage, (e: Error) => setError(e.message));
@@ -141,7 +160,7 @@ export function DetailPanel({ conceptId, version, onClose, pinned = true, onPin,
 
   return (
     <aside
-      className={`panel${draft ? ' editing' : ''}`}
+      className={`panel${draft ? ' editing' : ''}${expanded ? ' expanded' : ''}`}
       aria-label="Dettaglio concetto"
       onMouseEnter={() => onPointer?.(true)}
       onMouseLeave={() => onPointer?.(false)}
@@ -183,6 +202,16 @@ export function DetailPanel({ conceptId, version, onClose, pinned = true, onPin,
               </button>
             </>
           )}
+          <button
+            type="button"
+            className="ghost icon"
+            onClick={toggleExpanded}
+            aria-label={expanded ? 'Riduci il pannello' : 'Espandi il pannello'}
+            title={expanded ? 'Riduci il pannello' : 'Espandi a tutto lo spazio'}
+            aria-pressed={expanded}
+          >
+            {expanded ? '→' : '←'}
+          </button>
           <button type="button" className="ghost icon" onClick={onClose} aria-label="Chiudi">
             ✕
           </button>
@@ -244,7 +273,7 @@ export function DetailPanel({ conceptId, version, onClose, pinned = true, onPin,
       {menu === 'delete' && page && (
         <div className="edit-box">
           <p className="small">
-            Elimina «{page.name}» e i suoi {page.visits.length} nodi da tutte le conversazioni. I nodi figli salgono di un
+            Elimina «{page.name}» e i suoi {page.visits.length} nodi da tutti i grafi. I nodi figli salgono di un
             livello.
           </p>
           <button type="button" className="danger" onClick={() => void run(api.deleteConcept(conceptId), onClose)}>
@@ -427,7 +456,7 @@ function Occurrence({ visit: v, draft, tree, onChange, onDelete }: OccurrencePro
               value={d.parentVisitId ?? ''}
               onChange={(e) => onChange(v.id, { parentVisitId: e.target.value || null })}
             >
-              <option value="">radice della conversazione</option>
+              <option value="">radice del grafo</option>
               {parents.map(({ visit: p, depth }) => (
                 <option key={p.id} value={p.id}>
                   {'  '.repeat(depth)}

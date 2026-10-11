@@ -47,7 +47,7 @@ test('tree defaults to the latest conversation and reports unknown ids', () => {
   const { reader } = setup();
   assert.match(reader.tree(null, false), /^Event sourcing/);
   assert.throws(() => reader.tree('missing', false), TrackerError);
-  assert.equal(new Reader(new SqliteRepository(':memory:')).tree(null, false), 'No conversations yet.');
+  assert.equal(new Reader(new SqliteRepository(':memory:')).tree(null, false), 'No graphs yet.');
 });
 
 test('profile lists top and recent concepts and non-empty conversations', () => {

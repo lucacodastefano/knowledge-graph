@@ -162,8 +162,8 @@ test('colour by community or conversation with a legend, and filters by conversa
   assert.notEqual(await probe(page, (k) => k.position('Vulcani')), null);
   assert.equal(await probe(page, (k) => k.position('Origami')), null);
   await page.getByLabel('Solo concetti con fonti').uncheck();
-  const value = await page.locator('select[aria-label="Filtra conversazione"] option', { hasText: 'Piante da appartamento' }).getAttribute('value');
-  await page.getByLabel('Filtra conversazione').selectOption(value!);
+  const value = await page.locator('select[aria-label="Filtra grafo"] option', { hasText: 'Piante da appartamento' }).getAttribute('value');
+  await page.getByLabel('Filtra grafo').selectOption(value!);
   await page.getByText(`56 di ${total} concetti`).waitFor();
   await page.waitForTimeout(500);
   assert.equal(await level(page), 'detail', 'one conversation fits on screen with its labels');
@@ -174,7 +174,7 @@ test('colour by community or conversation with a legend, and filters by conversa
   await page.reload();
   await counter.waitFor();
   assert.equal(await page.getByLabel('Colora per').inputValue(), 'conversation');
-  assert.equal(await page.getByLabel('Filtra conversazione').inputValue(), '');
+  assert.equal(await page.getByLabel('Filtra grafo').inputValue(), '');
 });
 
 test('a superclass gathers topics of different conversations into one named area (D18)', async () => {

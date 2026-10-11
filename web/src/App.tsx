@@ -107,8 +107,8 @@ export function App() {
           }}
         />
         <nav role="tablist" className="tabs">
-          {tab('conversation', 'Conversazione', '#conversazione')}
-          {tab('personal', 'Grafo personale', '#personale')}
+          {tab('conversation', 'Grafo', '#conversazione')}
+          {tab('personal', 'Grafo globale', '#personale')}
           {tab('metrics', 'Metriche', '#metriche')}
         </nav>
         <ModelSettings />

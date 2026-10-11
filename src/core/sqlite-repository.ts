@@ -618,7 +618,6 @@ export class SqliteRepository implements Repository {
   }
 
   graphSnapshot(): GraphSnapshot {
-    const strings = (sql: string) => this.db.prepare(sql).all().map((r) => r.t as string);
     return {
       conversations: this.db.prepare('SELECT id, started_at FROM conversations').all().map((r) => ({ id: r.id as string, at: r.started_at as string })),
       concepts: this.db
@@ -646,7 +645,6 @@ export class SqliteRepository implements Repository {
           hasDetail: r.has_detail === 1,
           sourceCount: Number(r.sources),
         })),
-      relationTimes: strings(`SELECT COALESCE(created_at, '') AS t FROM concept_links`),
     };
   }
 

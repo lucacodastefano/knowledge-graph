@@ -71,7 +71,7 @@ export interface NodeEdit extends DetailEdit {
 }
 
 const SIMILAR_LIMIT = 3;
-const DEFAULT_TITLE = 'Conversazione';
+const DEFAULT_TITLE = 'Grafo';
 
 /**
  * Processing order of a kc_track batch: each node comes after the batch node it hangs under ("#n", or the title
@@ -137,7 +137,7 @@ export class Tracker {
   }
 
   startConversation(title: string | undefined, client: string | null): Conversation {
-    const conversation = this.repo.createConversation({ title: title?.trim() || 'Conversazione', client });
+    const conversation = this.repo.createConversation({ title: title?.trim() || 'Grafo', client });
     this.emit({ type: 'conversation.created', conversation });
     return conversation;
   }
@@ -160,19 +160,19 @@ export class Tracker {
       all.find((c) => c.id === r) ??
       all.find((c) => normalizeName(c.title) === normalizeName(r)) ??
       all.find((c) => sharesEnough(r, c.title));
-    if (!found) throw new TrackerError(`No map matches "${r}"`);
+    if (!found) throw new TrackerError(`No graph matches "${r}"`);
     return found;
   }
 
   requireConversation(id: string): Conversation {
     const c = this.repo.getConversation(id);
-    if (!c) throw new TrackerError(`Conversation ${id} not found`);
+    if (!c) throw new TrackerError(`Graph ${id} not found`);
     return c;
   }
 
   private requireVisitIn(conversationId: string, visitId: string): Visit {
     const v = this.repo.getVisit(visitId);
-    if (!v || v.conversationId !== conversationId) throw new TrackerError(`Node ${visitId} not found in this conversation`);
+    if (!v || v.conversationId !== conversationId) throw new TrackerError(`Node ${visitId} not found in this graph`);
     return v;
   }
 
@@ -305,7 +305,7 @@ export class Tracker {
       (v) => normalizeName(v.title) === norm || normalizeName(this.repo.getConcept(v.conceptId)?.name ?? '') === norm,
     );
     if (byTitle) return byTitle;
-    throw new TrackerError(`Node "${ref}" not found in this conversation: use a title from the tree, "root" or "#n"`);
+    throw new TrackerError(`Node "${ref}" not found in this graph: use a title from the tree, "root" or "#n"`);
   }
 
   /** Partial edit of a node (kc_edit): text replaced or appended, summary, sources; the rest stays as it is. */

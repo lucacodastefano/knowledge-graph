@@ -12,23 +12,16 @@ export interface MetricsQuery {
 }
 
 const PERIOD_MS: Record<Exclude<Period, 'all'>, number> = { '24h': 86_400_000, '7d': 7 * 86_400_000, '30d': 30 * 86_400_000 };
-/** Past this many days of data the charts group by day instead of by hour. */
-const HOURLY_MAX_MS = 2 * 86_400_000;
 const MAX_DUPLICATES = 10;
 /** Pairwise title comparison is quadratic: above this many concepts only identical word sets count as duplicates. */
 const PAIRWISE_MAX = 400;
 
 export interface Metrics {
-  /** First moment shown (null = everything) and the bucket size of the time series. */
+  /** First moment shown (null = everything). */
   from: string | null;
-  bucket: 'hour' | 'day';
-  tokens: {
-    series: { t: string; written: number; read: number; cumWritten: number; cumRead: number }[];
-    written: number;
-    read: number;
-    calls: number;
-  };
-  growth: { t: string; maps: number; concepts: number; nodes: number; relations: number | null }[];
+  tokens: { written: number; read: number; calls: number };
+  /** One point per call, in time order: nodes in the graph (or chosen map) right after it, tokens spent so far, tokens per node it created. */
+  size: { nodes: number; cumTokens: number; perNode: number | null }[];
   tools: { tool: string; calls: number; written: number; read: number; errors: number; avgMs: number; maxMs: number }[];
   efficiency: {
     nodesCreated: number;
@@ -46,23 +39,12 @@ export interface Metrics {
     concepts: number;
     withoutSuperclass: number;
     duplicates: [string, string][];
-    /** Index = depth (1 = top of a map), value = how many nodes. */
+    /** Index = depth - 1 (0 = top of a map), value = how many nodes. */
     depth: number[];
+    /** Deepest level and children per node that has children. */
+    maxDepth: number;
+    avgChildren: number | null;
   };
-}
-
-const bucketKey = (iso: string, bucket: 'hour' | 'day') => (bucket === 'hour' ? `${iso.slice(0, 13)}:00:00.000Z` : iso.slice(0, 10));
-const step = (key: string, bucket: 'hour' | 'day') => {
-  const d = new Date(bucket === 'hour' ? key : `${key}T00:00:00.000Z`);
-  d.setTime(d.getTime() + (bucket === 'hour' ? 3_600_000 : 86_400_000));
-  return bucketKey(d.toISOString(), bucket);
-};
-
-/** Every bucket from the first to the last key, so quiet periods show as flat stretches. */
-function range(first: string, last: string, bucket: 'hour' | 'day'): string[] {
-  const out = [first];
-  while (out[out.length - 1] < last && out.length < 2000) out.push(step(out[out.length - 1], bucket));
-  return out;
 }
 
 export function periodStart(period: Period, now = Date.now()): string | null {
@@ -76,57 +58,17 @@ export function buildMetrics(calls: ToolCall[], graph: GraphSnapshot, query: Met
   const inScope = (c: ToolCall) => (!from || c.at >= from) && (!conv || c.conversationId === conv);
   const scoped = calls.filter(inScope);
 
-  const first = [scoped[0]?.at, ...graph.visits.filter((v) => !conv || v.conversationId === conv).map((v) => v.at)]
-    .filter((t): t is string => !!t && (!from || t >= from))
-    .sort()[0];
-  const spanMs = period === 'all' ? now - Date.parse(first ?? new Date(now).toISOString()) : PERIOD_MS[period];
-  const bucket = spanMs <= HOURLY_MAX_MS ? 'hour' : 'day';
-  const nowKey = bucketKey(new Date(now).toISOString(), bucket);
-
-  // --- tokens over time ---
-  const perBucket = new Map<string, { written: number; read: number }>();
-  for (const c of scoped) {
-    const k = bucketKey(c.at, bucket);
-    const b = perBucket.get(k) ?? { written: 0, read: 0 };
-    b.written += tokens(c.argChars);
-    b.read += tokens(c.resultChars);
-    perBucket.set(k, b);
-  }
-  const keys = perBucket.size ? range([...perBucket.keys()].sort()[0], nowKey, bucket) : [];
-  let cw = 0;
-  let cr = 0;
-  const series = keys.map((t) => {
-    const b = perBucket.get(t) ?? { written: 0, read: 0 };
-    cw += b.written;
-    cr += b.read;
-    return { t, ...b, cumWritten: cw, cumRead: cr };
-  });
-
-  // --- growth (cumulative; what existed before the period is the starting level) ---
+  // --- graph size against tokens, call by call ---
   const visits = graph.visits.filter((v) => !conv || v.conversationId === conv);
-  const firstOfConcept = new Map<string, string>();
-  for (const v of visits) if (!firstOfConcept.has(v.conceptId) || v.at < firstOfConcept.get(v.conceptId)!) firstOfConcept.set(v.conceptId, v.at);
-  const events = {
-    maps: conv ? [] : graph.conversations.map((c) => c.at),
-    concepts: conv ? [...firstOfConcept.values()] : graph.concepts.map((c) => c.at),
-    nodes: visits.map((v) => v.at),
-    relations: graph.relationTimes,
-  };
-  const gKeys = new Set<string>();
-  for (const times of Object.values(events)) for (const t of times) if (t && (!from || t >= from)) gKeys.add(bucketKey(t, bucket));
-  const growthKeys = gKeys.size ? range([...gKeys].sort()[0], nowKey, bucket) : [];
-  const level = (times: string[], key: string) => {
-    const end = step(key, bucket);
-    const upTo = bucket === 'hour' ? end : `${end}T00:00:00.000Z`;
-    return times.filter((t) => t !== '' && t < upTo).length;
-  };
-  const growth = growthKeys.map((t) => ({
-    t,
-    maps: level(events.maps, t),
-    concepts: level(events.concepts, t),
-    nodes: level(events.nodes, t),
-    relations: conv ? null : level(events.relations, t),
-  }));
+  const visitTimes = visits.map((v) => v.at).sort();
+  let upTo = 0;
+  let cum = 0;
+  const size = scoped.map((c) => {
+    while (upTo < visitTimes.length && visitTimes[upTo] <= c.at) upTo++;
+    const spent = tokens(c.argChars) + tokens(c.resultChars);
+    cum += spent;
+    return { nodes: upTo, cumTokens: cum, perNode: c.nodesCreated > 0 ? Math.round(spent / c.nodesCreated) : null };
+  });
 
   // --- per tool ---
   const byTool = new Map<string, ToolCall[]>();
@@ -168,10 +110,12 @@ export function buildMetrics(calls: ToolCall[], graph: GraphSnapshot, query: Met
     return d;
   };
   const depth: number[] = [0];
+  const children = new Map<string, number>();
   for (const v of visits) {
     const d = depthOf(v.id);
     while (depth.length <= d) depth.push(0);
     depth[d]++;
+    if (v.parentVisitId && byId.has(v.parentVisitId)) children.set(v.parentVisitId, (children.get(v.parentVisitId) ?? 0) + 1);
   }
   const conceptIds = new Set(visits.map((v) => v.conceptId));
   const concepts = graph.concepts.filter((c) => !conv || conceptIds.has(c.id));
@@ -192,9 +136,8 @@ export function buildMetrics(calls: ToolCall[], graph: GraphSnapshot, query: Met
 
   return {
     from,
-    bucket,
-    tokens: { series, written: sum(series.map((s) => s.written)), read: sum(series.map((s) => s.read)), calls: scoped.length },
-    growth,
+    tokens: { written: tokens(sum(scoped.map((c) => c.argChars))), read: tokens(sum(scoped.map((c) => c.resultChars))), calls: scoped.length },
+    size,
     tools,
     efficiency,
     memory: { recall: mem('kc_recall'), read: mem('kc_read') },
@@ -206,6 +149,8 @@ export function buildMetrics(calls: ToolCall[], graph: GraphSnapshot, query: Met
       withoutSuperclass: concepts.filter((c) => !c.hasSuperclass).length,
       duplicates,
       depth: depth.slice(1),
+      maxDepth: depth.length - 1,
+      avgChildren: children.size ? Math.round((sum([...children.values()]) / children.size) * 10) / 10 : null,
     },
   };
 }

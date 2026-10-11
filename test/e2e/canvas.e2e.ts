@@ -104,6 +104,19 @@ test('the canvas starts blank and grows live while the model tracks concepts', a
   assert.equal(await page.locator('[data-testid=visit] .source-badge').count(), 1, 'one node cites a source');
   assert.equal(await panel.getByRole('region', { name: 'Fonti' }).getByRole('link', { name: 'kafka.apache.org/documentation' }).count(), 1);
   await page.screenshot({ path: join(out, '5-approfondisci.png') });
+
+  // The arrow widens the panel over the whole canvas; the choice survives a reload, and Esc/close work as before.
+  const vw = page.viewportSize()!.width;
+  assert.ok(((await panel.boundingBox())!.width) < vw / 2, 'normal width');
+  await panel.getByRole('button', { name: 'Espandi il pannello' }).click();
+  assert.ok(((await panel.boundingBox())!.width) > vw * 0.95, 'expanded over the canvas');
+  await page.screenshot({ path: join(out, '5b-approfondisci-espanso.png') });
+  await page.reload();
+  await titled(page, /^Partizioni$/).first().dblclick();
+  await panel.waitFor();
+  assert.ok(((await panel.boundingBox())!.width) > vw * 0.95, 'remembered after reload');
+  await panel.getByRole('button', { name: 'Riduci il pannello' }).click();
+  assert.ok(((await panel.boundingBox())!.width) < vw / 2, 'back to normal');
 });
 
 test('the personal graph shows every concept, previews it on hover and grows live', async () => {
@@ -144,8 +157,8 @@ test('search finds a concept and the canvas corrects nodes and concepts (RF17, D
     };
   };
   await page.goto(base);
-  const value = await page.locator('select[aria-label=Conversazione] option', { hasText: 'Kafka e architetture' }).getAttribute('value');
-  await page.selectOption('select[aria-label=Conversazione]', value!);
+  const value = await page.locator('select[aria-label=Grafo] option', { hasText: 'Kafka e architetture' }).getAttribute('value');
+  await page.selectOption('select[aria-label=Grafo]', value!);
   const visits = page.locator('[data-testid=visit]');
   await visits.nth(11).waitFor();
 
@@ -229,8 +242,8 @@ test('search finds a concept and the canvas corrects nodes and concepts (RF17, D
 test('three layouts, radial by default, no overlapping nodes, and the choice is remembered (WP7)', async () => {
   const page = await browser.newPage({ viewport: { width: 1400, height: 820 } });
   await page.goto(base);
-  const value = await page.locator('select[aria-label=Conversazione] option', { hasText: 'Kafka e architetture' }).getAttribute('value');
-  await page.selectOption('select[aria-label=Conversazione]', value!);
+  const value = await page.locator('select[aria-label=Grafo] option', { hasText: 'Kafka e architetture' }).getAttribute('value');
+  await page.selectOption('select[aria-label=Grafo]', value!);
   const select = page.getByLabel('Layout');
   assert.equal(await select.inputValue(), 'radial');
   const visits = page.locator('[data-testid=visit]');
@@ -896,7 +909,7 @@ test('search finds words inside the text of another map and opens the node in th
   assert.match(await hit.innerText(), /uvetta di zibibbo/);
   await hit.click();
   // The view moves to the conversation view, on the map that holds the node, with the node selected.
-  await page.waitForFunction((id) => (document.querySelector('select[aria-label=Conversazione]') as HTMLSelectElement | null)?.value === id, a.id);
+  await page.waitForFunction((id) => (document.querySelector('select[aria-label=Grafo]') as HTMLSelectElement | null)?.value === id, a.id);
   await titled(page, 'Passito').waitFor();
   assert.equal(await titled(page, 'Carbonara').count(), 0, 'the other map is not shown');
   await page.locator('.visit.match', { hasText: 'Passito' }).waitFor();

@@ -76,7 +76,7 @@ test('kc_start resumes a map with the same title, by id or title, and offers sim
   // Same title (case and article folded): resumed, no new map.
   const again = await connect();
   const resumed = await call(again, 'kc_start', { title: 'architettura Event Driven' });
-  assert.match(resumed.text, /Resumed the existing map "Architettura event driven"/);
+  assert.match(resumed.text, /Resumed the existing graph "Architettura event driven"/);
   assert.match(resumed.text, /- Evento/);
   assert.equal(tracker.repo.listConversations().length, before);
   await call(again, 'kc_track', { nodes: [{ title: 'Broker', summary: 'Smista.', parent: 'Evento' }] });
@@ -85,7 +85,7 @@ test('kc_start resumes a map with the same title, by id or title, and offers sim
   // Similar title: offered, nothing created yet; resume by title continues the right map.
   const similar = await connect();
   const offer = await call(similar, 'kc_start', { title: 'Event driven e Kafka' });
-  assert.match(offer.text, /Similar maps: "Architettura event driven" \[[0-9a-f-]+\].*2 nodes/);
+  assert.match(offer.text, /Similar graphs: "Architettura event driven" \[[0-9a-f-]+\].*2 nodes/);
   assert.equal(tracker.repo.listConversations().length, before, 'no empty map is left while the model decides');
   assert.match((await call(similar, 'kc_start', { resume: 'event driven' })).text, /- Broker/);
   await call(similar, 'kc_track', { nodes: [{ title: 'Kafka', summary: 'Log.', parent: 'Broker' }] });

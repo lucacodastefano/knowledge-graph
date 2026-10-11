@@ -88,7 +88,7 @@ export function ConceptSearch({ label, placeholder, onPick, onPickHit, exclude, 
               <span className="muted small">×{c.visitCount}</span>
             </li>
           ))}
-          {textHits.length > 0 && <li className="muted small results-head">Nel testo delle mappe</li>}
+          {textHits.length > 0 && <li className="muted small results-head">Nel testo dei grafi</li>}
           {textHits.map((h) => (
             <li key={h.visitId} className="hit" role="option" aria-selected={false} onMouseDown={(e) => e.preventDefault()} onClick={() => pickHit(h)}>
               <span className="hit-title">
