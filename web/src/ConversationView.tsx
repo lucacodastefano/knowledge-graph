@@ -103,10 +103,29 @@ interface Step {
   redo: () => Promise<unknown>;
 }
 
+/** The grey dashed edge previewing where a dragged node would attach. */
+function previewEdge(drop: { drag: string; target: string }, nodes: VisitNodeType[]): Edge<EdgeData> {
+  const x = (id: string) => nodes.find((n) => n.id === id)?.position.x ?? 0;
+  const targetOnLeft = x(drop.target) <= x(drop.drag);
+  return {
+    id: 'preview',
+    source: drop.target,
+    target: drop.drag,
+    sourceHandle: targetOnLeft ? 's-right' : 's-left',
+    targetHandle: targetOnLeft ? 't-left' : 't-right',
+    type: 'straight',
+    className: 'preview',
+    selectable: false,
+    focusable: false,
+  };
+}
+
 const nodeTypes = { visit: VisitNode };
 const edgeTypes = { cross: CrossEdge, relation: RelationEdge, tree: TreeEdge };
 const FRESH_MS = 1600;
 /** WP6: the tooltip opens after a short dwell and closes at once, with a grace period to reach its button. */
+/** How close (screen px between edges) a dragged node must get to another one to preview attaching to it. */
+const DROP_RADIUS = 120;
 const OPEN_DELAY_MS = 700;
 const CLOSE_GRACE_MS = 150;
 const AUTO = '';
@@ -220,19 +239,51 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
     },
     [fail],
   );
-  // Dropping a node on another one moves it (with its children) under that node; elsewhere it snaps back.
+  // While a node is dragged, the nearest node within DROP_RADIUS (screen px between their edges) is the attach target:
+  // it is highlighted and a grey dashed preview edge joins it to the dragged node. Releasing attaches the dragged node
+  // (with its subtree) there; out of range it just stays where it was dropped. A node and its descendants never qualify.
+  const [drop, setDrop] = useState<{ drag: string; target: string } | null>(null);
+  const dropRef = useRef<{ drag: string; target: string } | null>(null);
+  const setDropBoth = useCallback((d: { drag: string; target: string } | null) => {
+    dropRef.current = d;
+    setDrop((prev) => (prev?.drag === d?.drag && prev?.target === d?.target ? prev : d));
+  }, []);
+  const onDrag = useCallback(
+    (_: unknown, node: VisitNodeType) => {
+      if (!tree) return;
+      const banned = new Set([node.id]);
+      for (let grew = true; grew; ) {
+        grew = false;
+        for (const v of tree.visits) if (v.parentVisitId && banned.has(v.parentVisitId) && !banned.has(v.id)) banned.add(v.id), (grew = true);
+      }
+      const zoom = flow.getZoom();
+      const box = (n: VisitNodeType) => ({ x: n.position.x, y: n.position.y, w: n.measured?.width ?? 190, h: n.measured?.height ?? 46 });
+      const me = box(node);
+      let best: { id: string; gap: number } | null = null;
+      for (const other of flow.getNodes() as VisitNodeType[]) {
+        if (banned.has(other.id)) continue;
+        const o = box(other);
+        const gx = Math.max(0, Math.max(o.x - (me.x + me.w), me.x - (o.x + o.w)));
+        const gy = Math.max(0, Math.max(o.y - (me.y + me.h), me.y - (o.y + o.h)));
+        const gap = Math.hypot(gx, gy) * zoom;
+        if (gap <= DROP_RADIUS && (!best || gap < best.gap)) best = { id: other.id, gap };
+      }
+      setDropBoth(best ? { drag: node.id, target: best.id } : null);
+    },
+    [tree, flow, setDropBoth],
+  );
   const onDragStop = useCallback(
     (_: unknown, node: VisitNodeType) => {
-      const target = flow.getIntersectingNodes(node).find((n) => n.id !== node.id);
+      const d = dropRef.current;
+      setDropBoth(null);
       const old = node.data.visit.parentVisitId;
-      if (!target || target.id === old) return relayout();
+      if (!d || d.drag !== node.id || d.target === old) return;
       act({
-        redo: () => api.editVisit(node.id, { parentVisitId: target.id }),
+        redo: () => api.editVisit(node.id, { parentVisitId: d.target }),
         undo: () => api.editVisit(node.id, { parentVisitId: old }),
       });
-      relayout();
     },
-    [flow, relayout, act],
+    [act, setDropBoth],
   );
   // Pulling a line from one node to another relates their concepts (a different idea, unlike "Unisci a…").
   const onConnect = useCallback(
@@ -447,14 +498,14 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
     () =>
       nodes.map((n) => {
         const match = n.data.visit.conceptId === matchConcept;
-        const focus = n.id === focusId;
+        const focus = n.id === focusId || n.id === drop?.target;
         const related = !focus && !!near?.nodes.has(n.id);
         const dim = !!near && !focus && !related;
         return fresh.has(n.id) || hovered === n.id || match || near
           ? { ...n, data: { ...n.data, fresh: fresh.has(n.id), hovered: hovered === n.id, match, focus, related, dim } }
           : n;
       }),
-    [nodes, fresh, hovered, matchConcept, near, focusId],
+    [nodes, fresh, hovered, matchConcept, near, focusId, drop],
   );
   const base = edges;
   const shownEdges = useMemo(() => {
@@ -465,13 +516,14 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
           ? { ...e, type: 'tree', data: { shape: e.type, armed: e.id === armed, onRemove: () => removeRelation(e.id) } as EdgeData }
           : e,
     );
-    if (!near) return edges;
+    const previewed = drop ? [...edges, previewEdge(drop, nodes)] : edges;
+    if (!near || drop) return previewed;
     const mark = (e: Edge<EdgeData>, cls: string) => ({ ...e, className: [e.className, cls].filter(Boolean).join(' ') });
     return [
       ...edges.filter((e) => !near.edges.has(e.id)).map((e) => mark(e, 'dim')),
       ...edges.filter((e) => near.edges.has(e.id)).map((e) => mark(e, 'related')),
     ];
-  }, [base, near, armed, removeRelation, labelRelation]);
+  }, [base, near, armed, removeRelation, labelRelation, drop, nodes]);
 
   return (
     <>
@@ -526,6 +578,7 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
           nodesDraggable
           nodesConnectable
           connectionMode={ConnectionMode.Loose}
+          onNodeDrag={onDrag}
           onNodeDragStop={onDragStop}
           onConnect={onConnect}
           onEdgeClick={onEdgeClick}
