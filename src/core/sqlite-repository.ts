@@ -619,7 +619,7 @@ export class SqliteRepository implements Repository {
 
   graphSnapshot(): GraphSnapshot {
     return {
-      conversations: this.db.prepare('SELECT id, started_at FROM conversations').all().map((r) => ({ id: r.id as string, at: r.started_at as string })),
+      conversations: this.db.prepare('SELECT id, title, started_at FROM conversations').all().map((r) => ({ id: r.id as string, title: r.title as string, at: r.started_at as string })),
       concepts: this.db
         .prepare(
           `SELECT c.id, c.name, c.created_at,
@@ -630,7 +630,7 @@ export class SqliteRepository implements Repository {
         .map((r) => ({ id: r.id as string, name: r.name as string, at: r.created_at as string, hasSuperclass: r.has_super === 1 })),
       visits: this.db
         .prepare(
-          `SELECT v.id, v.conversation_id, v.concept_id, v.parent_visit_id, v.created_at,
+          `SELECT v.id, v.conversation_id, v.concept_id, v.parent_visit_id, v.title, v.created_at,
              (v.detail IS NOT NULL AND trim(v.detail) <> '') AS has_detail,
              (SELECT COUNT(*) FROM visit_sources vs WHERE vs.visit_id = v.id) AS sources
            FROM visits v`,
@@ -641,6 +641,7 @@ export class SqliteRepository implements Repository {
           conversationId: r.conversation_id as string,
           conceptId: r.concept_id as string,
           parentVisitId: (r.parent_visit_id as string | null) ?? null,
+          title: r.title as string,
           at: r.created_at as string,
           hasDetail: r.has_detail === 1,
           sourceCount: Number(r.sources),

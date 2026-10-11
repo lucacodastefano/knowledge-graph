@@ -44,6 +44,9 @@ export interface Metrics {
     /** Deepest level and children per node that has children. */
     maxDepth: number;
     avgChildren: number | null;
+    /** The trees behind the sunburst: every node with its parent, and the graphs that hold them. */
+    graphs: { id: string; title: string }[];
+    tree: { id: string; parent: string | null; graph: string; title: string }[];
   };
 }
 
@@ -150,6 +153,8 @@ export function buildMetrics(calls: ToolCall[], graph: GraphSnapshot, query: Met
       duplicates,
       depth: depth.slice(1),
       maxDepth: depth.length - 1,
+      graphs: graph.conversations.filter((c) => !conv || c.id === conv).map((c) => ({ id: c.id, title: c.title })),
+      tree: visits.map((v) => ({ id: v.id, parent: v.parentVisitId && byId.has(v.parentVisitId) ? v.parentVisitId : null, graph: v.conversationId, title: v.title })),
       avgChildren: children.size ? Math.round((sum([...children.values()]) / children.size) * 10) / 10 : null,
     },
   };

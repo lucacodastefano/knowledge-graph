@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { api, type Conversation, type Metrics, type Period } from './api.ts';
 import type { LiveEvent } from './App.tsx';
 
@@ -38,6 +38,111 @@ function XYChart({ points, line, xName, yName, testId }: { points: { x: number; 
         )}
       </svg>
       <div className="chart-legend"><span>x: {xName}</span><span>y: {yName}</span></div>
+    </div>
+  );
+}
+
+
+interface SunNode {
+  id: string;
+  name: string;
+  children: SunNode[];
+  /** Nodes below this one, itself excluded. */
+  below: number;
+  depth: number;
+  parent: SunNode | null;
+  branch: number;
+}
+
+/** Root = the chosen graph, or "all graphs" with one sector per graph; then the node trees. */
+function buildSun(q: Metrics['quality'], multi: boolean): SunNode {
+  const make = (id: string, name: string, parent: SunNode | null, branch: number): SunNode => ({ id, name, children: [], below: 0, depth: parent ? parent.depth + 1 : 0, parent, branch });
+  const kids = new Map<string, typeof q.tree>();
+  for (const n of q.tree) kids.set(n.parent ?? `g:${n.graph}`, [...(kids.get(n.parent ?? `g:${n.graph}`) ?? []), n]);
+  const grow = (node: SunNode, key: string, branchOf: (i: number) => number) => {
+    (kids.get(key) ?? []).forEach((k, i) => {
+      const c = make(k.id, k.title, node, branchOf(i));
+      node.children.push(c);
+      grow(c, k.id, () => c.branch);
+    });
+    node.below = node.children.reduce((a, c) => a + 1 + c.below, 0);
+  };
+  if (multi) {
+    const root = make('root', 'Tutti i grafi', null, 0);
+    q.graphs.forEach((g, i) => {
+      const gn = make(`g:${g.id}`, g.title, root, i);
+      root.children.push(gn);
+      grow(gn, `g:${g.id}`, () => i);
+    });
+    root.below = root.children.reduce((a, c) => a + 1 + c.below, 0);
+    return root;
+  }
+  const g = q.graphs[0];
+  const root = make('root', g?.title ?? 'Grafo', null, 0);
+  grow(root, `g:${g?.id}`, (i) => i);
+  return root;
+}
+
+const RINGS = 6;
+const SUN = 300;
+
+/** Dependency-free sunburst: ring = depth, arc width = size of the subtree, colour = first-level branch. Click an arc to zoom in, the centre to go up. */
+function Sunburst({ quality, multi }: { quality: Metrics['quality']; multi: boolean }) {
+  const root = useMemo(() => buildSun(quality, multi), [quality, multi]);
+  const [focusId, setFocusId] = useState('root');
+  const [hover, setHover] = useState<SunNode | null>(null);
+  const index = useMemo(() => {
+    const m = new Map<string, SunNode>();
+    const walk = (n: SunNode) => (m.set(n.id, n), n.children.forEach(walk));
+    walk(root);
+    return m;
+  }, [root]);
+  const focus = index.get(focusId) ?? root;
+  if (root.below === 0) return <p className="m-empty">Ancora nessun nodo.</p>;
+  const r = (SUN / 2 - 4) / (RINGS + 1);
+  const arcs: { n: SunNode; a0: number; a1: number; ring: number }[] = [];
+  const lay = (n: SunNode, a0: number, a1: number, ring: number) => {
+    let a = a0;
+    for (const c of n.children) {
+      const share = ((1 + c.below) / Math.max(1, n.below)) * (a1 - a0);
+      if (ring <= RINGS && share > 0.012) {
+        arcs.push({ n: c, a0: a, a1: a + share, ring });
+        lay(c, a, a + share, ring + 1);
+      }
+      a += share;
+    }
+  };
+  lay(focus, 0, Math.PI * 2, 1);
+  const pt = (rad: number, a: number) => [Math.sin(a) * rad, -Math.cos(a) * rad];
+  const path = ({ a0, a1, ring }: { a0: number; a1: number; ring: number }) => {
+    const [r0, r1] = [ring * r, (ring + 1) * r - 1];
+    const full = a1 - a0 > Math.PI * 2 - 0.001 ? a1 - 0.001 : a1;
+    const [x0, y0] = pt(r1, a0), [x1, y1] = pt(r1, full), [x2, y2] = pt(r0, full), [x3, y3] = pt(r0, a0);
+    const big = full - a0 > Math.PI ? 1 : 0;
+    return `M${x0},${y0}A${r1},${r1} 0 ${big} 1 ${x1},${y1}L${x2},${y2}A${r0},${r0} 0 ${big} 0 ${x3},${y3}Z`;
+  };
+  const shown = hover ?? focus;
+  return (
+    <div className="sunburst" data-testid="chart-depth">
+      <svg viewBox={`${-SUN / 2} ${-SUN / 2} ${SUN} ${SUN}`} role="img" aria-label="Albero dei nodi">
+        {arcs.map(({ n, a0, a1, ring }) => (
+          <path
+            key={n.id}
+            d={path({ a0, a1, ring })}
+            fill={`hsl(${(n.branch * 47) % 360} 55% ${62 - ring * 4}%)`}
+            className="arc"
+            data-arc={n.name}
+            onMouseEnter={() => setHover(n)}
+            onMouseLeave={() => setHover(null)}
+            onClick={() => n.children.length && setFocusId(n.id)}
+          >
+            <title>{`${n.name} · ${n.below} sotto`}</title>
+          </path>
+        ))}
+        <circle r={r - 1} className="sun-centre" onClick={() => focus.parent && setFocusId(focus.parent.id)} style={{ cursor: focus.parent ? 'pointer' : 'default' }} />
+        <text className="sun-label" textAnchor="middle" y={-4}>{shown.name.length > 18 ? `${shown.name.slice(0, 17)}…` : shown.name}</text>
+        <text className="sun-sub" textAnchor="middle" y={10}>{shown.below} sotto{focus.parent && !hover ? ' · ↩' : ''}</text>
+      </svg>
     </div>
   );
 }
@@ -173,9 +278,9 @@ export function MetricsView({ live }: { live: LiveEvent | null }) {
                   )}
                 </div>
                 <div>
-                  <h4>Nodi per livello</h4>
-                  <p className="caption">Quanti nodi stanno a ciascun livello dell’albero: barre lunghe ai primi livelli indicano un grafo largo e poco approfondito.</p>
-                  <Bars testId="chart-depth" rows={m.quality.depth.map((n, i) => ({ name: `Livello ${i + 1}`, value: n }))} />
+                  <h4>Forma dell’albero</h4>
+                  <p className="caption">Al centro la radice, un anello per livello, un arco per nodo grande quanto i suoi discendenti, colorato per ramo. Clic su un arco per entrare, sul centro per risalire: mostra profondità, equilibrio e ramificazione insieme.</p>
+                  <Sunburst key={conversation} quality={m.quality} multi={!conversation} />
                   <div className="stats small">
                     <Stat value={String(m.quality.maxDepth)} name="profondità massima (livelli)" />
                     <Stat value={m.quality.avgChildren === null ? '–' : String(m.quality.avgChildren).replace('.', ',')} name="figli medi per nodo che ha figli" />

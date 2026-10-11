@@ -183,7 +183,7 @@ export interface ToolCall {
 
 /** Raw facts about the graph, enough to compute the size and quality charts without more queries. */
 export interface GraphSnapshot {
-  conversations: { id: string; at: string }[];
+  conversations: { id: string; title: string; at: string }[];
   concepts: { id: string; name: string; at: string; hasSuperclass: boolean }[];
-  visits: { id: string; conversationId: string; conceptId: string; parentVisitId: string | null; at: string; hasDetail: boolean; sourceCount: number }[];
+  visits: { id: string; conversationId: string; conceptId: string; parentVisitId: string | null; title: string; at: string; hasDetail: boolean; sourceCount: number }[];
 }
