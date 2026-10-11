@@ -89,7 +89,7 @@ test('the canvas starts blank and grows live while the model tracks concepts', a
   await titled(page, /^Partizioni$/).first().hover();
   await page.waitForTimeout(900);
   assert.equal(await page.getByRole('tooltip').count(), 0, 'no tooltip');
-  assert.match(await page.locator('.overlay-bar').innerText(), /Doppio clic su un nodo per approfondire/);
+  assert.equal(await page.locator('.overlay-bar .bar-hint').getAttribute('title'), 'Doppio clic su un nodo per approfondire');
   await titled(page, /^Partizioni$/).first().dblclick();
   const panel = page.getByLabel('Dettaglio concetto');
   await panel.waitFor();
@@ -741,7 +741,7 @@ test('dashed relations can be bent, hidden and survive a refresh; Riordina undoe
   await page.waitForTimeout(900);
   assert.deepEqual(await pos('Forma uno'), moved, 'the hand-placed position survives a refresh');
   assert.notEqual(await pathD(), before, 'and so does the bend');
-  await page.getByRole('button', { name: 'Riordina' }).click();
+  await page.getByRole('button', { name: 'Riordina', exact: true }).click();
   await page.waitForTimeout(900);
   assert.notDeepEqual(await pos('Forma uno'), moved, 'Riordina re-applies the layout');
   await page.mouse.click(5, 300);
@@ -750,10 +750,10 @@ test('dashed relations can be bent, hidden and survive a refresh; Riordina undoe
   assert.deepEqual(await pos('Forma uno'), moved, 'Ctrl+Z puts the hand-placed node back');
 
   // The toolbar toggle hides every dashed relation.
-  await page.getByRole('button', { name: /Nascondi relazioni tratteggiate/ }).click();
+  await page.getByRole('button', { name: 'Relazioni tratteggiate' }).click();
   await page.waitForTimeout(300);
   assert.equal(await page.locator('.react-flow__edge.relation').count(), 0);
-  await page.getByRole('button', { name: /Mostra relazioni tratteggiate/ }).click();
+  await page.getByRole('button', { name: 'Relazioni tratteggiate' }).click();
   await page.locator('.react-flow__edge.relation').first().waitFor({ state: 'attached' });
   await page.close();
 });
