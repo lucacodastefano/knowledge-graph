@@ -830,3 +830,51 @@ test('personal graph: the panel follows the hover, a click locks it, Esc or an e
   await page.keyboard.press('Escape');
   await panel.waitFor({ state: 'detached' });
 });
+
+test('Approfondisci renders the markdown of the detail: tables, headings, emphasis, lists, callouts, code, safe links', async () => {
+  const conv = tracker.startConversation('Formattazione', null);
+  const detail = [
+    '## Panoramica',
+    'Testo con **grassetto**, *corsivo*, ~~barrato~~ e `codice`.',
+    '### Confronto',
+    '| Modello | Costo | Note |',
+    '|:--|--:|---|',
+    '| Alfa | 4 | veloce |',
+    '| Beta | 10 | preciso |',
+    '1. Primo passo',
+    '2. Secondo passo',
+    '   - dettaglio annidato',
+    '> Attenzione: caso limite',
+    '```',
+    'npm start',
+    '```',
+    '---',
+    '[ok](https://example.com) [no](javascript:alert(1)) <script>window.pwned=1</script>',
+  ].join('\n');
+  tracker.track(conv.id, [{ title: 'Nodo formattato', summary: 'Prova.', parent: 'root', detail }]);
+  const page = await browser.newPage({ viewport: { width: 1400, height: 820 } });
+  await page.goto(base);
+  const node = titled(page, 'Nodo formattato');
+  await node.waitFor({ timeout: 10_000 });
+  await node.dblclick();
+  const md = page.getByLabel('Dettaglio concetto').locator('.markdown');
+  await md.waitFor();
+  assert.equal(await md.locator('h4', { hasText: 'Panoramica' }).count(), 1);
+  assert.equal(await md.locator('h5', { hasText: 'Confronto' }).count(), 1);
+  assert.equal(await md.locator('strong', { hasText: 'grassetto' }).count(), 1);
+  assert.equal(await md.locator('em', { hasText: 'corsivo' }).count(), 1);
+  assert.equal(await md.locator('del', { hasText: 'barrato' }).count(), 1);
+  assert.equal(await md.locator('table th').count(), 3);
+  assert.equal(await md.locator('table tbody tr').count(), 2);
+  assert.equal(await md.locator('table td').nth(1).evaluate((e) => getComputedStyle(e).textAlign), 'right');
+  assert.equal(await md.locator('ol > li').count(), 2);
+  assert.equal(await md.locator('ol > li > ul > li').count(), 1, 'nested list');
+  assert.equal(await md.locator('blockquote.callout').count(), 1);
+  assert.equal(await md.locator('pre code').innerText(), 'npm start');
+  assert.equal(await md.locator('hr').count(), 1);
+  assert.equal(await md.locator('a').count(), 1, 'only the https link is a link');
+  assert.equal(await md.locator('a').getAttribute('href'), 'https://example.com');
+  assert.equal(await md.locator('script').count(), 0, 'raw HTML is shown as text');
+  assert.ok(await page.evaluate(() => (window as unknown as { pwned?: number }).pwned === undefined));
+  await page.screenshot({ path: join(out, '6-markdown.png') });
+});

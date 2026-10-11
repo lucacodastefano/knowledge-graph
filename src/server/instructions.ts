@@ -12,7 +12,7 @@ Rules:
 - Every node names its parent: the title of a node in the tree (kc_start and kc_track return it), "root" for a topic unrelated to the tree, or the title (or "#0", "#1"...) of another node of the same call, in any order.
 - Title: the concept name, 1-5 words, in the user's language, no sentence. Same concept = same title; tracking it again under the same parent updates it.
 - summary: 1-2 short sentences that say what the concept is (label of the node).
-- detail: the full text of your answer about this concept, in markdown (explanations, lists, tables, numbers, examples, caveats), as complete as what you write to the user: the map keeps the same content so they can reread it. Not a summary. Fill it for every node you explain, and also when you review or expand nodes already on the canvas (track them again with the same title).
+- detail: the full text of your answer about this concept, in markdown (explanations, lists, tables, numbers, examples, caveats), as complete as what you write to the user: the map keeps the same content so they can reread it. Not a summary. Format to fit the content: tables for comparisons, numbered lists for steps, **bold** for key terms, *italic* for definitions, ## headings for sub-topics, > quotes for warnings, code blocks for code. Fill it for every node you explain, and also when you review or expand nodes already on the canvas (track them again with the same title).
 - When your answer uses web search results or documents, put their URLs in "sources" on the nodes they support.
 - When the conversation returns to a node already on the canvas, call kc_focus with its title instead of creating it again.
 - If kc_track returns a "similar" concept that is the same idea, call kc_link; otherwise keep both.
