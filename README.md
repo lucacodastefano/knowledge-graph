@@ -39,8 +39,9 @@ The **[user manual](docs/MANUAL.md)** covers every client (Claude Code, Claude D
 
 | Tool | Purpose |
 |---|---|
-| `kc_start` | Start or resume a conversation |
+| `kc_start` | Start a conversation, or resume one (same title, `resume`, similar maps offered) |
 | `kc_track` | Add the concept nodes of an answer (batch) |
+| `kc_edit` | Change part of a node (replace, append, summary, sources) without resending it |
 | `kc_focus` | Go back to a node already on the canvas |
 | `kc_link` | Merge a node into an existing concept |
 | `kc_move` | Move a node under another node |

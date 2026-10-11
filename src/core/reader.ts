@@ -2,7 +2,7 @@ import type { Repository } from './repository.ts';
 import type { Concept, ConceptMatch, ConceptPage, ConceptSection, GroupSuggestion, Visit } from './types.ts';
 import { normalizeName } from './normalize.ts';
 import { TrackerError } from './tracker.ts';
-import { titleStems } from './similarity.ts';
+import { sharesEnough, titleStems } from './similarity.ts';
 
 /** What the user already knows about a concept (RF8). Kept compact: it is sent to the model. */
 export interface RecalledConcept {
@@ -52,6 +52,7 @@ const MEMORY_AREAS = 5;
 const MEMORY_TOPICS = 6;
 const PROFILE_CONVERSATIONS = 5;
 const SEARCH_LIMIT = 20;
+const SIMILAR_MAPS = 3;
 
 const MEMBERS_SHOWN = 8;
 const UNGROUPED_SHOWN = 15;
@@ -242,9 +243,27 @@ export class Reader {
       if (!visit) throw new TrackerError(`"${q}" has no text yet`);
     }
     const kids = (this.repo.getTree(visit.conversationId)?.visits ?? []).filter((v) => v.parentVisitId === visit.id).map((v) => v.title);
-    return [`# ${visit.title}`, visit.summary, visit.detail ?? '', kids.length ? `Children: ${kids.join(', ')}` : '']
+    const urls = this.repo.listConceptSources(visit.conceptId).filter((s) => s.visitIds.includes(visit.id)).map((s) => s.url);
+    return [`# ${visit.title}`, visit.summary, visit.detail ?? '', kids.length ? `Children: ${kids.join(', ')}` : '', urls.length ? `Sources: ${urls.join(' ')}` : '']
       .filter(Boolean)
       .join('\n\n');
+  }
+
+  /**
+   * Maps the user already has on a similar topic (kc_start): titles sharing words with the new one, or holding a concept
+   * that matches it. Most recent first.
+   */
+  similarMaps(title: string): { id: string; title: string; last: string; nodes: number }[] {
+    const byConcept = new Set<string>();
+    for (const c of this.repo.searchConcepts(title, 5)) {
+      for (const v of this.repo.getConceptDetail(c.id)?.visits ?? []) byConcept.add(v.conversationId);
+    }
+    return this.repo
+      .listConversations()
+      .filter((c) => sharesEnough(title, c.title) || byConcept.has(c.id))
+      .slice(0, SIMILAR_MAPS)
+      .map((c) => ({ id: c.id, title: c.title, last: day(c.lastActivityAt), nodes: this.repo.getTree(c.id)!.visits.length }))
+      .filter((c) => c.nodes > 0);
   }
 
   /** Most explored and most recent themes, plus the last conversations (RF10). */
