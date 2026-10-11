@@ -62,10 +62,12 @@ export function createMcpServer(tracker: Tracker, state: McpSessionState): McpSe
   // fixed when the session opens (Claude Desktop keeps one session for its whole life), so a later change re-registers
   // kc_track (tools/list_changed) and is announced once in the next kc_start / kc_track result.
   const instructionsDetail = tracker.settings().detail;
+  // D19: like the server instructions, the memory profile follows the setting as it was when the session opened.
+  const instructionsMemory = tracker.settings().memory;
   /** What the model of the current chat was told about detail. */
   let toldDetail = instructionsDetail;
   const detailNote = (on: boolean) => (on ? `Detail setting is now on:${DETAIL_RULE.slice(2)}` : DETAIL_OFF);
-  const server = new McpServer({ name: 'knowledge-graph', version: VERSION }, { instructions: trackingInstructions(instructionsDetail) });
+  const server = new McpServer({ name: 'knowledge-graph', version: VERSION }, { instructions: trackingInstructions({ detail: instructionsDetail, memory: instructionsMemory }) });
 
   const reader = new Reader(tracker.repo);
 
@@ -89,7 +91,8 @@ export function createMcpServer(tracker: Tracker, state: McpSessionState): McpSe
         toldDetail = detail;
         const notes = detail === instructionsDetail ? START_NOTE : `${START_NOTE}\n${detailNote(detail)}`;
         const result = ok({ conversation: c.id });
-        result.content.push({ type: 'text', text: `${reader.tree(c.id, false, true)}\n${notes}` });
+        const profile = instructionsMemory && !resume ? reader.memoryProfile() : '';
+        result.content.push({ type: 'text', text: `${reader.tree(c.id, false, true)}\n${profile ? `${profile}\n` : ''}${notes}` });
         return result;
       }),
   );
@@ -196,7 +199,7 @@ export function createMcpServer(tracker: Tracker, state: McpSessionState): McpSe
   server.registerTool(
     'kc_recall',
     {
-      description: 'What the user already explored about a topic: concepts, past summaries, dates. Use when a topic first comes up.',
+      description: 'What the user already explored about a topic: concepts, past summaries, dates; thin = only superficial. Use when a topic first comes up.',
       inputSchema: { query: z.string().describe('Topic or concept name') },
     },
     ({ query }) => guarded(() => ok(reader.recall(query))),
@@ -240,7 +243,7 @@ export function createMcpServer(tracker: Tracker, state: McpSessionState): McpSe
   server.registerPrompt(
     'kc_instructions',
     { description: 'How to keep the knowledge-graph canvas up to date during a conversation.' },
-    () => ({ messages: [{ role: 'user', content: { type: 'text', text: trackingInstructions(tracker.settings().detail) } }] }),
+    () => ({ messages: [{ role: 'user', content: { type: 'text', text: trackingInstructions(tracker.settings()) } }] }),
   );
 
   return server;

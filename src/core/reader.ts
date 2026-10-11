@@ -14,6 +14,8 @@ export interface RecalledConcept {
   last: string;
   /** Most recent distinct summaries of what was explained. */
   notes: string[];
+  /** True when only a summary exists: no deeper detail and no sub-concepts yet ("superficiale"). */
+  thin?: boolean;
   /** Concepts explored right before or after it. */
   near: string[];
   /** Known sources (URLs), newest first; only when there are some. */
@@ -47,6 +49,9 @@ const NOTE_MAX = 300;
 /** Sources returned by kc_recall per concept: enough to reuse, few tokens. */
 const RECALL_SOURCES = 3;
 const PROFILE_LIMIT = 10;
+/** Caps of the kc_start memory profile (D19): about 150 tokens. */
+const MEMORY_AREAS = 5;
+const MEMORY_TOPICS = 6;
 const PROFILE_CONVERSATIONS = 5;
 const SEARCH_LIMIT = 20;
 
@@ -99,10 +104,44 @@ export class Reader {
         last: day(c.lastSeenAt),
         notes,
         near: this.repo.neighbourConcepts(c.id, NEAR_PER_CONCEPT).map((n) => n.name),
+        ...(this.isThin(detail.visits) ? { thin: true } : {}),
         ...(sources.length > 0 ? { sources } : {}),
         ...extras(this.repo, c.id),
       };
     });
+  }
+
+  private isThin(visits: { id: string; conversationId: string; detail: string | null }[]): boolean {
+    if (visits.some((v) => v.detail)) return false;
+    const parents = new Set<string>();
+    for (const cid of new Set(visits.map((v) => v.conversationId))) {
+      for (const v of this.repo.getTree(cid)?.visits ?? []) if (v.parentVisitId) parents.add(v.parentVisitId);
+    }
+    return !visits.some((v) => parents.has(v.id));
+  }
+
+  /**
+   * D19: a few lines appended to kc_start so the model knows what the graph holds (areas, most explored, recent)
+   * without a call. Hard-capped; empty for an empty graph (zero tokens).
+   */
+  memoryProfile(): string {
+    const total = this.repo.countConcepts();
+    if (total === 0) return '';
+    const areas = this.repo
+      .listSuperclasses()
+      .map((g) => ({ name: g.name, n: this.repo.listMembers(g.id).length }))
+      .sort((a, b) => b.n - a.n)
+      .slice(0, MEMORY_AREAS)
+      .map((g) => `${g.name} (${g.n})`);
+    const top = this.repo.rankConcepts('visits', MEMORY_TOPICS);
+    const seen = new Set(top.map((c) => c.id));
+    const recent = this.repo.rankConcepts('recent', MEMORY_TOPICS).filter((c) => !seen.has(c.id)).slice(0, MEMORY_TOPICS);
+    return [
+      `User's graph (${total} concepts).`,
+      ...(areas.length ? [`Areas: ${areas.join(', ')}`] : []),
+      `Most explored: ${top.map((c) => `${c.name} ×${c.visitCount}`).join(', ')}`,
+      ...(recent.length ? [`Recent: ${recent.map((c) => c.name).join(', ')}`] : []),
+    ].join('\n');
   }
 
   /** "Approfondisci": every occurrence of a concept with its parent and its sub-concepts as sections (D16, D17). */

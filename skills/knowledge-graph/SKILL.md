@@ -38,6 +38,7 @@ Never create nodes about the graph, the tools or the conversation itself; do not
 - When a topic first comes up in the conversation (not on follow-ups), call `kc_recall` with the topic. If the user has seen it, build on their notes
   instead of starting from zero, and point out links to earlier topics (`near`) when they help. `sources` lists pages already cited on it.
 - When the user asks to pick up where they left off, call `kc_tree` (optionally with `summaries: true`) and continue from the `*current` node.
+- When the user asks what they know or what is missing on a topic, read `kc_recall` (`thin: true` = only superficial) or `kc_profile` and answer from it.
 - When the user asks what they have been studying, or you need context at the start of a session, call `kc_profile`.
 - `kc_relate` (`concept`, then `superclass` or `related_to`, optional `label`) groups a concept under a superclass (one per concept) or relates two concepts. Use it after `kc_track` when `kc_recall` shows the topic belongs to an existing group (`in`), or when the user asks to tidy their graph (see `groups` and `ungrouped` in `kc_profile`).
 

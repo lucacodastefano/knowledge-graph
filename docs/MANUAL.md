@@ -146,6 +146,8 @@ Opened from **Approfondisci**, from the personal graph or from search. It lists 
 
 **Dettaglio approfondito** (checkbox in the top bar, off by default): when on, the model also keeps the 5-10 key points of its answer, worded as in the answer, for a node it goes deep on, shown as a list in the panel. It costs some output tokens on those answers; when off, the model is not even told the option exists. The change applies at once, also to chats already open and without restarting the client: the daemon re-announces its tools and tells the model in the result of its next `kc_start` or `kc_track`.
 
+**Memoria automatica** (checkbox in the top bar, on by default): the model uses your graph as its memory. `kc_start` adds a short profile of the graph (areas, most explored, recent; about 150 tokens at most), and the model calls `kc_recall` once for a topic already in the graph, before answering, building on what is there. When off, neither the profile nor the rule is sent (zero tokens). It applies from the next chat, after restarting Claude Desktop. Independently of the setting you can always ask "what did I know about X" or "what am I missing on Y": the model reads the graph (`kc_recall` flags superficial concepts as `thin`).
+
 **Fonti**: when an answer relies on web search results or documents, the model attaches their links to the nodes, and the panel lists them once per page (without tracking parameters). In edit mode each source has a ✕ to remove a wrong one.
 
 ## 5. Fixing mistakes

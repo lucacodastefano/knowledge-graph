@@ -112,7 +112,7 @@ test('only local origins are allowed', async () => {
 test('kc_track returns the tree and a reminder; parents and kc_move work by title, without merging', async () => {
   const client = await connect();
   const start = await client.callTool({ name: 'kc_start', arguments: { title: 'Piante' } });
-  assert.match((start.content as { text: string }[])[1].text, /^Tree: empty\n.*call kc_track first, then answer\. Silently/);
+  assert.match((start.content as { text: string }[])[1].text, /^Tree: empty\n[^]*call kc_track first, then answer\. Silently/);
   await client.callTool({ name: 'kc_track', arguments: { nodes: [{ title: 'Annaffiatura', summary: 'Quanta acqua.', parent: 'root' }] } });
   const res = await client.callTool({
     name: 'kc_track',
@@ -182,7 +182,7 @@ test('detail is exposed only when the canvas turns it on, and Approfondisci show
 
   const patch = (body: object) =>
     fetch(new URL('/api/settings', base), { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-  assert.deepEqual(await (await patch({ detail: true })).json(), { detail: true });
+  assert.deepEqual(await (await patch({ detail: true })).json(), { detail: true, memory: true });
   const on = await connect();
   assert.ok((await schemaOf(on)).includes('detail'));
   assert.match(on.getInstructions() ?? '', /"detail"/);
@@ -263,4 +263,47 @@ test('the detail setting reaches open sessions at once: tools/list_changed and a
     await patch(false);
     await client.close();
   }
+});
+
+test('memory (D19): kc_start carries a compact profile and the recall rule only while the setting is on', async () => {
+  const patch = (body: object) =>
+    fetch(new URL('/api/settings', base), { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  const conv = tracker.startConversation('Memoria', null).id;
+  tracker.track(conv, [
+    { title: 'Event sourcing', summary: 'Stato come sequenza di eventi.', parent: 'root' },
+    { title: 'Proiezioni', summary: 'Viste derivate.', parent: 'Event sourcing' },
+    { title: 'Saga', summary: 'Transazioni distribuite.', parent: 'root' },
+  ]);
+  tracker.relateByName({ concept: 'Event sourcing', superclass: 'Architettura software' });
+  const startText = async (c: Client) => {
+    const r = await c.callTool({ name: 'kc_start', arguments: { title: 'Prova' } });
+    return (r.content as { text: string }[]).map((p) => p.text).join('\n');
+  };
+
+  const on = await connect();
+  const withMemory = await startText(on);
+  assert.match(withMemory, /User's graph \(\d+ concepts\)/);
+  assert.match(withMemory, /Areas: Architettura software \(1\)/);
+  assert.match(withMemory, /Most explored: .*Event sourcing/);
+  assert.match(on.getInstructions() ?? '', /The user's graph is your memory/);
+  assert.match(on.getInstructions() ?? '', /kc_recall \(thin: true/);
+  const profileLines = withMemory.split('\n').filter((l) => /^(User's graph|Areas|Most explored|Recent)/.test(l));
+  assert.ok(profileLines.length <= 4 && profileLines.join('\n').length < 700, 'the profile stays within its cap');
+  // A concept with a sub-concept is not superficial; a lone one is.
+  const recall = json(await on.callTool({ name: 'kc_recall', arguments: { query: 'Saga' } }));
+  assert.equal(recall[0].thin, true);
+  assert.equal(json(await on.callTool({ name: 'kc_recall', arguments: { query: 'Event sourcing' } }))[0].thin, undefined);
+
+  assert.deepEqual(await (await patch({ memory: false })).json(), { detail: false, memory: false });
+  const off = await connect();
+  const without = await startText(off);
+  assert.ok(!/User's graph|Areas:/.test(without), 'no profile when off');
+  assert.ok(!/is your memory|kc_relate\(concept, superclass\)/.test(off.getInstructions() ?? ''), 'no memory rule when off');
+  console.log(
+    `memory tokens (~chars/4): instructions on=${Math.round((on.getInstructions() ?? '').length / 4)} off=${Math.round((off.getInstructions() ?? '').length / 4)}; ` +
+      `kc_start on=${Math.round(withMemory.length / 4)} off=${Math.round(without.length / 4)}`,
+  );
+  await patch({ memory: true });
+  await on.close();
+  await off.close();
 });

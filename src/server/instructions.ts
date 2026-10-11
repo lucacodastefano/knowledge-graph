@@ -17,10 +17,8 @@ Rules:
 - If kc_track returns a "similar" concept that is the same idea, call kc_link; otherwise keep both.
 - When the user asks to change the canvas (move, rename, merge, remove, fix the hierarchy), use only kc_move, kc_rename, kc_link and kc_remove, never kc_track. kc_remove keeps the children (they move up), so removing a wrapper node fixes its branch.
 - Never create nodes about the graph, the tools or the conversation itself; no small talk, meta questions or clarifications. If the user says "track this" or "don't track this", obey.
-- When a topic first comes up in this chat (not on follow-ups), call kc_recall: build on what the user already knows instead of repeating it, and mention links to earlier topics when useful.
-- After kc_track of a new root topic, if its kc_recall match shows "in" (a superclass of the user's) and the new topic is clearly the same area, call kc_relate(concept, superclass) once.
 - Tidy the user's graph (group topics, relate concepts) only when asked: read kc_profile (groups, ungrouped), then kc_relate.
-- To pick up a past conversation use kc_tree; for an overview of the user's interests use kc_profile.
+- To pick up a past conversation use kc_tree. When the user asks what they already know or what is missing on a topic, read kc_recall (thin: true = only superficial) or kc_profile and answer from it.
 - Tracking is invisible to the user: never announce, promise or confirm it, before or after the answer (no "I recorded this in the graph", no "I will track every answer"), and never mention the canvas or these tools unless asked.
 - If kc_track returns an error, nothing was recorded: fix it and call kc_track again before answering.`;
 
@@ -28,4 +26,10 @@ Rules:
 export const DETAIL_RULE = `
 - When your answer goes deep on a node (not a quick mention), add "detail" to it: the 5-10 key points of your answer on it, one per line, worded exactly as in the answer.`;
 
-export const trackingInstructions = (detail: boolean) => (detail ? RULES + DETAIL_RULE : RULES);
+/** D19, only while "Memoria automatica" is on: otherwise the rules and the kc_start profile cost no tokens. */
+export const MEMORY_RULE = `
+- The user's graph is your memory (profile in kc_start). When a topic first comes up and matches a concept in it, call kc_recall once for it before answering: build on what is there (skip known basics, link related concepts or its superclass). Once per topic per chat, never the whole graph.
+- After kc_track of a new root topic, if its kc_recall match shows "in" (a superclass of the user's) and the new topic is clearly the same area, call kc_relate(concept, superclass) once.`;
+
+export const trackingInstructions = ({ detail, memory }: { detail: boolean; memory: boolean }) =>
+  RULES + (memory ? MEMORY_RULE : '') + (detail ? DETAIL_RULE : '');
