@@ -10,6 +10,8 @@ import type {
   ConversationTree,
   PersonalGraph,
   Revision,
+  ToolCall,
+  GraphSnapshot,
   Visit,
 } from './types.ts';
 import { SCHEMA } from './schema.ts';
@@ -176,6 +178,7 @@ export class SqliteRepository implements Repository {
     this.db.exec('CREATE INDEX IF NOT EXISTS concepts_key ON concepts(name_key)');
     if (!has('concept_links', 'label')) this.db.exec('ALTER TABLE concept_links ADD COLUMN label TEXT');
     if (!has('visits', 'detail')) this.db.exec('ALTER TABLE visits ADD COLUMN detail TEXT');
+    if (!has('concept_links', 'created_at')) this.db.exec('ALTER TABLE concept_links ADD COLUMN created_at TEXT');
   }
 
   findConceptsByKey(name: string, excludeId: string): ConceptMatch[] {
@@ -446,7 +449,7 @@ export class SqliteRepository implements Repository {
       this.db.prepare(`UPDATE concept_links SET label = ?3 WHERE ${both}`).run(fromId, toId, text);
       return true;
     }
-    this.db.prepare(`INSERT INTO concept_links (from_concept_id, to_concept_id, kind, label) VALUES (?, ?, 'related', ?)`).run(fromId, toId, text);
+    this.db.prepare(`INSERT INTO concept_links (from_concept_id, to_concept_id, kind, label, created_at) VALUES (?, ?, 'related', ?, ?)`).run(fromId, toId, text, now());
     return true;
   }
 
@@ -470,7 +473,7 @@ export class SqliteRepository implements Repository {
 
   setSuperclass(childId: string, parentId: string | null): void {
     this.db.prepare(`DELETE FROM concept_links WHERE kind = 'is_a' AND from_concept_id = ?`).run(childId);
-    if (parentId) this.db.prepare(`INSERT INTO concept_links (from_concept_id, to_concept_id, kind) VALUES (?, ?, 'is_a')`).run(childId, parentId);
+    if (parentId) this.db.prepare(`INSERT INTO concept_links (from_concept_id, to_concept_id, kind, created_at) VALUES (?, ?, 'is_a', ?)`).run(childId, parentId, now());
   }
 
   getSuperclass(conceptId: string): ConceptMatch | undefined {
@@ -504,6 +507,72 @@ export class SqliteRepository implements Repository {
       .prepare(`SELECT c.id, c.name FROM concept_links l JOIN concepts c ON c.id = l.from_concept_id WHERE l.kind = 'is_a' AND l.to_concept_id = ? ORDER BY c.name`)
       .all(superId)
       .map((r) => ({ id: r.id as string, name: r.name as string }));
+  }
+
+  recordToolCall(c: ToolCall): void {
+    this.db
+      .prepare(
+        `INSERT INTO tool_calls (at, tool, conversation_id, arg_chars, result_chars, duration_ms, ok, error, nodes_created, nodes_changed, hit)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(c.at, c.tool, c.conversationId, c.argChars, c.resultChars, c.durationMs, c.ok ? 1 : 0, c.error, c.nodesCreated, c.nodesChanged, c.hit === null ? null : c.hit ? 1 : 0);
+  }
+
+  listToolCalls(since?: string): ToolCall[] {
+    const rows = since
+      ? this.db.prepare('SELECT * FROM tool_calls WHERE at >= ? ORDER BY id').all(since)
+      : this.db.prepare('SELECT * FROM tool_calls ORDER BY id').all();
+    return rows.map((r) => ({
+      at: r.at as string,
+      tool: r.tool as string,
+      conversationId: (r.conversation_id as string | null) ?? null,
+      argChars: Number(r.arg_chars),
+      resultChars: Number(r.result_chars),
+      durationMs: Number(r.duration_ms),
+      ok: r.ok === 1,
+      error: (r.error as string | null) ?? null,
+      nodesCreated: Number(r.nodes_created),
+      nodesChanged: Number(r.nodes_changed),
+      hit: r.hit === null ? null : r.hit === 1,
+    }));
+  }
+
+  counters(): { visits: number; revisions: number } {
+    const n = (sql: string) => Number(this.db.prepare(sql).get()!.n);
+    return { visits: n('SELECT COUNT(*) AS n FROM visits'), revisions: n('SELECT COUNT(*) AS n FROM revisions') };
+  }
+
+  graphSnapshot(): GraphSnapshot {
+    const strings = (sql: string) => this.db.prepare(sql).all().map((r) => r.t as string);
+    return {
+      conversations: this.db.prepare('SELECT id, started_at FROM conversations').all().map((r) => ({ id: r.id as string, at: r.started_at as string })),
+      concepts: this.db
+        .prepare(
+          `SELECT c.id, c.name, c.created_at,
+             EXISTS (SELECT 1 FROM concept_links l WHERE l.kind = 'is_a' AND l.from_concept_id = c.id) AS has_super
+           FROM concepts c`,
+        )
+        .all()
+        .map((r) => ({ id: r.id as string, name: r.name as string, at: r.created_at as string, hasSuperclass: r.has_super === 1 })),
+      visits: this.db
+        .prepare(
+          `SELECT v.id, v.conversation_id, v.concept_id, v.parent_visit_id, v.created_at,
+             (v.detail IS NOT NULL AND trim(v.detail) <> '') AS has_detail,
+             (SELECT COUNT(*) FROM visit_sources vs WHERE vs.visit_id = v.id) AS sources
+           FROM visits v`,
+        )
+        .all()
+        .map((r) => ({
+          id: r.id as string,
+          conversationId: r.conversation_id as string,
+          conceptId: r.concept_id as string,
+          parentVisitId: (r.parent_visit_id as string | null) ?? null,
+          at: r.created_at as string,
+          hasDetail: r.has_detail === 1,
+          sourceCount: Number(r.sources),
+        })),
+      relationTimes: strings(`SELECT COALESCE(created_at, '') AS t FROM concept_links`),
+    };
   }
 
   addRevision(r: Omit<Revision, 'createdAt'>): void {

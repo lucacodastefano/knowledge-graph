@@ -6,6 +6,7 @@ import fastifyStatic from '@fastify/static';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { type Tracker, TrackerError, type TrackerEvent, type VisitEdit } from '../core/tracker.ts';
+import { buildMetrics, periodStart, type Period } from '../core/metrics.ts';
 import { Reader } from '../core/reader.ts';
 import type { Settings } from '../core/types.ts';
 import { createMcpServer, type McpSessionState } from './mcp.ts';
@@ -128,6 +129,15 @@ export async function buildApp({ tracker, webRoot, logger = false, onShutdown }:
     const page = new Reader(repo).conceptPage(req.params.id);
     return page ?? reply.code(404).send({ error: 'Not found' });
   });
+  app.get<{ Querystring: { conversation?: string; period?: Period } }>(
+    '/api/metrics',
+    { schema: { querystring: { type: 'object', properties: { conversation: { type: 'string' }, period: { enum: ['24h', '7d', '30d', 'all'] } } } } },
+    async (req) => {
+      const period = req.query.period ?? 'all';
+      // Growth needs the calls only from the period start; the baseline of the graph comes from the snapshot.
+      return buildMetrics(repo.listToolCalls(periodStart(period) ?? undefined), repo.graphSnapshot(), { ...req.query, period });
+    },
+  );
   app.get('/api/settings', async () => tracker.settings());
   app.patch<{ Body: Partial<Settings> }>(
     '/api/settings',
