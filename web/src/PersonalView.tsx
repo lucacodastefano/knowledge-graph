@@ -158,7 +158,8 @@ function merge(graph: Graph<NodeAttrs>, data: PersonalGraph, relayout: boolean, 
   });
   graph.clearEdges();
   for (const e of data.edges) {
-    if (graph.hasNode(e.source) && graph.hasNode(e.target) && e.source !== e.target) {
+    // Free (dashed) relations are not drawn here: they stay in the conversation view and the panel.
+    if (!e.relation && graph.hasNode(e.source) && graph.hasNode(e.target) && e.source !== e.target) {
       graph.mergeEdge(e.source, e.target, { size: Math.min(0.6 + 0.4 * e.weight, 3), relation: !!e.relation, ...(e.label ? { label: e.label } : {}) });
     }
   }
@@ -452,8 +453,31 @@ export function PersonalView({ live, found, onOpenConcept, onBackgroundClick, fo
       }
       bubbleCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
       bubbleCtx.clearRect(0, 0, width, height);
+      // Hovering a concept lights its bubble and those of its linked concepts; the rest recedes.
+      const hovered = hoverRef.current;
+      let lit: Set<string> | null = null;
+      if (hovered && graph.hasNode(hovered)) {
+        lit = new Set([graph.getNodeAttribute(hovered, 'community')]);
+        graph.forEachNeighbor(hovered, (n) => lit!.add(graph.getNodeAttribute(n, 'community')));
+      }
       for (const b of v.bubbles) {
         const p = viewportBubble(b);
+        if (lit) {
+          const on = lit.has(b.id);
+          const color = b.slot >= 0 && v.colorBy === 'community' ? colors[b.slot] : muted;
+          bubbleCtx.globalAlpha = on ? 0.16 : 0.015;
+          bubbleCtx.fillStyle = color;
+          bubbleCtx.beginPath();
+          bubbleCtx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+          bubbleCtx.fill();
+          if (on) {
+            bubbleCtx.globalAlpha = 0.5;
+            bubbleCtx.strokeStyle = color;
+            bubbleCtx.lineWidth = 1.5;
+            bubbleCtx.stroke();
+          }
+          continue;
+        }
         const dim = v.focus && !(b.slot >= 0 ? v.focus === `c:${b.id}` : false) && v.colorBy === 'community';
         const neutral = v.colorBy !== 'community' || b.slot < 0;
         const color = neutral ? muted : colors[b.slot];

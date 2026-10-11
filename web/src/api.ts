@@ -48,6 +48,7 @@ export function explain(message: string): string {
 
 export const api = {
   conversations: () => get<Conversation[]>('/api/conversations'),
+  deleteConversation: (id: string) => send<void>('DELETE', `/api/conversations/${id}`),
   tree: (id: string) => get<ConversationTree>(`/api/conversations/${id}/tree`),
   concept: (id: string) => get<ConceptPage>(`/api/concepts/${id}`),
   settings: () => get<Settings>('/api/settings'),

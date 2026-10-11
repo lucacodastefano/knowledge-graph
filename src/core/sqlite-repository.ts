@@ -308,6 +308,10 @@ export class SqliteRepository implements Repository {
     this.db.prepare('UPDATE visits SET parent_visit_id = ? WHERE id = ?').run(parentVisitId, visitId);
   }
 
+  deleteConversation(id: string): void {
+    this.db.prepare('DELETE FROM conversations WHERE id = ?').run(id);
+  }
+
   reparentChildren(visitId: string, parentVisitId: string | null): void {
     this.db.prepare('UPDATE visits SET parent_visit_id = ? WHERE parent_visit_id = ?').run(parentVisitId, visitId);
   }

@@ -44,6 +44,7 @@ export type TrackerEvent =
   | { type: 'focus.changed'; conversationId: string; visitId: string | null }
   | { type: 'visit.updated'; visit: Visit }
   | { type: 'visit.deleted'; visitId: string; conversationId: string; removedConceptId: string | null }
+  | { type: 'conversation.deleted'; conversationId: string; removedConceptIds: string[] }
   | { type: 'concept.renamed'; concept: Concept }
   | { type: 'concept.merged'; fromId: string; into: Concept }
   | { type: 'concept.deleted'; conceptId: string }
@@ -569,6 +570,21 @@ export class Tracker {
     const visit = this.requireVisit(visitId);
     const removedConceptId = this.repo.transaction(() => this.removeVisit(visitId, detachChildren));
     this.emit({ type: 'visit.deleted', visitId, conversationId: visit.conversationId, removedConceptId });
+  }
+
+  /** Deletes a conversation's map; concepts used nowhere else go too, the others stay in the personal graph. */
+  deleteConversation(conversationId: string): void {
+    this.requireConversation(conversationId);
+    const removedConceptIds = this.repo.transaction(() => {
+      const removed: string[] = [];
+      for (const v of this.repo.getTree(conversationId)?.visits ?? []) {
+        const gone = this.removeVisit(v.id, true);
+        if (gone) removed.push(gone);
+      }
+      this.repo.deleteConversation(conversationId);
+      return removed;
+    });
+    this.emit({ type: 'conversation.deleted', conversationId, removedConceptIds });
   }
 
   /**

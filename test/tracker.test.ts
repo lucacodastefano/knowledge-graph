@@ -171,3 +171,19 @@ test('a parent cycle or any other error in a batch is refused and nothing is wri
   assert.equal(tracker.repo.getTree(conv.id)!.visits.length, before);
   assert.equal(tracker.repo.countConcepts(), concepts);
 });
+
+test('deleting a conversation keeps concepts used elsewhere and drops the rest', () => {
+  const { tracker, conv } = setup();
+  const other = tracker.startConversation('Altro', null);
+  tracker.track(conv.id, [{ title: 'Kafka', summary: 's' }, { title: 'Solo qui', summary: 's', parent: '#0' }]);
+  tracker.track(other.id, [{ title: 'Kafka', summary: 's' }]);
+  const events: TrackerEvent[] = [];
+  tracker.events.on('change', (e) => events.push(e));
+  tracker.deleteConversation(conv.id);
+  const names = tracker.repo.getPersonalGraph().concepts.map((c) => c.name);
+  assert.deepEqual(names, ['Kafka']);
+  assert.equal(tracker.repo.getConversation(conv.id), undefined);
+  assert.ok(tracker.repo.getConversation(other.id));
+  assert.equal(events.at(-1)!.type, 'conversation.deleted');
+  assert.throws(() => tracker.deleteConversation(conv.id), TrackerError);
+});
