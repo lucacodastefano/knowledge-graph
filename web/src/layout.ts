@@ -10,7 +10,6 @@ export interface VisitNodeData extends Record<string, unknown> {
   visit: Visit;
   current: boolean;
   fresh: boolean;
-  hovered: boolean;
   /** Visit of the concept picked in the search. */
   match: boolean;
   /** Where else this concept appears in the conversation: the parents of its other nodes (D16). */

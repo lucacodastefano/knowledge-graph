@@ -20,3 +20,16 @@ test('after a checkpoint graph.db alone holds the data, while the daemon keeps i
   backup.close();
   repo.close();
 });
+
+test('canvas positions and relation bends are stored, updated and forgotten', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'kg-'));
+  const repo = new SqliteRepository(join(dir, 'graph.db'));
+  repo.setLayout([
+    { kind: 'visit', id: 'a', x: 1, y: 2 },
+    { kind: 'relation', id: 'r-a-b', x: 5, y: -6 },
+  ]);
+  repo.setLayout([{ kind: 'visit', id: 'a', x: 3, y: 4 }]);
+  assert.deepEqual(repo.layoutEntries().find((e) => e.id === 'a'), { kind: 'visit', id: 'a', x: 3, y: 4 });
+  repo.setLayout([{ kind: 'visit', id: 'a' }]);
+  assert.deepEqual(repo.layoutEntries().map((e) => e.id), ['r-a-b']);
+});

@@ -14,6 +14,14 @@ import type {
  * Storage boundary. Everything above this interface is storage-agnostic, so the
  * SQLite implementation can be swapped for a graph database later (D12).
  */
+/** A point the user chose on the canvas (node position, or bend offset of a relation). */
+export interface LayoutEntry {
+  kind: 'visit' | 'relation';
+  id: string;
+  x: number;
+  y: number;
+}
+
 export interface Repository {
   createConversation(input: { title: string; client: string | null }): Conversation;
   getConversation(id: string): Conversation | undefined;
@@ -55,6 +63,9 @@ export interface Repository {
   countVisitsOfConcept(conceptId: string): number;
   getTree(conversationId: string): ConversationTree | undefined;
   getPersonalGraph(): PersonalGraph;
+  layoutEntries(): LayoutEntry[];
+  /** Saves points the user chose; an entry without coordinates is forgotten. */
+  setLayout(entries: (Pick<LayoutEntry, 'kind' | 'id'> & Partial<LayoutEntry>)[]): void;
 
   /** Links normalized sources to a visit; a URL already stored is reused (dedup), a link already there is kept. */
   addVisitSources(visitId: string, sources: { url: string; domain: string }[]): void;

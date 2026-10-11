@@ -146,7 +146,6 @@ button.icon:hover { color: var(--text); }
 .react-flow__edge.dim .react-flow__edge-path { opacity: 0.15; }
 .react-flow__edge.related .react-flow__edge-path { stroke: var(--accent); stroke-width: 2; }
 .react-flow__edge.cross-link.related .react-flow__edge-path { stroke-width: 2.5; opacity: 1; }
-.overlay-bar select + select { margin-left: 8px; }
 
 /* Personal graph: colour slots (validated categorical order), toolbar, legend, zoom */
 :root {
@@ -203,6 +202,32 @@ button.icon:hover { color: var(--text); }
 
 .tooltip-note { margin: 0; font-size: 11px; font-style: italic; color: var(--muted, var(--text)); opacity: 0.7; }
 .react-flow__edge.hover .react-flow__edge-path { stroke: var(--accent); stroke-width: 3.5; opacity: 1; }
-.react-flow__edgelabel-renderer { z-index: 5; }
-.relation-label.hover { z-index: 10; font-weight: 600; }
+.react-flow__edgelabel-renderer { z-index: 0; }
+.react-flow__nodes { z-index: 1; }
+.react-flow__viewport > .relation-label { top: 0; left: 0; z-index: 1000; }
+.relation-label.hover { font-weight: 600; }
+.relation-label.top { box-shadow: 0 1px 6px rgb(0 0 0 / 0.18); }
+.relation-label:not(.has-text) { padding: 2px 4px; border: 1px solid var(--border); }
+.relation-label { cursor: grab; touch-action: none; }
+.relation-label .relation-grip { color: var(--muted); font-size: 14px; line-height: 20px; }
+.relation-label .relation-reset { background: var(--border); color: var(--text); }
+.react-flow__edge .relation-drag { cursor: grab; pointer-events: stroke; }
+.overlay-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.overlay-bar select + select { margin-left: 0; }
+.overlay-bar .bar-button { padding: 4px 10px; font-size: 13px; color: var(--text); background: var(--surface); border: 1px solid var(--border); }
+.overlay-bar .bar-button:hover { background: var(--accent-soft); }
+.overlay-bar .bar-button[aria-pressed=true] { background: var(--accent-soft); border-color: var(--accent); }
+.overlay-bar .bar-hint { font-size: 11px; font-style: italic; color: var(--muted); }
+
+/* Relations in Approfondisci: a soft pill for the concept, its label beside it, round icons on the right. */
+.panel ul.relations { list-style: none; margin: 0; padding: 0; }
+.panel ul.relations li { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+.panel .rel-name { padding: 3px 12px; font-size: 13px; font-weight: 500; color: var(--text); background: var(--accent-soft); border: 1px solid transparent; border-radius: 999px; }
+.panel .rel-name:hover { border-color: var(--accent); }
+.panel .rel-label { flex: 1; font-size: 12px; color: var(--muted); }
+.panel .rel-actions { display: flex; gap: 4px; margin-left: auto; opacity: 0.55; transition: opacity 0.15s; }
+.panel ul.relations li:hover .rel-actions, .panel .rel-actions:focus-within { opacity: 1; }
+.panel .rel-icon { width: 24px; height: 24px; padding: 0; font-size: 12px; line-height: 22px; color: var(--muted); background: none; border: 1px solid var(--border); border-radius: 50%; }
+.panel .rel-icon:hover { color: var(--text); background: var(--accent-soft); border-color: var(--accent); }
+.panel .rel-icon.danger:hover { color: #fff; background: #dc2626; border-color: #dc2626; }
 .visit.cover { opacity: 0.15; }

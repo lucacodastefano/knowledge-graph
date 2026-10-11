@@ -95,6 +95,34 @@ export async function buildApp({ tracker, webRoot, logger = false, onShutdown }:
     const tree = repo.getTree(req.params.id);
     return tree ?? reply.code(404).send({ error: 'Not found' });
   });
+  // Where the user put nodes and relation bends on the canvas (kept across refreshes and layout changes).
+  app.get('/api/layout', async () => repo.layoutEntries());
+  app.post<{ Body: { items: { kind: 'visit' | 'relation'; id: string; x?: number; y?: number }[] } }>(
+    '/api/layout',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          required: ['items'],
+          properties: {
+            items: {
+              type: 'array',
+              maxItems: 5000,
+              items: {
+                type: 'object',
+                required: ['kind', 'id'],
+                properties: { kind: { enum: ['visit', 'relation'] }, id: { type: 'string' }, x: { type: 'number' }, y: { type: 'number' } },
+              },
+            },
+          },
+        },
+      },
+    },
+    async (req, reply) => {
+      repo.setLayout(req.body.items);
+      return reply.code(204).send();
+    },
+  );
   app.get('/api/graph', async () => repo.getPersonalGraph());
   app.get<{ Params: { id: string } }>('/api/concepts/:id', async (req, reply) => {
     const page = new Reader(repo).conceptPage(req.params.id);

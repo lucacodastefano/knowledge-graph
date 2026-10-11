@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
-import type { Repository } from './repository.ts';
+import type { LayoutEntry, Repository } from './repository.ts';
 import type {
   Concept,
   ConceptDetail,
@@ -523,6 +523,29 @@ export class SqliteRepository implements Repository {
         oldValue: (r.old_value as string | null) ?? null,
         createdAt: r.created_at as string,
       }));
+  }
+
+  layoutEntries(): LayoutEntry[] {
+    return this.db
+      .prepare('SELECT kind, id, x, y FROM canvas_layout')
+      .all()
+      .map((r) => ({ kind: r.kind as LayoutEntry['kind'], id: r.id as string, x: r.x as number, y: r.y as number }));
+  }
+
+  setLayout(entries: Parameters<Repository['setLayout']>[0]): void {
+    const put = this.db.prepare('INSERT OR REPLACE INTO canvas_layout (kind, id, x, y) VALUES (?, ?, ?, ?)');
+    const drop = this.db.prepare('DELETE FROM canvas_layout WHERE kind = ? AND id = ?');
+    this.db.exec('BEGIN');
+    try {
+      for (const e of entries) {
+        if (typeof e.x === 'number' && typeof e.y === 'number') put.run(e.kind, e.id, e.x, e.y);
+        else drop.run(e.kind, e.id);
+      }
+      this.db.exec('COMMIT');
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
   }
 
   getSetting(key: string): string | undefined {

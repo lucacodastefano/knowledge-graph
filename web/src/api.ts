@@ -11,6 +11,7 @@ import type {
   Settings,
   Visit,
 } from '../../src/core/types.ts';
+import type { LayoutEntry } from '../../src/core/repository.ts';
 import type { TrackerEvent, VisitEdit } from '../../src/core/tracker.ts';
 
 export type { GroupSuggestion, Concept, ConceptOccurrence, ConceptPage, ConceptSection, ConceptSource, Conversation, ConversationTree, PersonalGraph, Settings, TrackerEvent, Visit, VisitEdit };
@@ -51,6 +52,9 @@ export const api = {
   deleteConversation: (id: string) => send<void>('DELETE', `/api/conversations/${id}`),
   tree: (id: string) => get<ConversationTree>(`/api/conversations/${id}/tree`),
   concept: (id: string) => get<ConceptPage>(`/api/concepts/${id}`),
+  layout: () => get<LayoutEntry[]>('/api/layout'),
+  /** An item without x / y is forgotten. */
+  saveLayout: (items: Partial<LayoutEntry>[]) => send<void>('POST', '/api/layout', { items }),
   settings: () => get<Settings>('/api/settings'),
   updateSettings: (patch: Partial<Settings>) => send<Settings>('PATCH', '/api/settings', patch),
   graph: () => get<PersonalGraph>('/api/graph'),

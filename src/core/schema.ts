@@ -69,6 +69,15 @@ CREATE TABLE IF NOT EXISTS settings (
   value TEXT NOT NULL
 );
 
+-- Where the user put things on the canvas: a node (kind 'visit') or the bend of a dashed relation (kind 'relation').
+CREATE TABLE IF NOT EXISTS canvas_layout (
+  kind TEXT NOT NULL,
+  id TEXT NOT NULL,
+  x REAL NOT NULL,
+  y REAL NOT NULL,
+  PRIMARY KEY (kind, id)
+);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS concepts_fts USING fts5(
   concept_id UNINDEXED, name, tokenize = 'trigram remove_diacritics 1'
 );
