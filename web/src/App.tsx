@@ -133,7 +133,7 @@ export function App() {
   );
 }
 
-/** The two canvas settings that change what the server tells the model (D17 detail, D19 memory). */
+/** The canvas setting that changes what the server tells the model (D19 memory). */
 function ModelSettings() {
   const [settings, setSettings] = useState<Settings | null>(null);
   useEffect(() => void api.settings().then(setSettings, () => setSettings(null)), []);
@@ -150,11 +150,6 @@ function ModelSettings() {
         'memory',
         "Il modello riceve all'avvio un breve profilo del tuo grafo e, quando un argomento c'è già, lo richiama prima di rispondere. Vale dalla prossima chat, dopo aver riavviato Claude Desktop.",
         'Memoria automatica',
-      )}
-      {toggle(
-        'detail',
-        'Quando il modello approfondisce un concetto salva anche i 5-10 punti chiave della risposta, con le sue parole. Costa qualche token in più. Vale subito, anche nelle chat già aperte.',
-        'Dettaglio approfondito',
       )}
     </>
   );

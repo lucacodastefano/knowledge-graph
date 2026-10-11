@@ -27,10 +27,14 @@ test('exposes the tracking tools, the instructions prompt and server instruction
   assert.deepEqual(tools, ['kc_focus', 'kc_link', 'kc_move', 'kc_profile', 'kc_recall', 'kc_relate', 'kc_remove', 'kc_rename', 'kc_start', 'kc_track', 'kc_tree']);
   assert.equal((await client.listPrompts()).prompts[0].name, 'kc_instructions');
   assert.match(client.getInstructions() ?? '', /kc_track/);
-  // Node texts are the answer's own sentences, not a summary of it.
-  assert.match(client.getInstructions() ?? '', /not a summary.*exactly as you will write them; then use them verbatim/);
+  // Transparent wording: the map is explained to the model, nothing asks to hide it or to copy words verbatim.
+  const instr = client.getInstructions() ?? '';
+  assert.match(instr, /personal knowledge map/);
+  assert.match(instr, /detail: the full text of your answer/);
+  assert.doesNotMatch(instr, /invisible|never mention|verbatim|word for word|exactly as you will write/i);
   const track = JSON.stringify((await client.listTools()).tools.find((t) => t.name === 'kc_track')!.inputSchema);
-  assert.match(track, /word for word as you will write them/);
+  assert.match(track, /"detail":\{[^}]*Full text of your answer/);
+  assert.doesNotMatch(track, /verbatim|word for word/i);
   const skill = readFileSync(new URL('../skills/knowledge-graph/SKILL.md', import.meta.url), 'utf8');
   for (const tool of tools) assert.ok(skill.includes(`\`${tool}\``), `skill should cover ${tool}`);
   await client.close();
@@ -112,7 +116,7 @@ test('only local origins are allowed', async () => {
 test('kc_track returns the tree and a reminder; parents and kc_move work by title, without merging', async () => {
   const client = await connect();
   const start = await client.callTool({ name: 'kc_start', arguments: { title: 'Piante' } });
-  assert.match((start.content as { text: string }[])[1].text, /^Tree: empty\n[^]*call kc_track first, then answer\. Silently/);
+  assert.match((start.content as { text: string }[])[1].text, /^Tree: empty\n[^]*call kc_track with its nodes, then write the answer/);
   await client.callTool({ name: 'kc_track', arguments: { nodes: [{ title: 'Annaffiatura', summary: 'Quanta acqua.', parent: 'root' }] } });
   const res = await client.callTool({
     name: 'kc_track',
@@ -120,7 +124,8 @@ test('kc_track returns the tree and a reminder; parents and kc_move work by titl
   });
   const extra = (res.content as { text: string }[])[1].text;
   assert.match(extra, /^Tree:\n- Annaffiatura\n- Acqua giusta\n/);
-  assert.match(extra, /never mention this call/);
+  assert.match(extra, /Saved in the map\. Write your answer now, once\./);
+  assert.doesNotMatch(extra, /never mention|silently/i);
 
   const moved = await client.callTool({ name: 'kc_move', arguments: { node: 'Acqua giusta', parent: 'Annaffiatura' } });
   assert.match((moved.content as { text: string }[])[0].text, /- Annaffiatura\n {2}- Acqua giusta/);
@@ -172,33 +177,17 @@ test("Luca's case: wrappers are refused, and an existing wrapper is dissolved by
   await client.close();
 });
 
-test('detail is exposed only when the canvas turns it on, and Approfondisci shows sub-concepts as sections', async () => {
-  const schemaOf = async (c: Client) =>
-    JSON.stringify((await c.listTools()).tools.find((t) => t.name === 'kc_track')!.inputSchema);
-  const off = await connect();
-  assert.ok(!(await schemaOf(off)).includes('detail'));
-  assert.ok(!(off.getInstructions() ?? '').includes('detail'));
-  await off.close();
-
-  const patch = (body: object) =>
-    fetch(new URL('/api/settings', base), { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-  assert.deepEqual(await (await patch({ detail: true })).json(), { detail: true, memory: true });
-  const on = await connect();
-  assert.ok((await schemaOf(on)).includes('detail'));
-  assert.match(on.getInstructions() ?? '', /"detail"/);
-  await on.close();
-  await patch({ detail: false });
-
+test('detail is always accepted, and Approfondisci shows sub-concepts as sections', async () => {
   const id = tracker.startConversation('Architettura', null).id;
   const [da] = tracker.track(id, [
-    { title: 'Design Authority', summary: 'Organo di governo.', parent: 'root', detail: '- decide\n- verifica' },
+    { title: 'Design Authority', summary: 'Organo di governo.', parent: 'root', detail: '## Cosa fa\n- decide\n- verifica' },
     { title: 'Gate', summary: 'Punti di controllo.', parent: '#0' },
     { title: 'Gate di design', summary: 'Prima dello sviluppo.', parent: '#1' },
     { title: 'Deroghe', summary: 'Eccezioni motivate.', parent: '#0' },
   ]);
   const page = await (await fetch(new URL(`/api/concepts/${da.conceptId}`, base))).json();
   const [occ] = page.visits;
-  assert.equal(occ.detail, '- decide\n- verifica');
+  assert.equal(occ.detail, '## Cosa fa\n- decide\n- verifica');
   assert.equal(occ.parentTitle, null);
   assert.deepEqual(
     occ.sections.map((s: { title: string; children: { title: string }[] }) => [s.title, s.children.map((c) => c.title)]),
@@ -226,41 +215,6 @@ test('kc_track accepts parents defined later in the call; any error says nothing
     const tree = await client.callTool({ name: 'kc_tree', arguments: {} });
     assert.doesNotMatch((tree.content as { text: string }[])[0].text, /UDP/);
   } finally {
-    await client.close();
-  }
-});
-
-test('the detail setting reaches open sessions at once: tools/list_changed and a one-time note', async () => {
-  const patch = (detail: boolean) =>
-    fetch(new URL('/api/settings', base), { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ detail }) });
-  const client = await connect();
-  let changed = 0;
-  client.setNotificationHandler(ToolListChangedNotificationSchema, () => void changed++);
-  const texts = (r: unknown) => (r as { content: { text: string }[] }).content.map((c) => c.text).join('\n');
-  const track = (node: object) => client.callTool({ name: 'kc_track', arguments: { nodes: [{ summary: 's', parent: 'root', ...node }] } });
-  try {
-    await client.callTool({ name: 'kc_start', arguments: { title: 'Dettaglio live' } });
-    await new Promise((r) => setTimeout(r, 50)); // the notification stream opens after initialization
-    await patch(true);
-    await new Promise((r) => setTimeout(r, 100));
-    assert.equal(changed, 1);
-    const schema = JSON.stringify((await client.listTools()).tools.find((t) => t.name === 'kc_track')!.inputSchema);
-    assert.match(schema, /"detail":\{[^}]*key points of your answer, one per line, word for word/);
-
-    const first = await track({ title: 'Primo', detail: '- uno' });
-    assert.match(texts(first), /Detail setting is now on/);
-    const stored = tracker.repo.getVisit(json(first)[0].id)!;
-    assert.equal(stored.detail, '- uno');
-    assert.doesNotMatch(texts(await track({ title: 'Secondo' })), /Detail setting/);
-    // A new chat in the same session (Claude Desktop) learns it from kc_start.
-    assert.match(texts(await client.callTool({ name: 'kc_start', arguments: { title: 'Altra chat' } })), /Detail setting is now on/);
-
-    await patch(false);
-    const off = await track({ title: 'Terzo', detail: '- ignorato' });
-    assert.match(texts(off), /Detail setting is now off/);
-    assert.equal(tracker.repo.getVisit(json(off)[0].id)!.detail, null);
-  } finally {
-    await patch(false);
     await client.close();
   }
 });
@@ -294,7 +248,7 @@ test('memory (D19): kc_start carries a compact profile and the recall rule only 
   assert.equal(recall[0].thin, true);
   assert.equal(json(await on.callTool({ name: 'kc_recall', arguments: { query: 'Event sourcing' } }))[0].thin, undefined);
 
-  assert.deepEqual(await (await patch({ memory: false })).json(), { detail: false, memory: false });
+  assert.deepEqual(await (await patch({ memory: false })).json(), { memory: false });
   const off = await connect();
   const without = await startText(off);
   assert.ok(!/User's graph|Areas:/.test(without), 'no profile when off');

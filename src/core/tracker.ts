@@ -293,17 +293,12 @@ export class Tracker {
   }
 
   settings(): Settings {
-    return { detail: this.repo.getSetting('detail') === 'on', memory: this.repo.getSetting('memory') !== 'off' };
+    return { memory: this.repo.getSetting('memory') !== 'off' };
   }
 
   updateSettings(patch: Partial<Settings>): Settings {
-    const before = this.settings();
-    if (patch.detail !== undefined) this.repo.setSetting('detail', patch.detail ? 'on' : 'off');
     if (patch.memory !== undefined) this.repo.setSetting('memory', patch.memory ? 'on' : 'off');
-    const settings = this.settings();
-    // Live MCP sessions re-register their tools on this (D17: no restart of the client).
-    if (settings.detail !== before.detail) this.emit({ type: 'settings.changed', settings });
-    return settings;
+    return this.settings();
   }
 
   focus(conversationId: string, visitId: string | null): void {

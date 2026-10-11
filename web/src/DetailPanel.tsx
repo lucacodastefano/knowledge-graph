@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Markdown } from './Markdown.tsx';
 import { api, explain, type ConceptOccurrence, type ConceptPage, type ConceptSection, type ConceptSource, type Visit } from './api.ts';
 import { ConceptSearch } from './ConceptSearch.tsx';
 
@@ -468,13 +469,13 @@ interface TextsProps {
   onChange: (id: string, patch: Partial<NodeDraft>) => void;
 }
 
-/** Node text (key sentences of the answer) and key points, read-only or edited in place with the same look. */
+/** Node label text and the full detail of the answer (markdown), read-only or edited in place. */
 function Texts({ id, summary, detail, draft, onChange }: TextsProps) {
   if (!draft) {
     return (
       <>
         <p>{summary}</p>
-        {detail && <KeyPoints text={detail} />}
+        {detail && <Markdown text={detail} />}
       </>
     );
   }
@@ -489,27 +490,12 @@ function Texts({ id, summary, detail, draft, onChange }: TextsProps) {
       {(detail || draft.detail) && (
         <textarea
           className="editable"
-          aria-label="Punti chiave"
+          aria-label="Dettaglio della risposta"
           value={draft.detail}
           onChange={(e) => onChange(id, { detail: e.target.value })}
         />
       )}
     </>
-  );
-}
-
-/** The model's key points (D17), one per line, shown as a list. */
-function KeyPoints({ text }: { text: string }) {
-  const points = text
-    .split('\n')
-    .map((l) => l.replace(/^\s*[-*•\d.)]+\s*/, '').trim())
-    .filter(Boolean);
-  return (
-    <ul className="key-points">
-      {points.map((p, i) => (
-        <li key={i}>{p}</li>
-      ))}
-    </ul>
   );
 }
 

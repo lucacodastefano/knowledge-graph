@@ -1,10 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { fileURLToPath } from 'node:url';
 import type { FastifyInstance } from 'fastify';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { ToolListChangedNotificationSchema } from '@modelcontextprotocol/sdk/types.js';
 import { SqliteRepository } from '../src/core/sqlite-repository.ts';
 import { Tracker } from '../src/core/tracker.ts';
 import { buildApp } from '../src/server/app.ts';
@@ -65,32 +61,5 @@ test('the bridge keeps a daemon of its version or newer, and replaces an older o
   } finally {
     await old.app.close();
     await (await replacement)?.app.close();
-  }
-});
-
-test('the stdio bridge relays tools/list_changed when the canvas toggles detail', async () => {
-  const d = await daemon();
-  const root = fileURLToPath(new URL('..', import.meta.url));
-  const client = new Client({ name: 'bridge-test', version: '1.0.0' });
-  const changed = new Promise<void>((resolve) => client.setNotificationHandler(ToolListChangedNotificationSchema, () => resolve()));
-  try {
-    await client.connect(
-      new StdioClientTransport({
-        command: process.execPath,
-        args: ['--disable-warning=ExperimentalWarning', 'src/server/cli.ts', 'stdio'],
-        cwd: root,
-        env: { ...process.env, KG_PORT: String(d.port) } as Record<string, string>,
-        stderr: 'ignore',
-      }),
-    );
-    const tools = async () => JSON.stringify((await client.listTools()).tools.find((t) => t.name === 'kc_track')!.inputSchema);
-    assert.ok(!(await tools()).includes('detail'));
-    await new Promise((r) => setTimeout(r, 200)); // the daemon's notification stream opens after initialization
-    d.tracker.updateSettings({ detail: true });
-    await Promise.race([changed, new Promise((_, reject) => setTimeout(() => reject(new Error('no tools/list_changed')), 3000))]);
-    assert.ok((await tools()).includes('detail'));
-  } finally {
-    await client.close();
-    await d.app.close();
   }
 });

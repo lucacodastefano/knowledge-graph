@@ -103,7 +103,7 @@ export async function buildApp({ tracker, webRoot, logger = false, onShutdown }:
   app.get('/api/settings', async () => tracker.settings());
   app.patch<{ Body: Partial<Settings> }>(
     '/api/settings',
-    { schema: { body: { type: 'object', properties: { detail: { type: 'boolean' }, memory: { type: 'boolean' } }, additionalProperties: false } } },
+    { schema: { body: { type: 'object', properties: { memory: { type: 'boolean' } }, additionalProperties: false } } },
     async (req) => tracker.updateSettings(req.body),
   );
 
