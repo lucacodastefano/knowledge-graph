@@ -65,6 +65,7 @@ async function stopDaemon(base: string, h: Health): Promise<boolean> {
 function startDaemon(): void {
   const child = spawn(process.execPath, [...process.execArgv, process.argv[1], 'serve'], {
     detached: true,
+    windowsHide: true,
     stdio: 'ignore',
     env: process.env,
   });
