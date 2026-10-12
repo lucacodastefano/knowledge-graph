@@ -16,6 +16,6 @@ It prints two URLs after about 5 minutes:
 
 ## Update, cost, data
 - Update to the latest `main`: `deploy/azure/update.sh`.
-- Cost: `Standard_B1s` is free for 12 months on a new Azure account, about EUR 8/month afterwards. Set a budget alert in the portal. Delete everything with `az group delete -n rg-<name>`.
+- Cost: the script tries only the sizes of Azure's 12-month free offer (B1s, B2ats v2, B2pts v2; new accounts only) across several regions, and creates nothing if none is available. Paid sizes (about EUR 8-10/month) are used only with `ALLOW_PAID=1`, with a warning. Set a budget alert in the portal. Delete everything with `az group delete -n rg-<name>`.
 - Backup: `ssh kg@<fqdn>` then `sudo docker compose -f /opt/kg/deploy/azure/docker-compose.yml exec app node -e "new (require('node:sqlite').DatabaseSync)('/data/graph.db').exec(\"VACUUM INTO '/data/backup.db'\")"`.
 - Env vars of the daemon: `KG_HOST` (default `127.0.0.1`) and `KG_TOKEN`. A non-local host without a token refuses to start. Without `KG_TOKEN` nothing changes for local use.
