@@ -4,3 +4,4 @@ web/dist/
 *.db
 *.db-*
 test/e2e/out/
+dist-win/

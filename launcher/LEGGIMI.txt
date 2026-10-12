@@ -1,0 +1,20 @@
+KNOWLEDGE GRAPH - versione portabile per Windows
+================================================
+
+Non serve installare nulla (Node.js e' incluso nella cartella).
+
+1. Estrai tutta la cartella dallo zip (tasto destro > Estrai tutto), anche sul Desktop o su una chiavetta.
+2. Doppio clic su KnowledgeGraph.exe: si apre una finestra nera e il browser su http://localhost:7777.
+   Per fermarlo chiudi la finestra nera. Se e' gia' in esecuzione apre solo il browser.
+   La prima volta Windows puo' mostrare "Windows ha protetto il PC" (l'app non e' firmata):
+   clicca "Ulteriori informazioni" poi "Esegui comunque".
+3. Per usarlo con Claude Desktop: doppio clic su "Configura Claude Desktop.cmd", poi chiudi del tutto
+   Claude Desktop (icona nella barra delle applicazioni > Esci) e riaprilo.
+
+I dati (data\graph.db) stanno dentro questa cartella: spostando la cartella sposti tutto.
+Aggiornare: scarica il nuovo zip, sostituisci la cartella tenendo la tua cartella data\ e rilancia
+"Configura Claude Desktop.cmd" se hai spostato la cartella.
+Usare un database esistente: chiudi l'app e copia il tuo graph.db (di solito in
+C:\Users\<tu>\.knowledge-graph\) dentro data\, sostituendo quello vuoto.
+
+Altre opzioni: KnowledgeGraph.exe --ferma  (ferma il server avviato in background da Claude Desktop)

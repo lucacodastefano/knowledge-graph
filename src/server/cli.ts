@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { copyFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // node:sqlite still prints an ExperimentalWarning on Node 22: hide it from users, keep every other warning.
@@ -22,6 +22,8 @@ const usage = `Usage: knowledge-graph [command]
 Commands:
   serve          start the daemon: canvas on http://localhost:${port}, MCP on /mcp (default)
   stdio          stdio bridge for MCP clients without HTTP support (starts the daemon if needed)
+  configure-claude [--db <file>] [--config <file>]
+                 add this install to Claude Desktop's config (backup first; other servers untouched)
   install-skill  copy the Claude Code skill into ~/.claude/skills/knowledge-graph
   help, version
 
@@ -61,11 +63,33 @@ function installSkill() {
   console.error(`knowledge-graph: skill installed in ${target}`);
 }
 
+/** Registers this install (node + cli.js, database path) as the stdio server of Claude Desktop. */
+async function configureClaudeDesktop(args: string[]) {
+  const { claudeConfigPaths, configureClaude } = await import('./claude-config.ts');
+  const opt = (name: string) => args[args.indexOf(name) + 1] ?? undefined;
+  const db = resolve(opt('--db') ?? dbPath);
+  const config = opt('--config');
+  const paths = config ? [resolve(config)] : claudeConfigPaths();
+  if (!paths.length) throw new Error('APPDATA is not set: pass --config <claude_desktop_config.json>');
+  const entry = { command: process.execPath, args: [resolve(process.argv[1]), 'stdio'], env: { KG_DB: db } };
+  for (const { file, backup } of configureClaude(paths, entry)) {
+    console.error(`knowledge-graph: updated ${file}${backup ? ` (backup: ${backup})` : ''}`);
+  }
+  console.error(`knowledge-graph: database ${db}. Restart Claude Desktop (quit it from the tray icon) to load it.`);
+}
+
 const command = process.argv[2] ?? 'serve';
 if (command === 'serve') await serve();
 else if (command === 'stdio') {
   const { runBridge } = await import('../bridge/stdio-bridge.ts');
   await runBridge(`http://127.0.0.1:${port}/mcp`);
+} else if (command === 'configure-claude') {
+  try {
+    await configureClaudeDesktop(process.argv.slice(3));
+  } catch (err) {
+    console.error(`knowledge-graph: ${(err as Error).message}`);
+    process.exit(1);
+  }
 } else if (command === 'install-skill') installSkill();
 else if (command === 'version' || command === '--version' || command === '-v') {
   console.log(JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8')).version);

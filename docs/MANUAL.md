@@ -43,6 +43,18 @@ knowledge-graph
 
 Example: `KG_PORT=8080 KG_DB=~/notes/study.db npx @lucacodastefano/knowledge-graph`. If you change the port, use the same value in your client configuration.
 
+### Windows portable version
+
+No install, no Node.js needed: a folder you unzip and run.
+
+1. Download `knowledge-graph-win-x64.zip` from the [latest release](https://github.com/lucacodastefano/knowledge-graph/releases/latest) and extract the whole folder (anywhere, even a USB stick).
+2. Double-click `KnowledgeGraph.exe`: a console window starts the server and your browser opens http://localhost:7777. Close the window to stop it. The executable is not code-signed, so Windows may show "Windows protected your PC": choose *More info* → *Run anyway*.
+3. For Claude Desktop, double-click `Configura Claude Desktop.cmd`, then quit Claude Desktop completely (tray icon → Quit) and reopen it. The script backs up `claude_desktop_config.json` and only adds or updates the `knowledge-graph` entry.
+
+Everything you create lives in `data\graph.db` inside the folder, so moving the folder moves your graphs (run the configure script again after moving it). To **update**, extract the new zip and copy your old `data\` folder into it. To **keep an existing database**, close the app and copy your `graph.db` (normally `C:\Users\<you>\.knowledge-graph\`) over `data\graph.db`. `KnowledgeGraph.exe --ferma` stops a server started in the background by Claude Desktop.
+
+Build it yourself from Linux or macOS with `npm run package:win` (needs Go and curl; downloads the pinned official Node.js for Windows and verifies its checksum).
+
 ## 2. Connect your model
 
 Any MCP client works. HTTP is the direct route; stdio goes through the bridge. Either way the server sends its tracking rules to the model when the client connects, so no prompt is needed on your side.
