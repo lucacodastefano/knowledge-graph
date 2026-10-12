@@ -1,0 +1,17 @@
+#cloud-config
+# Runs once on first boot: Docker, swap (the 1 GB VM needs it to build the canvas), the app and HTTPS.
+package_update: true
+packages: [docker.io, docker-compose-v2, git]
+write_files:
+  - path: /opt/kg-env
+    permissions: '0600'
+    content: |
+      KG_TOKEN=__TOKEN__
+      KG_FQDN=__FQDN__
+runcmd:
+  - fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
+  - echo '/swapfile none swap sw 0 0' >> /etc/fstab
+  - systemctl enable --now docker
+  - git clone --depth 1 --branch __BRANCH__ https://github.com/lucacodastefano/knowledge-graph /opt/kg
+  - cp /opt/kg-env /opt/kg/deploy/azure/.env
+  - cd /opt/kg/deploy/azure && docker compose up -d --build

@@ -81,3 +81,5 @@ npm run build                   # what gets published: dist/ (server) + web/dist
 Architecture and decisions (Italian): [docs/ARCHITETTURA.md](docs/ARCHITETTURA.md).
 
 MIT licensed.
+
+Hosting it in the cloud (Azure VM with HTTPS and a secret token): [docs/AZURE.md](docs/AZURE.md).

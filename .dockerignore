@@ -1,0 +1,9 @@
+node_modules
+web/node_modules
+dist
+web/dist
+dist-win
+.git
+*.db
+*.db-*
+test/e2e/out

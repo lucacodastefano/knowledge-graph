@@ -11,6 +11,7 @@ import { Reader } from '../core/reader.ts';
 import type { Settings } from '../core/types.ts';
 import { createMcpServer, type McpSessionState } from './mcp.ts';
 import { VERSION } from '../version.ts';
+import { registerAuth, tokenRewriteUrl } from './auth.ts';
 
 export interface AppOptions {
   tracker: Tracker;
@@ -19,6 +20,8 @@ export interface AppOptions {
   logger?: boolean;
   /** Graceful stop, exposed as POST /api/shutdown (local origins only, like every route). */
   onShutdown?: () => void;
+  /** Hosted mode: every route needs this secret, and pages served from the request's own host are allowed. */
+  token?: string;
 }
 
 /** Only local pages may talk to the daemon (DNS-rebinding protection). Clients without Origin (CLIs) are allowed. */
@@ -32,8 +35,16 @@ export function isAllowedOrigin(origin: string | undefined): boolean {
   }
 }
 
-export async function buildApp({ tracker, webRoot, logger = false, onShutdown }: AppOptions): Promise<FastifyInstance> {
-  const app = Fastify({ logger });
+const safeHost = (origin: string) => {
+  try {
+    return new URL(origin).host;
+  } catch {
+    return null;
+  }
+};
+
+export async function buildApp({ tracker, webRoot, logger = false, onShutdown, token }: AppOptions): Promise<FastifyInstance> {
+  const app = Fastify({ logger, rewriteUrl: tokenRewriteUrl(token) });
   await app.register(websocket);
 
   // Domain errors (unknown id, invalid edit) are the caller's fault.
@@ -43,8 +54,11 @@ export async function buildApp({ tracker, webRoot, logger = false, onShutdown }:
   });
 
   app.addHook('onRequest', async (req, reply) => {
-    if (!isAllowedOrigin(req.headers.origin)) return reply.code(403).send({ error: 'Origin not allowed' });
+    const sameHost = token && req.headers.origin && safeHost(req.headers.origin) === req.headers.host;
+    if (!sameHost && !isAllowedOrigin(req.headers.origin)) return reply.code(403).send({ error: 'Origin not allowed' });
   });
+
+  if (token) registerAuth(app, token);
 
   // --- MCP (Streamable HTTP, one transport + server per MCP session) ---
   const transports = new Map<string, StreamableHTTPServerTransport>();
