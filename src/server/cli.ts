@@ -12,6 +12,9 @@ process.emitWarning = ((warning: string | Error, ...rest: unknown[]) => {
 }) as typeof process.emitWarning;
 
 const port = Number(process.env.KG_PORT ?? 7777);
+// Hosted mode: KG_HOST=0.0.0.0 exposes the daemon, so KG_TOKEN (a secret) is then mandatory.
+const host = process.env.KG_HOST ?? '127.0.0.1';
+const token = process.env.KG_TOKEN || undefined;
 const dbPath = process.env.KG_DB ?? join(homedir(), '.knowledge-graph', 'graph.db');
 // Same depth from src/server/cli.ts and from the built dist/server/cli.js.
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -27,13 +30,15 @@ Commands:
   install-skill  copy the Claude Code skill into ~/.claude/skills/knowledge-graph
   help, version
 
-Environment: KG_PORT (default 7777), KG_DB (default ~/.knowledge-graph/graph.db)`;
+Environment: KG_PORT (default 7777), KG_DB (default ~/.knowledge-graph/graph.db),
+             KG_HOST (default 127.0.0.1) and KG_TOKEN (required when KG_HOST is not local)`;
 
 async function serve() {
   // Loaded lazily so the warning filter above is in place before node:sqlite is imported.
   const { SqliteRepository } = await import('../core/sqlite-repository.ts');
   const { Tracker } = await import('../core/tracker.ts');
   const { buildApp } = await import('./app.ts');
+  if (!['127.0.0.1', 'localhost', '::1'].includes(host) && !token) throw new Error('KG_TOKEN is required when KG_HOST is not a local address');
   mkdirSync(dirname(dbPath), { recursive: true });
   const repo = new SqliteRepository(dbPath);
   const tracker = new Tracker(repo);
@@ -47,8 +52,8 @@ async function serve() {
     repo.close();
     process.exit(0);
   };
-  const app = await buildApp({ tracker, webRoot, onShutdown: () => void stop() });
-  await app.listen({ host: '127.0.0.1', port });
+  const app = await buildApp({ tracker, webRoot, onShutdown: () => void stop(), token });
+  await app.listen({ host, port });
   // Keep graph.db complete on disk: the WAL is folded in every few seconds and on shutdown.
   setInterval(() => repo.checkpoint(), 10_000).unref();
   for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) process.once(signal, () => void stop());
