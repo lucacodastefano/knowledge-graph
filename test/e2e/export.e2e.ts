@@ -107,7 +107,7 @@ test('an exported map keeps the folded branches and their toggles', async () => 
   const toggle = page.getByTestId('collapse-toggle');
   await toggle.waitFor();
   assert.equal(await page.locator('[data-testid=visit]').count(), 1);
-  assert.equal((await toggle.innerText()).trim(), '+2');
+  assert.equal((await toggle.innerText()).trim(), '2');
   await toggle.click();
   await page.locator('[data-testid=visit]').nth(2).waitFor();
   assert.equal((await toggle.innerText()).trim(), '−');

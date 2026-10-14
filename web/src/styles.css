@@ -47,9 +47,18 @@ main { position: relative; flex: 1; min-height: 0; overflow: hidden; }
 .visit .also { display: block; font-size: 11px; color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .visit.shared .visit-title { -webkit-line-clamp: 1; }
 .visit .also { max-width: 100%; }
-.visit .collapse-toggle { position: absolute; left: 50%; bottom: -20px; transform: translateX(-50%); min-width: 20px; height: 20px; padding: 0 5px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--muted, #667); font: inherit; font-size: 11px; line-height: 18px; text-align: center; cursor: pointer; z-index: 2; }
-.visit .collapse-toggle:hover { border-color: var(--accent); color: var(--accent); }
-.visit .collapse-toggle.folded { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+/* Branch toggle, XMind style: a small circle where the branches leave the node. Open: only on hover; folded: always, with the hidden count. */
+.visit .collapse-toggle { position: absolute; top: 50%; width: 20px; height: 20px; margin-top: -10px; padding: 0; box-sizing: border-box; border-radius: 10px; border: 1.5px solid var(--border); background: var(--surface); color: var(--muted, #667); font: inherit; font-size: 13px; font-weight: 600; line-height: 17px; text-align: center; cursor: pointer; z-index: 3; opacity: 0; transition: opacity 0.12s, background 0.12s, border-color 0.12s, color 0.12s; }
+.visit .collapse-toggle.right { right: -34px; }
+/* Invisible bridge from the node to its toggle, so the pointer keeps the node hovered on the way. */
+.visit.branch-right::after, .visit.branch-left::after { content: ''; position: absolute; top: 0; bottom: 0; width: 40px; }
+.visit.branch-right::after { left: 100%; }
+.visit.branch-left::after { right: 100%; }
+.visit .collapse-toggle.left { left: -34px; }
+.visit:hover .collapse-toggle, .visit .collapse-toggle:focus-visible { opacity: 1; }
+.visit .collapse-toggle:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.visit .collapse-toggle.folded { opacity: 1; min-width: 20px; width: auto; padding: 0 6px; background: var(--accent); border-color: var(--accent); color: #fff; font-size: 11px; line-height: 17px; }
+.visit .collapse-toggle.folded:hover { background: var(--accent); color: #fff; filter: brightness(1.1); }
 .visit .also-link { all: unset; cursor: pointer; text-decoration: underline; }
 /* Number of sources the model cited for the node (details in Approfondisci). */
 .visit .source-badge { position: absolute; top: -7px; right: -7px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; font-size: 10px; line-height: 16px; text-align: center; color: #fff; background: var(--accent); }

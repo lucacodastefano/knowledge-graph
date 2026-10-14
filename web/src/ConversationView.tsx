@@ -1044,12 +1044,19 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
   }, [pointed, selected, tree]);
   const focusId = near ? (pointed ?? selected) : null;
   const shown = useMemo(
-    () =>
-      nodes.filter((n) => !branches.hidden.has(n.id)).map((n0) => {
+    () => {
+      // The toggle sits where the branches leave the node: on the side facing away from its parent (right for a root).
+      const at = new Map(nodes.map((n) => [n.id, n.position.x]));
+      const toggleSide = (n: VisitNodeType): 'left' | 'right' => {
+        const parent = n.data.visit.parentVisitId;
+        const px = parent ? at.get(parent) : undefined;
+        return px !== undefined && n.position.x < px ? 'left' : 'right';
+      };
+      return nodes.filter((n) => !branches.hidden.has(n.id)).map((n0) => {
         const folded = collapsed.has(n0.id) && branches.kids.has(n0.id);
         const n =
           branches.kids.has(n0.id)
-            ? { ...n0, data: { ...n0.data, collapsible: true, collapsed: folded, hiddenCount: folded ? (branches.size.get(n0.id) ?? 0) : 0, onToggle: toggle } }
+            ? { ...n0, data: { ...n0.data, collapsible: true, collapsed: folded, toggleSide: toggleSide(n0), hiddenCount: folded ? (branches.size.get(n0.id) ?? 0) : 0, onToggle: toggle } }
             : n0;
         const match = n.data.visit.conceptId === matchConcept;
         const focus = n.id === focusId || n.id === drop?.target;
@@ -1059,7 +1066,8 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
         return fresh.has(n.id) || match || near || cover
           ? { ...n, data: { ...n.data, fresh: fresh.has(n.id), match, focus, related, dim, cover } }
           : n;
-      }),
+      });
+    },
     [nodes, fresh, matchConcept, near, focusId, drop, edgeHover, branches, collapsed, toggle],
   );
   const base = edges;
