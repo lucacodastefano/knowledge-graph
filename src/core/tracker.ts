@@ -434,7 +434,7 @@ export class Tracker {
 
   /**
    * Links two graphs (D25): a reference node under `parentRef` of `conversationId` (root when omitted) and its return
-   * node at the root of the target graph (or under `targetParentRef`), each titled with the other graph. Asking again for
+   * node under the main (oldest root) node of the target graph (or under `targetParentRef`), each titled with the other graph. Asking again for
    * the same pair under the same parent returns the existing nodes.
    */
   createReference(conversationId: string, targetConversationId: string, parentRef?: string | null, targetParentRef?: string | null): { visits: [Visit, Visit]; created: boolean } {
@@ -446,7 +446,9 @@ export class Tracker {
       return r && r !== 'root' ? this.resolveNode(cid, r).id : null;
     };
     const parentVisitId = parentId(conversationId, parentRef);
-    const targetParentVisitId = parentId(targetConversationId, targetParentRef);
+    // Without an explicit parent the return node hangs under the target's main node (its oldest root), so it is connected.
+    const mainRoot = (this.repo.getTree(targetConversationId)?.visits ?? []).find((v) => !v.parentVisitId && !v.ref)?.id ?? null;
+    const targetParentVisitId = parentId(targetConversationId, targetParentRef) ?? mainRoot;
     for (const p of [this.repo.getVisit(parentVisitId ?? ''), this.repo.getVisit(targetParentVisitId ?? '')]) {
       if (p?.ref) throw new TrackerError(`"${p.title}" is a reference to another graph: nothing can hang under it`);
     }

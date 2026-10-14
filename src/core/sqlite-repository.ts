@@ -209,6 +209,25 @@ export class SqliteRepository implements Repository {
     this.db.exec('CREATE INDEX IF NOT EXISTS visits_ref ON visits(ref_visit_id)');
     this.migrateTextSearch();
     this.migrateRelations();
+    this.migrateReferenceRoots();
+  }
+
+  /**
+   * Reference nodes used to be created at root level, with no edge. Once, each one still at root level is hooked under the
+   * oldest non-reference root node of its graph (graphs without one keep it at root).
+   */
+  private migrateReferenceRoots() {
+    if (this.getSetting('migrated_reference_roots')) return;
+    this.transaction(() => {
+      this.db.exec(`
+        UPDATE visits SET parent_visit_id = (
+          SELECT m.id FROM visits m WHERE m.conversation_id = visits.conversation_id AND m.parent_visit_id IS NULL AND m.ref_visit_id IS NULL
+          ORDER BY m.seq LIMIT 1)
+        WHERE ref_visit_id IS NOT NULL AND parent_visit_id IS NULL
+          AND EXISTS (SELECT 1 FROM visits m WHERE m.conversation_id = visits.conversation_id AND m.parent_visit_id IS NULL AND m.ref_visit_id IS NULL)
+      `);
+      this.setSetting('migrated_reference_roots', '1');
+    });
   }
 
   /**

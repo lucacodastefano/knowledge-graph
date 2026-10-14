@@ -56,10 +56,10 @@ test('link two graphs from the canvas, follow the reference, come back, delete o
   await page.waitForTimeout(1900); // the new node's glow
   await page.screenshot({ path: join(out, 'rimandi-2-grafo-partenza.png') });
 
-  // The return node exists in the other graph at root level.
+  // The return node exists in the other graph, hanging under its main node (Flink).
   const back = tracker.repo.getTree(stream.id)!.visits.find((v) => v.ref);
   assert.equal(back?.title, 'Kafka');
-  assert.equal(back?.parentVisitId, null);
+  assert.equal(back?.parentVisitId, tracker.repo.getTree(stream.id)!.visits.find((v) => v.title === 'Flink')!.id);
 
   // Click on the reference: Streaming opens centred on the return node, with "← torna a Kafka".
   await ref.click();
