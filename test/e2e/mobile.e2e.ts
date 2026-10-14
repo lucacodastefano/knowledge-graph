@@ -38,6 +38,19 @@ const IPHONE = {
   isMobile: true,
   userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
 };
+/** Every parent-child link of the graph is drawn as a visible, non-empty line (a missing edge layer or hidden handles lose them). */
+async function assertEdgesDrawn(page: import('playwright').Page) {
+  const [conv] = await (await page.request.get(`${base}/api/conversations`)).json();
+  const tree = await (await page.request.get(`${base}/api/conversations/${conv.id}/tree`)).json();
+  const expected = tree.visits.filter((v: { parentVisitId: string | null }) => v.parentVisitId).length;
+  assert.ok(expected >= 8, 'the sample graph has parent-child links');
+  await page.waitForFunction((n) => document.querySelectorAll('.react-flow__edge:not(.cross-link):not(.relation)').length >= n, expected);
+  const drawn = await page.evaluate(() =>
+    [...document.querySelectorAll<SVGPathElement>('.react-flow__edge:not(.cross-link):not(.relation) path.react-flow__edge-path')].filter((p) => p.getTotalLength() > 5 && getComputedStyle(p).visibility !== 'hidden').length,
+  );
+  assert.equal(drawn, expected, 'one visible line per parent-child link');
+}
+
 /** A node that is on screen at the initial zoom (the view opens on the current node). */
 const visibleNode = (page: Page) => page.locator('[data-testid=visit]').filter({ has: page.locator('.visit-title', { hasText: 'Proiezioni di lettura' }) });
 const phone = (width = 390, height = 844) => browser.newContext({ ...IPHONE, viewport: { width, height } });
@@ -81,6 +94,7 @@ test('phone: header, graph bar and Approfondisci stay inside the screen and reac
   const header = (await page.locator('header.bar').boundingBox())!;
   assert.ok(header.height <= 56, `header is one row (${header.height}px)`);
   assert.equal(await page.locator('.bar-map').evaluate((e) => e.getBoundingClientRect().width > 120), true, 'graph selector has room');
+  await assertEdgesDrawn(page);
   const zoom = await page.evaluate(() => new DOMMatrix(getComputedStyle(document.querySelector('.react-flow__viewport')!).transform).a);
   assert.ok(zoom >= 0.7, `readable initial zoom (${zoom})`);
 
