@@ -11,8 +11,6 @@ import { meterTools } from './metering.ts';
 export interface McpSessionState {
   conversationId: string | null;
   client: string | null;
-  /** Title given to kc_start while similar maps were on offer: the graph is created on the first kc_track unless one is resumed. */
-  pendingTitle?: string | null;
 }
 
 const ok = (data: unknown): CallToolResult => ({ content: [{ type: 'text', text: JSON.stringify(data) }] });
@@ -67,15 +65,18 @@ function expandSources(nodes: TrackNodeInput[], shared: string[] | undefined): T
 }
 
 export function createMcpServer(tracker: Tracker, state: McpSessionState): McpServer {
-  // D19: like the server instructions, the memory profile follows the setting as it was when the session opened.
-  const instructionsMemory = tracker.settings().memory;
-  const server = new McpServer({ name: 'knowledge-graph', version: VERSION }, { instructions: trackingInstructions({ memory: instructionsMemory }) });
+  const server = new McpServer({ name: 'knowledge-graph', version: VERSION }, { instructions: trackingInstructions() });
 
   meterTools(server, tracker, state);
   const reader = new Reader(tracker.repo);
 
   const conversationId = () => {
-    if (!state.conversationId) state.conversationId = tracker.startConversation(state.pendingTitle ?? undefined, state.client).id;
+    if (!state.conversationId) state.conversationId = tracker.startConversation(undefined, state.client).id;
+    return state.conversationId;
+  };
+  /** Tools that only read need a graph of this chat: they never fall back to another one (D22). */
+  const startedConversation = () => {
+    if (!state.conversationId) throw new TrackerError('No graph started in this chat: call kc_start first');
     return state.conversationId;
   };
 
@@ -83,38 +84,15 @@ export function createMcpServer(tracker: Tracker, state: McpSessionState): McpSe
     'kc_start',
     {
       description:
-        'Start the canvas graph at the first real topic of every chat (once per chat; a new topic is kc_track with parent "root"). To continue an earlier graph ("continue the research on X"), pass resume: its id or title.',
+        'Start this chat\'s graph at the first real topic (once per chat; a new topic is kc_track with parent "root"). A title always makes a new empty graph. Only to continue an earlier graph the user asked for, pass resume: its id or title.',
       inputSchema: { title: z.string().optional(), resume: z.string().optional() },
     },
     ({ title, resume }) =>
       guarded(() => {
-        let c;
-        let note = START_NOTE;
-        let similar: ReturnType<Reader['similarMaps']> = [];
-        state.pendingTitle = null;
-        const same = resume ? undefined : tracker.sameTitle(title);
-        if (resume) {
-          c = tracker.findConversation(resume);
-        } else if (same) {
-          c = same;
-          note = `Resumed the existing graph "${c.title}" instead of creating another. ${START_NOTE}`;
-        } else {
-          similar = title ? reader.similarMaps(title) : [];
-          // With similar maps on offer the new one is held back until the model decides, so no empty duplicate is left.
-          if (similar.length) state.pendingTitle = title;
-          else c = tracker.startConversation(title, state.client);
-        }
-        state.conversationId = c?.id ?? null;
-        const lines = similar.length
-          ? [
-              `Similar graphs: ${similar.map((m) => `"${m.title}" [${m.id}] ${m.last}, ${m.nodes} nodes`).join('; ')}`,
-              'To continue one, call kc_start(resume: its id or title) instead of starting another. Otherwise kc_track starts a new graph.',
-            ]
-          : [];
-        const result = ok({ conversation: state.conversationId });
-        const profile = instructionsMemory && c && !resume && !same ? reader.memoryProfile() : '';
-        const tree = c ? `${reader.tree(c.id, false, true)}\n` : '';
-        result.content.push({ type: 'text', text: `${tree}${lines.length ? `${lines.join('\n')}\n` : ''}${profile ? `${profile}\n` : ''}${note}` });
+        const c = resume ? tracker.findConversation(resume) : tracker.startConversation(title, state.client);
+        state.conversationId = c.id;
+        const result = ok({ conversation: c.id });
+        result.content.push({ type: 'text', text: `${reader.tree(c.id, false, true)}\n${START_NOTE}` });
         return result;
       }),
   );
@@ -133,11 +111,10 @@ export function createMcpServer(tracker: Tracker, state: McpSessionState): McpSe
         const id = conversationId();
         const results = tracker.track(id, expandSources(nodes as TrackNodeInput[], sources));
         // Lean result: the touched branch, plus only what needs a decision (no ids, no empty or false fields).
-        const known = results.flatMap((r, i) => (r.knownConcept && !r.updated ? [nodes[i].title.trim()] : []));
         const similar = results.flatMap((r, i) => r.similar.map((m) => `"${nodes[i].title.trim()}" ~ "${m.name}" (conceptId ${m.id})`));
         const text = [
+          `Graph: ${tracker.requireConversation(id).title}`,
           reader.tree(id, false, true, new Set(results.map((r) => r.id))),
-          ...(known.length ? [`Known: ${known.join(', ')}`] : []),
           ...(similar.length ? [`Similar: ${similar.join('; ')}`] : []),
           TRACKED_NOTE,
         ].join('\n');
@@ -181,13 +158,13 @@ export function createMcpServer(tracker: Tracker, state: McpSessionState): McpSe
         const visit = tracker.resolveNode(id, node);
         tracker.focus(id, visit.id);
         return text(`Current: ${visit.title}`);
-      }, 'If it is only in the user\'s graph, kc_track it here instead.'),
+      }, 'If it is in another graph, kc_track it here in your own words instead.'),
   );
 
   server.registerTool(
     'kc_link',
     {
-      description: 'Merge a node into an existing concept: same idea under two names (e.g. kc_track reported it as similar). To re-attach a node elsewhere use kc_move.',
+      description: 'Merge a node into another concept of this graph: same idea under two names (e.g. kc_track reported it as similar). To re-attach a node elsewhere use kc_move.',
       inputSchema: { node: z.string().describe('Title of the node'), conceptId: z.string().describe('conceptId from the Similar line') },
     },
     ({ node, conceptId }) =>
@@ -246,63 +223,66 @@ export function createMcpServer(tracker: Tracker, state: McpSessionState): McpSe
   server.registerTool(
     'kc_recall',
     {
-      description: 'What the user already explored about a topic: concepts, past summaries, dates (thin:true in a result = superficial). Use when a topic first comes up.',
+      description: 'Nodes of this graph that already cover a topic: summaries, parent, sources (thin:true = superficial). Not for other graphs.',
       inputSchema: { query: z.string().describe('Topic or concept name') },
     },
-    ({ query }) => guarded(() => ok(reader.recall(query))),
+    ({ query }) => guarded(() => ok(reader.recall(startedConversation(), query))),
+  );
+
+  server.registerTool(
+    'kc_search_graphs',
+    {
+      description: "Search the user's OTHER graphs; titles and summaries only, grouped by graph. Use only when the user explicitly asks to look in their other graphs; then kc_read(node, graph) for the text.",
+      inputSchema: { query: z.string().describe('Topic or words') },
+    },
+    ({ query }) => guarded(() => ok(reader.searchGraphs(state.conversationId, query))),
   );
 
   server.registerTool(
     'kc_relate',
     {
       description:
-        'Group a concept under a superclass (one per concept; created if new) or relate it to another concept, with an optional label. Concepts must already be on the canvas.',
+        'Group a concept under a superclass (one per concept; created if new) or relate it to another concept, with an optional label. Concepts must already be in this graph.',
       inputSchema: {
         concept: z.string().describe('Concept name'),
         superclass: z.string().optional().describe('Kind-of / part-of group, e.g. "IT architecture"'),
-        related_to: z.string().optional().describe('Another concept'),
+        related_to: z.string().optional().describe('Another concept of this graph'),
         label: z.string().optional().describe('Short verb for related_to, e.g. "governs"'),
       },
     },
     ({ concept, superclass, related_to, label }) =>
-      guarded(() => ok({ done: tracker.relateByName({ concept, superclass, relatedTo: related_to, label }) })),
+      guarded(() => ok({ done: tracker.relateByName(startedConversation(), { concept, superclass, relatedTo: related_to, label }) })),
   );
 
   server.registerTool(
     'kc_tree',
     {
-      description: 'Outline of a graph (default: this one, else the latest), with its relations. A big graph shows 2 levels, collapsed branches as (+N): open one with root.',
+      description: 'Outline of this graph, with its relations. A big graph shows 2 levels, collapsed branches as (+N): open one with root.',
       inputSchema: {
-        conversation: z.string().optional().describe('Graph id'),
         summaries: z.boolean().optional().describe('Include node texts'),
         root: z.string().optional().describe('Title of a node: outline only its branch'),
         depth: z.number().int().min(1).optional().describe('Levels to show (default 2 on a big map)'),
         relations: z.boolean().optional().describe('Also list the dashed relations'),
       },
     },
-    ({ conversation, summaries, root, depth, relations }) =>
-      guarded(() => text(reader.tree(conversation ?? state.conversationId, summaries ?? false, false, undefined, { root, depth, relations, orient: true }))),
+    ({ summaries, root, depth, relations }) =>
+      guarded(() => text(reader.tree(startedConversation(), summaries ?? false, false, undefined, { root, depth, relations, orient: true }))),
   );
 
   server.registerTool(
     'kc_read',
     {
-      description: 'Full text of one node (title in this graph, or a concept of the global graph) and its children\'s titles.',
-      inputSchema: { node: z.string().describe('Title') },
+      description: "Full text of one node of this graph and its children's titles. `graph` (id or title) reads a node of another graph: only after kc_search_graphs.",
+      inputSchema: { node: z.string().describe('Title'), graph: z.string().optional().describe('Another graph, only after kc_search_graphs') },
     },
-    ({ node }) => guarded(() => text(reader.read(state.conversationId, node))),
-  );
-
-  server.registerTool(
-    'kc_profile',
-    { description: "Overview of the global graph: top and recent concepts, last graphs." },
-    () => guarded(() => ok(reader.profile())),
+    ({ node, graph }) =>
+      guarded(() => text(reader.read(graph ? tracker.findConversation(graph).id : startedConversation(), node))),
   );
 
   server.registerPrompt(
     'kc_instructions',
     { description: 'How to keep the knowledge-graph canvas up to date during a chat.' },
-    () => ({ messages: [{ role: 'user', content: { type: 'text', text: trackingInstructions(tracker.settings()) } }] }),
+    () => ({ messages: [{ role: 'user', content: { type: 'text', text: trackingInstructions() } }] }),
   );
 
   return server;

@@ -74,20 +74,16 @@ export interface ConceptOccurrence extends Visit {
 
 /** The "Approfondisci" page of a concept. */
 export interface ConceptPage extends Concept {
+  /** Set when the page was opened from a map that holds the concept: its occurrences come first, the others follow. */
+  conversationId?: string;
   visits: ConceptOccurrence[];
   /** Sources of every visit of the concept, each once, newest first. */
   sources: ConceptSource[];
-  /** Concepts joined to this one by a free relation drawn on the canvas. */
+  /** Concepts joined to this one by a free relation drawn on the canvas (in the map the page was opened from, else in any). */
   related: (ConceptMatch & { label?: string })[];
   /** The one superclass this concept sits under ("is a kind of"), and the concepts it groups. */
   superclass: ConceptMatch | null;
   members: ConceptMatch[];
-}
-
-/** Canvas settings that change what the server exposes to the model. */
-export interface Settings {
-  /** D19: kc_start carries a compact profile of the user's graph and the model recalls known topics on its own. Default on. */
-  memory: boolean;
 }
 
 /** A previous value kept before an edit (D16); no UI yet. */
@@ -159,6 +155,7 @@ export interface TextHit {
   conversationTitle: string;
   conceptId: string;
   title: string;
+  summary: string;
   /** Where the words were found first. */
   field: 'title' | 'summary' | 'detail';
   /** A short excerpt around the match. */

@@ -35,8 +35,25 @@ export function VisitNode({ data }: NodeProps<VisitNodeType>) {
         </span>
       )}
       {data.also.length > 0 && (
-        <span className="also" title={`Anche in: ${data.also.join(', ')}`}>
-          anche in: {data.also.join(', ')}
+        <span className="also" title={`Compare anche sotto: ${data.also.map((o) => o.parent).join(', ')}`}>
+          compare anche sotto{' '}
+          {data.also.map((o, i) => (
+            <span key={o.id}>
+              {i > 0 && ', '}
+              <button
+                type="button"
+                className="also-link nodrag nopan"
+                title="Vai a quel nodo"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  data.onGoto(o.id);
+                }}
+                onDoubleClick={(e) => e.stopPropagation()}
+              >
+                «{o.parent}»
+              </button>
+            </span>
+          ))}
         </span>
       )}
     </div>

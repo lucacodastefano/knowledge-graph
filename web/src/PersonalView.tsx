@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Graph from 'graphology';
 import Sigma from 'sigma';
 import type { NodeLabelDrawingFunction } from 'sigma/rendering';
-import { api, type PersonalGraph } from './api.ts';
+import { api, explain, type PersonalGraph } from './api.ts';
 import type { Found, LiveEvent } from './App.tsx';
 import { GroupSuggestions } from './GroupSuggestions.tsx';
 import { ISOLATED, layoutPersonalGraph, nextGridSpot, placeNear, seeded, type Point } from './personal-layout.ts';
@@ -256,6 +256,11 @@ export function PersonalView({ live, found, onOpenConcept, onBackgroundClick, fo
   const graphRef = useRef(new Graph<NodeAttrs>());
   const sigmaRef = useRef<Sigma<NodeAttrs> | null>(null);
   const hoverRef = useRef<string | null>(null);
+  /** Dragging a concept: the one in hand, and the superclass under it (where dropping it groups it). */
+  const dragRef = useRef<{ node: string; x: number; y: number; moved: boolean } | null>(null);
+  const dropRef = useRef<string | null>(null);
+  const justDragged = useRef(false);
+  const [notice, setNotice] = useState<string | null>(null);
   /** The edge under the pointer: drawn on top with its label, nodes covering it fade. */
   const edgeHoverRef = useRef<string | null>(null);
   const foundRef = useRef<string | null>(null);
@@ -381,6 +386,8 @@ export function PersonalView({ live, found, onOpenConcept, onBackgroundClick, fo
         if (v.visible && !v.visible.has(node) && !isFound) return { ...data, hidden: true };
         const g = groupOf(node, data);
         const color = g.slot >= 0 ? colors[g.slot] : other;
+        // The superclass a dragged concept would join: it grows and takes the superclass colour.
+        if (node === dropRef.current) return { ...data, size: Math.min(data.size, v.maxSize) * 1.35, color: SUPER_COLOR, highlighted: true, zIndex: 3, forceLabel: true };
         const highlighted = node === h || isFound;
         const eh = edgeHoverRef.current;
         if (eh && !h && !isFound && sigmaRef.current && graph.hasEdge(eh) && !graph.hasExtremity(eh, node)) {
@@ -595,13 +602,13 @@ export function PersonalView({ live, found, onOpenConcept, onBackgroundClick, fo
 
     // Hover mode: the highlight and the panel follow the node under the pointer; in focus mode they stay put.
     renderer.on('enterNode', ({ node }) => {
-      if (focusRef.current) return;
+      if (focusRef.current || dragRef.current) return;
       hoverRef.current = node;
       hoverCallback.current?.(node);
       renderer.refresh({ skipIndexation: true });
     });
     renderer.on('leaveNode', () => {
-      if (focusRef.current) return;
+      if (focusRef.current || dragRef.current) return;
       hoverRef.current = null;
       hoverCallback.current?.(null);
       renderer.refresh({ skipIndexation: true });
@@ -616,7 +623,63 @@ export function PersonalView({ live, found, onOpenConcept, onBackgroundClick, fo
       edgeHoverRef.current = null;
       renderer.refresh({ skipIndexation: true });
     });
+    // Drag a concept: it follows the pointer; dropped on a superclass it becomes one of its members (D18).
+    // Elsewhere it simply stays where it was dropped, until the graph is laid out again.
+    const superUnder = (x: number, y: number, except: string): string | null => {
+      let best: string | null = null;
+      let bestDist = Infinity;
+      graph.forEachNode((n, a) => {
+        if (n === except || !a.isSuper || (view.current.visible && !view.current.visible.has(n))) return;
+        const d = renderer.getNodeDisplayData(n);
+        if (!d || d.hidden) return;
+        const p = renderer.framedGraphToViewport(d);
+        const dist = Math.hypot(p.x - x, p.y - y);
+        if (dist <= renderer.scaleSize(Math.min(d.size, view.current.maxSize)) + 10 && dist < bestDist) [best, bestDist] = [n, dist];
+      });
+      return best;
+    };
+    renderer.on('downNode', ({ node, event }) => {
+      dragRef.current = { node, x: event.x, y: event.y, moved: false };
+      // No text selection while carrying a concept; the camera does not pan.
+      event.original.preventDefault();
+      event.preventSigmaDefault();
+      if (!renderer.getCustomBBox()) renderer.setCustomBBox(renderer.getBBox());
+    });
+    renderer.getMouseCaptor().on('mousemovebody', (event) => {
+      const drag = dragRef.current;
+      if (!drag) return;
+      if (!drag.moved && Math.hypot(event.x - drag.x, event.y - drag.y) < 5) return;
+      drag.moved = true;
+      const pos = renderer.viewportToGraph(event);
+      graph.mergeNodeAttributes(drag.node, { x: pos.x, y: pos.y });
+      dropRef.current = superUnder(event.x, event.y, drag.node);
+      container.current!.style.cursor = dropRef.current ? 'copy' : 'grabbing';
+      // The pointer is carrying a concept: the camera stays put.
+      event.preventSigmaDefault();
+      event.original.preventDefault();
+      event.original.stopPropagation();
+      renderer.refresh({ skipIndexation: false });
+    });
+    renderer.getMouseCaptor().on('mouseup', () => {
+      const drag = dragRef.current;
+      if (!drag) return;
+      const target = dropRef.current;
+      dragRef.current = null;
+      dropRef.current = null;
+      container.current!.style.cursor = '';
+      if (!drag.moved) return;
+      // The click that follows a drag must not open the panel.
+      justDragged.current = true;
+      setTimeout(() => (justDragged.current = false), 100);
+      renderer.refresh({ skipIndexation: true });
+      if (target) {
+        setNotice(null);
+        // Same operation as "Raggruppa in…" and kc_relate with a superclass; the live event lays the groups out again.
+        api.setSuperclass(drag.node, target).catch((e: Error) => setNotice(explain(e.message)));
+      }
+    });
     renderer.on('clickNode', ({ node, event }) => {
+      if (justDragged.current) return;
       // From afar a node is a dot inside its community: the click zooms in rather than opening it.
       const b = bubbleAt(event.x, event.y);
       if (b) zoomToBubble(b);
@@ -661,6 +724,8 @@ export function PersonalView({ live, found, onOpenConcept, onBackgroundClick, fo
         return id ? graph.getNodeAttribute(id, 'community') : null;
       },
       ratio: () => renderer.getCamera().getState().ratio,
+      /** The concept in hand and the superclass it would join if dropped now. */
+      drag: () => ({ node: dragRef.current ? graph.getNodeAttribute(dragRef.current.node, 'label') : null, over: dropRef.current ? graph.getNodeAttribute(dropRef.current, 'label') : null }),
     };
     return () => {
       renderer.kill();
@@ -916,6 +981,14 @@ export function PersonalView({ live, found, onOpenConcept, onBackgroundClick, fo
       )}
       <div className="graph-area">
         <div ref={container} className="sigma" data-testid="personal-graph" data-level={overview ? 'overview' : 'detail'} />
+        {notice && (
+          <p className="error graph-notice" role="alert">
+            {notice}{' '}
+            <button type="button" className="ghost icon" aria-label="Chiudi avviso" onClick={() => setNotice(null)}>
+              ✕
+            </button>
+          </p>
+        )}
         {count === 0 && (
           <div className="empty">
             <p>Il grafo globale è vuoto.</p>

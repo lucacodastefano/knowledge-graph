@@ -12,8 +12,8 @@ export interface VisitNodeData extends Record<string, unknown> {
   fresh: boolean;
   /** Visit of the concept picked in the search. */
   match: boolean;
-  /** Where else this concept appears in the conversation: the parents of its other nodes (D16). */
-  also: string[];
+  /** Where else this concept appears in the conversation: its other nodes, with their parents (D16). */
+  also: AlsoRef[];
   /** Highlight around the hovered or selected node: the node itself, a relative of it, or neither (dimmed). */
   focus: boolean;
   related: boolean;
@@ -21,11 +21,19 @@ export interface VisitNodeData extends Record<string, unknown> {
   /** Under the hovered edge: faded to ~15% so the edge and its label can be read. */
   cover?: boolean;
   onHover: (visitId: string | null) => void;
-  onOpen: (conceptId: string) => void;
+  onOpen: (conceptId: string, conversationId?: string) => void;
+  /** Select and centre another node of the conversation. */
+  onGoto: (visitId: string) => void;
 }
 
-/** For each node, the parents of the other nodes of the same concept ("anche in", D16). */
-export function alsoIn(visits: Visit[]): Map<string, string[]> {
+/** Another node of the same concept in the conversation, and the title of its parent ("radice" at the top). */
+export interface AlsoRef {
+  id: string;
+  parent: string;
+}
+
+/** For each node, the other nodes of the same concept with their parents ("compare anche sotto", D16). */
+export function alsoIn(visits: Visit[]): Map<string, AlsoRef[]> {
   const title = new Map(visits.map((v) => [v.id, v.title]));
   const byConcept = new Map<string, Visit[]>();
   for (const v of visits) byConcept.set(v.conceptId, [...(byConcept.get(v.conceptId) ?? []), v]);
@@ -35,7 +43,7 @@ export function alsoIn(visits: Visit[]): Map<string, string[]> {
       byConcept
         .get(v.conceptId)!
         .filter((o) => o.id !== v.id)
-        .map((o) => (o.parentVisitId ? title.get(o.parentVisitId) ?? '' : 'radice')),
+        .map((o) => ({ id: o.id, parent: o.parentVisitId ? title.get(o.parentVisitId) ?? '' : 'radice' })),
     ]),
   );
 }

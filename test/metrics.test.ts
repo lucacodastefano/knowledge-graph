@@ -132,11 +132,11 @@ test('every MCP tool call is logged centrally with sizes, outcome and nodes crea
   await client.callTool({ name: 'kc_recall', arguments: { query: 'Kafka' } });
   await client.callTool({ name: 'kc_recall', arguments: { query: 'Zzzxyq' } });
   await client.callTool({ name: 'kc_focus', arguments: { node: 'Inesistente' } });
-  await client.callTool({ name: 'kc_profile', arguments: {} });
+  await client.callTool({ name: 'kc_tree', arguments: {} });
   await client.close();
 
   const calls = tracker.repo.listToolCalls();
-  assert.deepEqual(calls.map((c) => c.tool), ['kc_start', 'kc_track', 'kc_track', 'kc_recall', 'kc_recall', 'kc_focus', 'kc_profile']);
+  assert.deepEqual(calls.map((c) => c.tool), ['kc_start', 'kc_track', 'kc_track', 'kc_recall', 'kc_recall', 'kc_focus', 'kc_tree']);
   assert.equal(calls[1].nodesCreated, 1);
   assert.equal(calls[2].nodesCreated, 0);
   assert.equal(calls[1].argChars, JSON.stringify({ nodes }).length);
@@ -144,7 +144,7 @@ test('every MCP tool call is logged centrally with sizes, outcome and nodes crea
   assert.deepEqual(calls.filter((c) => c.tool === 'kc_recall').map((c) => c.hit), [true, false]);
   assert.equal(calls[5].ok, false);
   assert.ok(calls[5].error);
-  assert.equal(calls[6].argChars, 2); // tool without input: "{}"
+  assert.equal(calls[6].argChars, 2); // no arguments: "{}"
   assert.ok(calls.slice(1).every((c) => c.conversationId));
 
   const res = await fetch(new URL('/api/metrics?period=24h', base));

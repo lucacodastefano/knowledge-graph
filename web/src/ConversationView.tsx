@@ -235,7 +235,7 @@ function savedLayout(): LayoutKind {
 interface Props {
   live: LiveEvent | null;
   found: Found | null;
-  onOpenConcept: (conceptId: string) => void;
+  onOpenConcept: (conceptId: string, conversationId?: string) => void;
   /** A click on empty canvas: the app closes the detail panel. */
   onBackgroundClick?: () => void;
 }
@@ -271,6 +271,13 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
   /** Bent dashed relations: key `r-from-to` -> offset of the curve's control point. */
   const [bends, setBends] = useState<Map<string, { x: number; y: number }>>(new Map());
   const flow = useReactFlow();
+  /** The "compare anche sotto" link of a node: select the other node of the same concept and bring it to the centre. */
+  const flowRef = useRef(flow);
+  flowRef.current = flow;
+  const gotoNode = useCallback((id: string) => {
+    setSelected(id);
+    void flowRef.current.fitView({ nodes: [{ id }], padding: 1, maxZoom: 1.2, duration: 400 });
+  }, []);
   const fail = useCallback((e: unknown) => setNotice(explain((e as Error).message)), []);
   /** Back to the laid-out positions after a drag that moved nothing. */
   const relayout = useCallback(() => setTree((t) => (t ? { ...t } : t)), []);
@@ -435,7 +442,7 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
       const from = tree?.visits.find((v) => v.id === c.source);
       const to = tree?.visits.find((v) => v.id === c.target);
       if (!from || !to) return;
-      act({ redo: () => api.relate(from.conceptId, to.conceptId), undo: () => api.unrelate(from.conceptId, to.conceptId) });
+      act({ redo: () => api.relate(from.conceptId, to.conceptId, undefined, from.conversationId), undo: () => api.unrelate(from.conceptId, to.conceptId, from.conversationId) });
     },
     [tree, act],
   );
@@ -453,7 +460,8 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
       const r = relationOf(id);
       if (!r) return;
       setArmed(null);
-      act({ redo: () => api.unrelate(r.from, r.to), undo: () => api.relate(r.from, r.to, r.label) });
+      const map = tree?.conversation.id;
+      act({ redo: () => api.unrelate(r.from, r.to, map), undo: () => api.relate(r.from, r.to, r.label, map) });
     },
     [relationOf, act, tree],
   );
@@ -463,9 +471,10 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
       if (!r) return;
       const label = window.prompt('Etichetta della relazione (vuota per toglierla)', r.label ?? '');
       if (label === null) return;
-      act({ redo: () => api.relate(r.from, r.to, label.trim() || null), undo: () => api.relate(r.from, r.to, r.label ?? null) });
+      const map = tree?.conversation.id;
+      act({ redo: () => api.relate(r.from, r.to, label.trim() || null, map), undo: () => api.relate(r.from, r.to, r.label ?? null, map) });
     },
-    [relationOf, act],
+    [relationOf, act, tree],
   );
   /** Saves the shape of a dashed relation (null straightens it); undoable. */
   const bendRelation = useCallback(
@@ -567,7 +576,7 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
           void persist(new Map([[back.id, old]]));
           // A concept that was dropped comes back by name: its relations and superclass are re-applied.
           if (page && back.conceptId !== v.conceptId) {
-            for (const r of page.related) await api.relate(back.conceptId, r.id, r.label ?? null);
+            for (const r of page.related) await api.relate(back.conceptId, r.id, r.label ?? null, v.conversationId);
             if (page.superclass) await api.setSuperclass(back.conceptId, page.superclass.id);
           }
         },
@@ -742,6 +751,7 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
             also: also.get(v.id) ?? [],
             onHover,
             onOpen: onOpenConcept,
+            onGoto: gotoNode,
           },
         }));
       });
@@ -775,7 +785,7 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [tree, kind, onHover, onOpenConcept]);
+  }, [tree, kind, onHover, onOpenConcept, gotoNode]);
 
   // Frame the view after React Flow has taken the new positions and measured every node: fitting earlier
   // frames the old positions (or nothing, on the first load).
@@ -966,7 +976,7 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
           onEdgeClick={onEdgeClick}
           onEdgeMouseEnter={onEdgeEnter}
           onEdgeMouseLeave={onEdgeLeave}
-          onNodeDoubleClick={(_, n) => onOpenConcept(n.data.visit.conceptId)}
+          onNodeDoubleClick={(_, n) => onOpenConcept(n.data.visit.conceptId, n.data.visit.conversationId)}
           zoomOnDoubleClick={false}
           elementsSelectable={false}
           proOptions={{ hideAttribution: true }}

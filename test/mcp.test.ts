@@ -24,7 +24,7 @@ const json = (r: unknown) => JSON.parse((r as { content: { text: string }[] }).c
 test('exposes the tracking tools, the instructions prompt and server instructions', async () => {
   const client = await connect();
   const tools = (await client.listTools()).tools.map((t) => t.name).sort();
-  assert.deepEqual(tools, ['kc_edit', 'kc_focus', 'kc_link', 'kc_move', 'kc_profile', 'kc_read', 'kc_recall', 'kc_relate', 'kc_remove', 'kc_rename', 'kc_start', 'kc_track', 'kc_tree']);
+  assert.deepEqual(tools, ['kc_edit', 'kc_focus', 'kc_link', 'kc_move', 'kc_read', 'kc_recall', 'kc_relate', 'kc_remove', 'kc_rename', 'kc_search_graphs', 'kc_start', 'kc_track', 'kc_tree']);
   assert.equal((await client.listPrompts()).prompts[0].name, 'kc_instructions');
   assert.match(client.getInstructions() ?? '', /kc_track/);
   // Transparent wording: the graph is explained to the model, nothing asks to hide it or to copy words verbatim.
@@ -36,6 +36,9 @@ test('exposes the tracking tools, the instructions prompt and server instruction
   assert.match(instr, /"On the canvas" means this chat's graph/);
   assert.match(instr, /A parent's detail holds only what concerns the whole/);
   assert.doesNotMatch(instr, /thin: true/);
+  assert.match(instr, /Everything you read and write is this chat's graph/);
+  assert.match(instr, /kc_search_graphs, then kc_read\(node, graph\)/);
+  assert.doesNotMatch(instr, /global graph|kc_profile|is your memory/);
   assert.doesNotMatch(instr, /invisible|never mention|verbatim|word for word|exactly as you will write/i);
   const track = JSON.stringify((await client.listTools()).tools.find((t) => t.name === 'kc_track')!.inputSchema);
   assert.match(track, /"detail":\{[^}]*Full text of your answer/);
@@ -89,14 +92,12 @@ test('read tools answer from the graph without writing to it', async () => {
   const before = tracker.repo.countConcepts();
 
   const [recalled] = json(await client.callTool({ name: 'kc_recall', arguments: { query: 'borrow checker' } }));
-  assert.equal(recalled.name, 'Borrow checker');
-  assert.deepEqual(recalled.notes, ['Regole di prestito.']);
+  assert.equal(recalled.title, 'Borrow checker');
+  assert.equal(recalled.summary, 'Regole di prestito.');
 
   const tree = await client.callTool({ name: 'kc_tree', arguments: {} });
   assert.match((tree as { content: { text: string }[] }).content[0].text, /^Rust .*\n- Borrow checker \*current$/);
 
-  const profile = json(await client.callTool({ name: 'kc_profile', arguments: {} }));
-  assert.ok(profile.recent.includes('Borrow checker'));
   assert.equal(tracker.repo.countConcepts(), before);
   await client.close();
 });
@@ -126,7 +127,7 @@ test('kc_track returns the tree and a reminder; parents and kc_move work by titl
     arguments: { nodes: [{ title: 'Acqua giusta', summary: 'Né troppa né poca.', parent: 'root' }] },
   });
   const extra = (res.content as { text: string }[])[0].text;
-  assert.match(extra, /^Tree:\n- Acqua giusta\n/);
+  assert.match(extra, /^Graph: Piante\nTree:\n- Acqua giusta\n/);
   assert.match(extra, /Saved in the graph\. Write your answer now, once\./);
   assert.doesNotMatch(extra, /never mention|silently/i);
 
@@ -222,48 +223,97 @@ test('kc_track accepts parents defined later in the call; any error says nothing
   }
 });
 
-test('memory (D19): kc_start carries a compact profile and the recall rule only while the setting is on', async () => {
-  const patch = (body: object) =>
-    fetch(new URL('/api/settings', base), { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-  const conv = tracker.startConversation('Memoria', null).id;
-  tracker.track(conv, [
-    { title: 'Event sourcing', summary: 'Stato come sequenza di eventi.', parent: 'root' },
-    { title: 'Proiezioni', summary: 'Viste derivate.', parent: 'Event sourcing' },
-    { title: 'Saga', summary: 'Transazioni distribuite.', parent: 'root' },
-  ]);
-  tracker.relateByName({ concept: 'Event sourcing', superclass: 'Architettura software' });
-  tracker.track(tracker.startConversation('Altra chat', null).id, [{ title: 'Event sourcing', summary: 'Di nuovo.', parent: 'root' }]);
-  const startText = async (c: Client) => {
-    const r = await c.callTool({ name: 'kc_start', arguments: { title: 'Prova' } });
-    return (r.content as { text: string }[]).map((p) => p.text).join('\n');
-  };
-
+test('kc_recall is superficial-aware and read-only tools need a started graph', async () => {
   const on = await connect();
-  const withMemory = await startText(on);
-  assert.match(withMemory, /Global graph \(\d+ concepts\)/);
-  assert.match(withMemory, /Areas: Architettura software \(1\)/);
-  assert.match(withMemory, /Most explored: .*Event sourcing/);
-  assert.match(on.getInstructions() ?? '', /The global graph is your memory/);
-  assert.match(on.getInstructions() ?? '', /thin:true/);
-  const profileLines = withMemory.split('\n').filter((l) => /^(Global graph|Areas|Most explored|Recent)/.test(l));
-  assert.ok(profileLines.length <= 4 && profileLines.join('\n').length < 700, 'the profile stays within its cap');
-  // A concept with a sub-concept is not superficial; a lone one is.
-  const recall = json(await on.callTool({ name: 'kc_recall', arguments: { query: 'Saga' } }));
-  assert.equal(recall[0].thin, true);
+  const text = (r: unknown) => (r as { content: { text: string }[] }).content[0].text;
+  for (const call of [{ name: 'kc_recall', arguments: { query: 'x' } }, { name: 'kc_tree', arguments: {} }, { name: 'kc_read', arguments: { node: 'x' } }]) {
+    const r = await on.callTool(call);
+    assert.equal(r.isError, true, `${call.name} without kc_start`);
+    assert.match(text(r), /call kc_start/);
+  }
+  await on.callTool({ name: 'kc_start', arguments: { title: 'Memoria' } });
+  await on.callTool({
+    name: 'kc_track',
+    arguments: {
+      nodes: [
+        { title: 'Event sourcing', summary: 'Stato come sequenza di eventi.', parent: 'root' },
+        { title: 'Proiezioni', summary: 'Viste derivate.', parent: '#0' },
+        { title: 'Saga', summary: 'Transazioni distribuite.', parent: 'root' },
+      ],
+    },
+  });
+  // A node with a sub-concept is not superficial; a lone one is.
+  assert.equal(json(await on.callTool({ name: 'kc_recall', arguments: { query: 'Saga' } }))[0].thin, true);
   assert.equal(json(await on.callTool({ name: 'kc_recall', arguments: { query: 'Event sourcing' } }))[0].thin, undefined);
-
-  assert.deepEqual(await (await patch({ memory: false })).json(), { memory: false });
-  const off = await connect();
-  const without = await startText(off);
-  assert.ok(!/Global graph|Areas:/.test(without), 'no profile when off');
-  assert.ok(!/is your memory|kc_relate\(concept, superclass\)/.test(off.getInstructions() ?? ''), 'no memory rule when off');
-  console.log(
-    `memory tokens (~chars/4): instructions on=${Math.round((on.getInstructions() ?? '').length / 4)} off=${Math.round((off.getInstructions() ?? '').length / 4)}; ` +
-      `kc_start on=${Math.round(withMemory.length / 4)} off=${Math.round(without.length / 4)}`,
-  );
-  await patch({ memory: true });
+  console.log(`instructions tokens (~chars/4): ${Math.round((on.getInstructions() ?? '').length / 4)}`);
   await on.close();
-  await off.close();
+});
+
+test('graph isolation (D22): no tool shows the text of another map unless kc_search_graphs / kc_read(graph)', async () => {
+  const text = (r: unknown) => (r as { content: { text: string }[] }).content[0].text;
+  const a = await connect();
+  await a.callTool({ name: 'kc_start', arguments: { title: 'Isolamento alfa' } });
+  await a.callTool({
+    name: 'kc_track',
+    arguments: { nodes: [{ title: 'Tesoro condiviso', summary: 'Riassunto segreto alfa.', detail: 'Dettaglio segreto alfa', parent: 'root', sources: ['https://alfa.example/doc'] }, { title: 'Solo alfa', summary: 'Esiste solo in alfa.', parent: 'root' }] },
+  });
+
+  // Same title again: a new empty map, not the old one.
+  const b = await connect();
+  const started = await b.callTool({ name: 'kc_start', arguments: { title: 'Isolamento alfa' } });
+  assert.equal(started.isError, undefined);
+  const startedText = (started.content as { text: string }[]).map((c) => c.text).join('\n');
+  assert.match(startedText, /Tree: empty/);
+  assert.doesNotMatch(startedText, /Resumed|Similar graphs|Global graph|alfa\]/);
+  assert.equal(tracker.repo.listConversations().filter((c) => c.title === 'Isolamento alfa').length, 2);
+
+  // Tracking the shared concept in the new map: no Known line, no text of the other map, the graph is named.
+  const tracked = text(await b.callTool({ name: 'kc_track', arguments: { nodes: [{ title: 'Tesoro condiviso', summary: 'Versione beta.', parent: 'root' }] } }));
+  assert.match(tracked, /^Graph: Isolamento alfa\nTree:\n- Tesoro condiviso/);
+  assert.doesNotMatch(tracked, /Known|segreto|Solo alfa/);
+
+  // Every read tool answers with this map only.
+  const recall = text(await b.callTool({ name: 'kc_recall', arguments: { query: 'Tesoro condiviso' } }));
+  assert.match(recall, /Versione beta/);
+  assert.doesNotMatch(recall, /segreto|alfa\.example/);
+  assert.deepEqual(json(await b.callTool({ name: 'kc_recall', arguments: { query: 'Solo alfa' } })), []);
+  const read = text(await b.callTool({ name: 'kc_read', arguments: { node: 'Tesoro condiviso' } }));
+  assert.doesNotMatch(read, /segreto/);
+  const notHere = await b.callTool({ name: 'kc_read', arguments: { node: 'Solo alfa' } });
+  assert.equal(notHere.isError, true);
+  assert.match(text(notHere), /not in this graph/);
+  assert.doesNotMatch(text(await b.callTool({ name: 'kc_tree', arguments: {} })), /Solo alfa/);
+  assert.equal(JSON.stringify((await b.listTools()).tools.find((t) => t.name === 'kc_tree')!.inputSchema).includes('conversation'), false);
+
+  // kc_link / kc_relate / kc_focus only reach this map's concepts.
+  const solo = tracker.repo.findConceptByNorm('solo alfa')!;
+  await b.callTool({ name: 'kc_track', arguments: { nodes: [{ title: 'Gemello', summary: 'x', parent: 'root' }] } });
+  const link = await b.callTool({ name: 'kc_link', arguments: { node: 'Gemello', conceptId: solo.id } });
+  assert.equal(link.isError, true);
+  assert.match(text(link), /not in this graph/);
+  const relate = await b.callTool({ name: 'kc_relate', arguments: { concept: 'Tesoro condiviso', related_to: 'Solo alfa' } });
+  assert.equal(relate.isError, true);
+
+  // The explicit door: titles and summaries grouped by map, then the text of one node on request.
+  const found = json(await b.callTool({ name: 'kc_search_graphs', arguments: { query: 'segreto' } }));
+  assert.equal(found.length, 1);
+  assert.equal(found[0].graph, 'Isolamento alfa');
+  assert.deepEqual(found[0].nodes, [{ title: 'Tesoro condiviso', summary: 'Riassunto segreto alfa.' }]);
+  assert.doesNotMatch(JSON.stringify(found), /Dettaglio/);
+  assert.ok(!JSON.stringify(json(await b.callTool({ name: 'kc_search_graphs', arguments: { query: 'Versione beta' } }))).includes('beta'), 'the current map is excluded');
+  const cross = text(await b.callTool({ name: 'kc_read', arguments: { node: 'Solo alfa', graph: found[0].id } }));
+  assert.match(cross, /Esiste solo in alfa/);
+  const crossText = text(await b.callTool({ name: 'kc_read', arguments: { node: 'Tesoro condiviso', graph: found[0].id } }));
+  assert.match(crossText, /Dettaglio segreto alfa/);
+
+  // resume still works, and a miss lists the closest titles only.
+  const resumed = await b.callTool({ name: 'kc_start', arguments: { resume: found[0].id } });
+  assert.match((resumed.content as { text: string }[])[1].text, /Tesoro condiviso/);
+  const miss = await b.callTool({ name: 'kc_start', arguments: { resume: 'Isolamento zzz qqq' } });
+  assert.equal(miss.isError, true);
+  assert.match(text(miss), /No graph matches "Isolamento zzz qqq"\. Closest: "/);
+  await a.close();
+  await b.close();
 });
 
 test('kc_track answers lean: touched branch, no ids, only what needs a decision', async () => {
@@ -282,10 +332,11 @@ test('kc_track answers lean: touched branch, no ids, only what needs a decision'
     { title: 'Zorbio separato', summary: 's', parent: '#0' },
   ]);
   assert.doesNotMatch(first, /[0-9a-f]{8}-[0-9a-f]{4}|false|Similar|Known/);
+  assert.match(first, /^Graph: Zorbio\nTree:/);
   assert.match(first, /Saved in the graph/);
   // Only the branch touched comes back.
   const second = await track([{ title: 'Zorbio istantanea', summary: 's', parent: 'Zorbio registro' }]);
-  assert.match(second, /^Tree:\n- Zorbio generale\n {2}- Zorbio registro\n {4}- Zorbio istantanea\n/);
+  assert.match(second, /^Graph: Zorbio\nTree:\n- Zorbio generale\n {2}- Zorbio registro\n {4}- Zorbio istantanea\n/);
   assert.doesNotMatch(second, /separato|notifiche/);
   await client.close();
 });
@@ -311,14 +362,12 @@ test('kc_tree has no ids unless titles repeat, lists relations; kc_read returns 
   assert.match(tree.content[0].text, /Relations:\n- Foglia albero → Altra albero \(usa\)$/);
   const read = (await client.callTool({ name: 'kc_read', arguments: { node: 'Radice albero' } })) as { content: { text: string }[] };
   assert.match(read.content[0].text, /^# Radice albero\n\nLa radice\.\n\nTesto intero della radice\.\n\nChildren: Foglia albero, Altra albero$/);
-  // A concept of another conversation is read from the user's graph.
+  // A node of another conversation is not readable by title, and kc_focus does not reach it.
   const other = await connect();
   await other.callTool({ name: 'kc_start', arguments: { title: 'Altra chat' } });
-  const cross = (await other.callTool({ name: 'kc_read', arguments: { node: 'Foglia albero' } })) as { content: { text: string }[] };
-  assert.match(cross.content[0].text, /Testo della foglia\./);
-  const missing = await other.callTool({ name: 'kc_read', arguments: { node: 'Inesistente xyz' } });
-  assert.equal(missing.isError, true);
-  // kc_focus on a concept that only lives in the personal graph points to kc_track.
+  const cross = (await other.callTool({ name: 'kc_read', arguments: { node: 'Foglia albero' } })) as { isError?: boolean; content: { text: string }[] };
+  assert.equal(cross.isError, true);
+  assert.match(cross.content[0].text, /not in this graph/);
   const focus = (await other.callTool({ name: 'kc_focus', arguments: { node: 'Foglia albero' } })) as { isError?: boolean; content: { text: string }[] };
   assert.equal(focus.isError, true);
   assert.match(focus.content[0].text, /kc_track it here/);

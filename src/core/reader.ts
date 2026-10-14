@@ -2,30 +2,26 @@ import type { Repository } from './repository.ts';
 import type { Concept, ConceptMatch, ConceptPage, ConceptSection, GroupSuggestion, TextHit, Visit } from './types.ts';
 import { normalizeName } from './normalize.ts';
 import { TrackerError } from './tracker.ts';
-import { sharesEnough, titleStems } from './similarity.ts';
+import { titleStems } from './similarity.ts';
 
-/** What the user already knows about a concept (RF8). Kept compact: it is sent to the model. */
-export interface RecalledConcept {
-  id: string;
-  name: string;
-  /** How many times it was explored, across all conversations. */
-  seen: number;
-  /** Date (YYYY-MM-DD) of the last time it came up. */
-  last: string;
-  /** Most recent distinct summaries of what was explained. */
-  notes: string[];
+/** A node of the current map found by kc_recall. Kept compact: it is sent to the model. */
+export interface RecalledNode {
+  title: string;
+  /** Title of its parent node; absent at the top of the map. */
+  parent?: string;
+  summary: string;
   /** True when only a summary exists: no deeper detail and no sub-concepts yet ("superficiale"). */
   thin?: boolean;
-  /** Concepts explored right before or after it. */
-  near: string[];
-  /** Known sources (URLs), newest first; only when there are some. */
+  children?: number;
+  /** Known sources (URLs) of this node; only when there are some. */
   sources?: string[];
-  /** The superclass it sits under, when it has one. */
-  in?: string;
-  /** Free relations, as "name" or "name (label)". */
-  rel?: string[];
-  /** For a superclass: the concepts it groups. */
-  members?: string[];
+}
+
+/** What kc_search_graphs finds in the user's other maps: node titles and summaries, grouped by map. */
+export interface GraphHits {
+  graph: string;
+  id: string;
+  nodes: { title: string; summary: string }[];
 }
 
 export interface Profile {
@@ -41,16 +37,11 @@ export interface Profile {
 }
 
 const RECALL_LIMIT = 5;
-const NOTES_PER_CONCEPT = 3;
-const NEAR_PER_CONCEPT = 5;
 const NOTE_MAX = 300;
-/** Sources returned by kc_recall per concept: enough to reuse, few tokens. */
+/** Sources returned by kc_recall per node: enough to reuse, few tokens. */
 const RECALL_SOURCES = 3;
 const PROFILE_LIMIT = 10;
 const PROFILE_GROUPS = 20;
-/** Caps of the kc_start memory profile (D19): about 150 tokens. */
-const MEMORY_AREAS = 5;
-const MEMORY_TOPICS = 6;
 const PROFILE_CONVERSATIONS = 5;
 const SEARCH_LIMIT = 20;
 const TEXT_HITS = 30;
@@ -58,24 +49,13 @@ const TEXT_HITS = 30;
 export const TREE_MAX_NODES = 150;
 /** kc_tree shows only the top two levels of a map bigger than this, to orient before drilling down. */
 const ORIENT_MIN_NODES = 40;
-const SIMILAR_MAPS = 3;
+const GRAPH_HITS = 20;
+const GRAPH_SUMMARY_MAX = 160;
 
 const MEMBERS_SHOWN = 8;
 const UNGROUPED_SHOWN = 15;
 const SUGGESTION_MAX = 12;
 const IGNORED_KEY = 'groupIgnored';
-
-/** Superclass, relations and members of a concept, only the ones that exist (tokens). */
-function extras(repo: Repository, id: string): Pick<RecalledConcept, 'in' | 'rel' | 'members'> {
-  const up = repo.getSuperclass(id);
-  const rel = repo.listRelated(id).map((r) => (r.label ? `${r.name} (${r.label})` : r.name));
-  const members = repo.listMembers(id).map((m) => m.name);
-  return {
-    ...(up ? { in: up.name } : {}),
-    ...(rel.length ? { rel } : {}),
-    ...(members.length ? { members: members.slice(0, MEMBERS_SHOWN) } : {}),
-  };
-}
 
 const day = (iso: string) => iso.slice(0, 10);
 const clip = (s: string, max: number) => (s.length > max ? `${s.slice(0, max - 1)}…` : s);
@@ -88,112 +68,100 @@ export class Reader {
     this.repo = repo;
   }
 
-  recall(query: string): RecalledConcept[] {
+  /** kc_recall: nodes of this map (title, summary or full text) matching the query; nothing from other maps (D22). */
+  recall(conversationId: string, query: string): RecalledNode[] {
     const q = query.trim();
     if (!q) throw new TrackerError('Empty query');
-    const found = new Map<string, Concept>();
-    const exact = this.repo.findConceptByNorm(normalizeName(q));
-    if (exact) found.set(exact.id, exact);
-    for (const c of this.repo.searchConcepts(q, RECALL_LIMIT)) found.set(c.id, c);
-
-    return [...found.values()].slice(0, RECALL_LIMIT).map((c) => {
-      const detail = this.repo.getConceptDetail(c.id)!;
-      const notes = [...new Set(detail.visits.map((v) => v.summary).filter(Boolean))]
-        .slice(0, NOTES_PER_CONCEPT)
-        .map((s) => clip(s, NOTE_MAX));
-      const sources = this.repo.listConceptSources(c.id).slice(0, RECALL_SOURCES).map((s) => s.url);
+    const visits = this.repo.getTree(conversationId)?.visits ?? [];
+    const byId = new Map(visits.map((v) => [v.id, v]));
+    const norm = normalizeName(q);
+    const found = new Map<string, Visit>();
+    for (const v of visits) if (normalizeName(v.title) === norm) found.set(v.id, v);
+    for (const h of this.repo.searchText(q, RECALL_LIMIT, { only: conversationId })) {
+      const v = byId.get(h.visitId);
+      if (v) found.set(v.id, v);
+    }
+    return [...found.values()].slice(0, RECALL_LIMIT).map((v) => {
+      const kids = visits.filter((c) => c.parentVisitId === v.id).length;
+      const parent = v.parentVisitId ? byId.get(v.parentVisitId)?.title : undefined;
+      const sources = this.repo.listConceptSources(v.conceptId).filter((s) => s.visitIds.includes(v.id)).slice(0, RECALL_SOURCES).map((s) => s.url);
       return {
-        id: c.id,
-        name: c.name,
-        seen: c.visitCount,
-        last: day(c.lastSeenAt),
-        notes,
-        near: this.repo.neighbourConcepts(c.id, NEAR_PER_CONCEPT).map((n) => n.name),
-        ...(this.isThin(detail.visits) ? { thin: true } : {}),
-        ...(sources.length > 0 ? { sources } : {}),
-        ...extras(this.repo, c.id),
+        title: v.title,
+        ...(parent ? { parent } : {}),
+        summary: clip(v.summary, NOTE_MAX),
+        ...(!v.detail && kids === 0 ? { thin: true } : {}),
+        ...(kids ? { children: kids } : {}),
+        ...(sources.length ? { sources } : {}),
       };
     });
   }
 
-  private isThin(visits: { id: string; conversationId: string; detail: string | null }[]): boolean {
-    if (visits.some((v) => v.detail)) return false;
-    const parents = new Set<string>();
-    for (const cid of new Set(visits.map((v) => v.conversationId))) {
-      for (const v of this.repo.getTree(cid)?.visits ?? []) if (v.parentVisitId) parents.add(v.parentVisitId);
+  /** kc_search_graphs: nodes of the user's other maps matching the query, grouped by map, without their text (D22). */
+  searchGraphs(currentConversationId: string | null, query: string): GraphHits[] {
+    const q = query.trim();
+    if (!q) throw new TrackerError('Empty query');
+    const out = new Map<string, GraphHits>();
+    for (const h of this.repo.searchText(q, GRAPH_HITS, currentConversationId ? { except: currentConversationId } : {})) {
+      const g = out.get(h.conversationId) ?? { graph: h.conversationTitle, id: h.conversationId, nodes: [] };
+      g.nodes.push({ title: h.title, summary: clip(h.summary, GRAPH_SUMMARY_MAX) });
+      out.set(h.conversationId, g);
     }
-    return !visits.some((v) => parents.has(v.id));
+    return [...out.values()];
   }
 
   /**
-   * D19: a few lines appended to kc_start so the model knows what the graph holds (areas, most explored, recent)
-   * without a call. Hard-capped; empty for an empty graph (zero tokens).
+   * "Approfondisci": every occurrence of a concept with its parent and its sub-concepts as sections (D16, D17).
+   * Opened from a map (D22) the page leads with that map's occurrence, its sources and its relations, and has no
+   * superclass: those are global. A map that does not hold the concept gives the global page.
    */
-  memoryProfile(): string {
-    const total = this.repo.countConcepts();
-    if (total === 0) return '';
-    const areas = this.repo
-      .listSuperclasses()
-      .map((g) => ({ name: g.name, n: this.repo.listMembers(g.id).length }))
-      .sort((a, b) => b.n - a.n)
-      .slice(0, MEMORY_AREAS)
-      .map((g) => `${g.name} (${g.n})`);
-    // Counts of 1 say nothing: only concepts seen at least twice are "most explored".
-    const top = this.repo.rankConcepts('visits', MEMORY_TOPICS).filter((c) => c.visitCount >= 2);
-    const seen = new Set(top.map((c) => c.id));
-    const recent = this.repo.rankConcepts('recent', MEMORY_TOPICS).filter((c) => !seen.has(c.id)).slice(0, MEMORY_TOPICS);
-    return [
-      `Global graph (${total} concepts).`,
-      ...(areas.length ? [`Areas: ${areas.join(', ')}`] : []),
-      ...(top.length ? [`Most explored: ${top.map((c) => `${c.name} ×${c.visitCount}`).join(', ')}`] : []),
-      ...(recent.length ? [`Recent: ${recent.map((c) => c.name).join(', ')}`] : []),
-    ].join('\n');
-  }
-
-  /** "Approfondisci": every occurrence of a concept with its parent and its sub-concepts as sections (D16, D17). */
-  conceptPage(conceptId: string): ConceptPage | undefined {
+  conceptPage(conceptId: string, conversationId?: string): ConceptPage | undefined {
     const detail = this.repo.getConceptDetail(conceptId);
     if (!detail) return undefined;
+    const map = conversationId && detail.visits.some((v) => v.conversationId === conversationId) ? conversationId : undefined;
     const trees = new Map<string, Visit[]>();
     const visitsOf = (conversationId: string) => {
       if (!trees.has(conversationId)) trees.set(conversationId, this.repo.getTree(conversationId)?.visits ?? []);
       return trees.get(conversationId)!;
     };
+    const here = new Set(detail.visits.filter((v) => v.conversationId === map).map((v) => v.id));
+    const occurrences = detail.visits.map((v) => {
+      const all = visitsOf(v.conversationId);
+      // Every descendant is a section, however deep: a parent never has to repeat its children's text.
+      const sections = (parentId: string): ConceptSection[] =>
+        all
+          .filter((c) => c.parentVisitId === parentId)
+          .map((c) => ({ id: c.id, title: c.title, summary: c.summary, detail: c.detail, children: sections(c.id) }));
+      const parentTitle = all.find((p) => p.id === v.parentVisitId)?.title ?? null;
+      return {
+        ...v,
+        // Same name as the conversation: "X · sotto «X»" says nothing.
+        parentTitle: parentTitle !== null && normalizeName(parentTitle) === normalizeName(v.conversationTitle) ? null : parentTitle,
+        sections: sections(v.id),
+      };
+    });
     return {
       ...detail,
-      // Sources of this node and of the other visits of the same concept, each once.
-      sources: this.repo.listConceptSources(conceptId),
-      related: this.repo.listRelated(conceptId),
-      superclass: this.repo.getSuperclass(conceptId) ?? null,
-      members: this.repo.listMembers(conceptId),
-      visits: detail.visits.map((v) => {
-        const all = visitsOf(v.conversationId);
-        // Every descendant is a section, however deep: a parent never has to repeat its children's text.
-        const sections = (parentId: string): ConceptSection[] =>
-          all
-            .filter((c) => c.parentVisitId === parentId)
-            .map((c) => ({ id: c.id, title: c.title, summary: c.summary, detail: c.detail, children: sections(c.id) }));
-        const parentTitle = all.find((p) => p.id === v.parentVisitId)?.title ?? null;
-        return {
-          ...v,
-          // Same name as the conversation: "X · sotto «X»" says nothing.
-          parentTitle: parentTitle !== null && normalizeName(parentTitle) === normalizeName(v.conversationTitle) ? null : parentTitle,
-          sections: sections(v.id),
-        };
-      }),
+      ...(map ? { conversationId: map } : {}),
+      // Sources of this node and of the other visits of the same concept, each once; from a map, only that map's.
+      sources: this.repo
+        .listConceptSources(conceptId)
+        .map((s) => (map ? { ...s, visitIds: s.visitIds.filter((id) => here.has(id)) } : s))
+        .filter((s) => s.visitIds.length > 0),
+      related: this.repo.listRelated(conceptId, map),
+      superclass: (!map && this.repo.getSuperclass(conceptId)) || null,
+      members: map ? [] : this.repo.listMembers(conceptId),
+      visits: map ? [...occurrences.filter((o) => here.has(o.id)), ...occurrences.filter((o) => !here.has(o.id))] : occurrences,
     };
   }
 
   /**
    * Indented outline of a conversation (RF9), titles only (the tools accept them); an id only where two nodes share
    * a title. `touched` narrows it to the branches leading to those nodes (the kc_track result); otherwise the free
-   * relations (the dashed lines of the canvas) close the outline. Defaults to the most recent conversation.
+   * relations (the dashed lines of the canvas) close the outline.
    */
-  tree(conversationId: string | null, withSummaries: boolean, compact = false, touched?: Set<string>, open?: { root?: string; depth?: number; relations?: boolean; orient?: boolean }): string {
-    const id = conversationId ?? this.repo.listConversations()[0]?.id;
-    if (!id) return 'No graphs yet.';
-    const tree = this.repo.getTree(id);
-    if (!tree) throw new TrackerError(`Graph ${id} not found`);
+  tree(conversationId: string, withSummaries: boolean, compact = false, touched?: Set<string>, open?: { root?: string; depth?: number; relations?: boolean; orient?: boolean }): string {
+    const tree = this.repo.getTree(conversationId);
+    if (!tree) throw new TrackerError(`Graph ${conversationId} not found`);
 
     const { conversation, visits } = tree;
     if (compact && visits.length === 0) return 'Tree: empty';
@@ -274,23 +242,14 @@ export class Reader {
     return lines.join('\n');
   }
 
-  /**
-   * kc_read: the full text of one node of this conversation, or of a concept from the user's graph (latest visit that
-   * has text), with the titles of its children.
-   */
-  read(conversationId: string | null, ref: string): string {
+  /** kc_read: the full text of one node of the conversation (the caller passes another map only for an explicit cross-graph read), with the titles of its children. */
+  read(conversationId: string, ref: string): string {
     const q = ref.trim();
-    const visits = conversationId ? (this.repo.getTree(conversationId)?.visits ?? []) : [];
+    const visits = this.repo.getTree(conversationId)?.visits ?? [];
     const norm = normalizeName(q);
-    let visit = visits.find((v) => v.id === q) ?? visits.findLast((v) => normalizeName(v.title) === norm);
-    if (!visit) {
-      const concept = this.repo.findConceptByNorm(norm);
-      if (!concept) throw new TrackerError(`"${q}" not found in this graph or in the global graph`);
-      const all = this.repo.getConceptDetail(concept.id)?.visits ?? [];
-      visit = all.find((v) => v.detail) ?? all[0];
-      if (!visit) throw new TrackerError(`"${q}" has no text yet`);
-    }
-    const kids = (this.repo.getTree(visit.conversationId)?.visits ?? []).filter((v) => v.parentVisitId === visit.id).map((v) => v.title);
+    const visit = visits.find((v) => v.id === q) ?? visits.findLast((v) => normalizeName(v.title) === norm);
+    if (!visit) throw new TrackerError(`"${q}" is not in this graph`);
+    const kids = visits.filter((v) => v.parentVisitId === visit.id).map((v) => v.title);
     const urls = this.repo.listConceptSources(visit.conceptId).filter((s) => s.visitIds.includes(visit.id)).map((s) => s.url);
     return [`# ${visit.title}`, visit.summary, visit.detail ?? '', kids.length ? `Children: ${kids.join(', ')}` : '', urls.length ? `Sources: ${urls.join(' ')}` : '']
       .filter(Boolean)
@@ -305,23 +264,6 @@ export class Reader {
       .sort((a, b) => b.n - a.n || a.name.localeCompare(b.name));
     const shown = all.slice(0, PROFILE_GROUPS).map((g) => `${g.name} (${g.n})`);
     return all.length > PROFILE_GROUPS ? [...shown, `…and ${all.length - PROFILE_GROUPS} more groups`] : shown;
-  }
-
-  /**
-   * Maps the user already has on a similar topic (kc_start): titles sharing words with the new one, or holding a concept
-   * that matches it. Most recent first.
-   */
-  similarMaps(title: string): { id: string; title: string; last: string; nodes: number }[] {
-    const byConcept = new Set<string>();
-    for (const c of this.repo.searchConcepts(title, 5)) {
-      for (const v of this.repo.getConceptDetail(c.id)?.visits ?? []) byConcept.add(v.conversationId);
-    }
-    return this.repo
-      .listConversations()
-      .filter((c) => sharesEnough(title, c.title) || byConcept.has(c.id))
-      .slice(0, SIMILAR_MAPS)
-      .map((c) => ({ id: c.id, title: c.title, last: day(c.lastActivityAt), nodes: this.repo.getTree(c.id)!.visits.length }))
-      .filter((c) => c.nodes > 0);
   }
 
   /** Most explored and most recent themes, plus the last conversations (RF10). */

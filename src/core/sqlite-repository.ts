@@ -154,6 +154,10 @@ export class SqliteRepository implements Repository {
     this.db
       .prepare('DELETE FROM concept_links WHERE from_concept_id = ?1 OR to_concept_id = ?1 OR from_concept_id = to_concept_id')
       .run(fromId);
+    // Relations of each map follow the merged concept; one that now joins the concept to itself, or repeats, goes.
+    this.db.prepare('UPDATE OR IGNORE map_relations SET from_concept_id = ? WHERE from_concept_id = ?').run(toId, fromId);
+    this.db.prepare('UPDATE OR IGNORE map_relations SET to_concept_id = ? WHERE to_concept_id = ?').run(toId, fromId);
+    this.db.prepare('DELETE FROM map_relations WHERE from_concept_id = ?1 OR to_concept_id = ?1 OR from_concept_id = to_concept_id').run(fromId);
     this.db
       .prepare('UPDATE concepts SET last_seen_at = MAX(last_seen_at, (SELECT last_seen_at FROM concepts WHERE id = ?1)) WHERE id = ?2')
       .run(fromId, toId);
@@ -181,6 +185,26 @@ export class SqliteRepository implements Repository {
     if (!has('visits', 'detail')) this.db.exec('ALTER TABLE visits ADD COLUMN detail TEXT');
     if (!has('concept_links', 'created_at')) this.db.exec('ALTER TABLE concept_links ADD COLUMN created_at TEXT');
     this.migrateTextSearch();
+    this.migrateRelations();
+  }
+
+  /**
+   * D22: relations used to be links between concepts, shown in every map holding both. Each one is kept for every map
+   * that contains both of its concepts (so maps look as before) and leaves concept_links. Idempotent: nothing is left to move.
+   */
+  private migrateRelations() {
+    if (this.db.prepare(`SELECT 1 FROM concept_links WHERE kind = 'related' LIMIT 1`).get() === undefined) return;
+    this.transaction(() => {
+      this.db.exec(`
+        INSERT OR IGNORE INTO map_relations (conversation_id, from_concept_id, to_concept_id, label, created_at)
+        SELECT DISTINCT a.conversation_id, l.from_concept_id, l.to_concept_id, l.label, l.created_at
+        FROM concept_links l
+        JOIN visits a ON a.concept_id = l.from_concept_id
+        JOIN visits b ON b.concept_id = l.to_concept_id AND b.conversation_id = a.conversation_id
+        WHERE l.kind = 'related';
+        DELETE FROM concept_links WHERE kind = 'related';
+      `);
+    });
   }
 
   /**
@@ -207,16 +231,20 @@ export class SqliteRepository implements Repository {
     if (!existed) this.db.exec(`INSERT INTO visits_fts (visits_fts) VALUES ('rebuild')`);
   }
 
-  searchText(query: string, limit: number): TextHit[] {
+  searchText(query: string, limit: number, scope: { only?: string; except?: string } = {}): TextHit[] {
     const words = [...new Set(query.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 3))].slice(0, 8);
     const select = `SELECT v.id, v.conversation_id, v.concept_id, v.title, v.summary, v.detail, cv.title AS conversation_title
       FROM visits_fts f JOIN visits v ON v.rowid = f.rowid JOIN conversations cv ON cv.id = v.conversation_id`;
     let rows: Row[] = [];
+    // One map only (kc_recall) or every other map (kc_search_graphs); the parameter is bound before the limit.
+    const only = scope.only ?? scope.except;
+    const other = only === undefined ? '' : ` AND v.conversation_id ${scope.only === undefined ? '<>' : '='} ?`;
+    const extra = only === undefined ? [] : [only];
     if (words.length > 0) {
       // All the words first (precise); any of them only when nothing contains them all.
       const match = (join: string) => words.map((w) => `"${w.replaceAll('"', '')}"`).join(join);
       const run = (q: string) =>
-        this.db.prepare(`${select} WHERE visits_fts MATCH ? ORDER BY bm25(visits_fts, 8, 3, 1) LIMIT ?`).all(q, limit);
+        this.db.prepare(`${select} WHERE visits_fts MATCH ?${other} ORDER BY bm25(visits_fts, 8, 3, 1) LIMIT ?`).all(q, ...extra, limit);
       rows = run(match(' AND '));
       if (rows.length === 0 && words.length > 1) rows = run(match(' OR '));
     } else {
@@ -228,9 +256,9 @@ export class SqliteRepository implements Repository {
         .prepare(
           `SELECT v.id, v.conversation_id, v.concept_id, v.title, v.summary, v.detail, cv.title AS conversation_title
            FROM visits v JOIN conversations cv ON cv.id = v.conversation_id
-           WHERE v.title LIKE ? ESCAPE '\\' ORDER BY length(v.title) LIMIT ?`,
+           WHERE v.title LIKE ? ESCAPE '\\'${other} ORDER BY length(v.title) LIMIT ?`,
         )
-        .all(like, limit);
+        .all(like, ...extra, limit);
     }
     const needles = words.length ? words : [query.trim().toLowerCase()];
     return rows.map((r) => {
@@ -250,6 +278,7 @@ export class SqliteRepository implements Repository {
         conversationTitle: r.conversation_title as string,
         conceptId: r.concept_id as string,
         title: r.title as string,
+        summary: r.summary as string,
         field,
         snippet,
       };
@@ -319,25 +348,6 @@ export class SqliteRepository implements Repository {
       .slice(0, limit)
       .map(([id]) => this.getConcept(id))
       .filter((c): c is Concept => c !== undefined);
-  }
-
-  neighbourConcepts(conceptId: string, limit: number): ConceptMatch[] {
-    return this.db
-      .prepare(
-        `SELECT c.id, c.name, COUNT(*) AS n FROM (
-           SELECT v.concept_id AS other FROM visits v JOIN visits p ON p.id = v.parent_visit_id WHERE p.concept_id = ?1
-           UNION ALL
-           SELECT p.concept_id FROM visits v JOIN visits p ON p.id = v.parent_visit_id WHERE v.concept_id = ?1
-           UNION ALL
-           SELECT to_concept_id FROM concept_links WHERE from_concept_id = ?1
-           UNION ALL
-           SELECT from_concept_id FROM concept_links WHERE to_concept_id = ?1
-         ) x JOIN concepts c ON c.id = x.other
-         WHERE c.id <> ?1
-         GROUP BY c.id ORDER BY n DESC, c.last_seen_at DESC LIMIT ?2`,
-      )
-      .all(conceptId, limit)
-      .map((r) => ({ id: r.id as string, name: r.name as string }));
   }
 
   rankConcepts(order: 'visits' | 'recent', limit: number): Concept[] {
@@ -454,8 +464,8 @@ export class SqliteRepository implements Repository {
       .map(toVisit);
     const relations = this.db
       .prepare(
-        `SELECT l.from_concept_id AS f, l.to_concept_id AS t, l.label FROM concept_links l
-         WHERE l.kind = 'related'
+        `SELECT l.from_concept_id AS f, l.to_concept_id AS t, l.label FROM map_relations l
+         WHERE l.conversation_id = ?1
            AND EXISTS (SELECT 1 FROM visits v WHERE v.conversation_id = ?1 AND v.concept_id = l.from_concept_id)
            AND EXISTS (SELECT 1 FROM visits v WHERE v.conversation_id = ?1 AND v.concept_id = l.to_concept_id)`,
       )
@@ -507,7 +517,7 @@ export class SqliteRepository implements Repository {
            WHERE p.concept_id <> v.concept_id
            GROUP BY 1, 2
            UNION ALL
-           SELECT from_concept_id, to_concept_id, 1, 1, label FROM concept_links WHERE kind = 'related'
+           SELECT from_concept_id, to_concept_id, 1, 1, MAX(label) FROM map_relations GROUP BY MIN(from_concept_id, to_concept_id), MAX(from_concept_id, to_concept_id)
          ) GROUP BY source, target`,
       )
       .all()
@@ -515,34 +525,43 @@ export class SqliteRepository implements Repository {
     return { concepts, edges, conversations };
   }
 
-  addRelation(fromId: string, toId: string, label?: string | null): boolean {
+  addRelation(fromId: string, toId: string, label: string | null | undefined, conversationId: string | null): boolean {
     const text = label?.trim() || null;
-    const both = `kind = 'related' AND ((from_concept_id = ?1 AND to_concept_id = ?2) OR (from_concept_id = ?2 AND to_concept_id = ?1))`;
-    const exists = this.db.prepare(`SELECT label FROM concept_links WHERE ${both}`).get(fromId, toId);
-    if (exists) {
-      if (label === undefined || (exists.label ?? null) === text) return false;
-      this.db.prepare(`UPDATE concept_links SET label = ?3 WHERE ${both}`).run(fromId, toId, text);
+    const both = `((from_concept_id = ?1 AND to_concept_id = ?2) OR (from_concept_id = ?2 AND to_concept_id = ?1))`;
+    // Without a map only the label of the relation, wherever it is drawn, can change.
+    const where = conversationId === null ? both : `conversation_id = ?3 AND ${both}`;
+    const args = conversationId === null ? [fromId, toId] : [fromId, toId, conversationId];
+    const exists = this.db.prepare(`SELECT label FROM map_relations WHERE ${where}`).all(...args);
+    if (exists.length > 0) {
+      if (label === undefined || exists.every((r) => (r.label ?? null) === text)) return false;
+      this.db.prepare(`UPDATE map_relations SET label = ?4 WHERE ${where}`).run(...(conversationId === null ? [fromId, toId, null] : args), text);
       return true;
     }
-    this.db.prepare(`INSERT INTO concept_links (from_concept_id, to_concept_id, kind, label, created_at) VALUES (?, ?, 'related', ?, ?)`).run(fromId, toId, text, now());
+    if (conversationId === null) return false;
+    this.db
+      .prepare('INSERT INTO map_relations (conversation_id, from_concept_id, to_concept_id, label, created_at) VALUES (?, ?, ?, ?, ?)')
+      .run(conversationId, fromId, toId, text, now());
     return true;
   }
 
-  removeRelation(aId: string, bId: string): boolean {
-    const r = this.db
-      .prepare(`DELETE FROM concept_links WHERE kind = 'related' AND ((from_concept_id = ?1 AND to_concept_id = ?2) OR (from_concept_id = ?2 AND to_concept_id = ?1))`)
-      .run(aId, bId);
+  removeRelation(aId: string, bId: string, conversationId: string | null): boolean {
+    const both = `((from_concept_id = ?1 AND to_concept_id = ?2) OR (from_concept_id = ?2 AND to_concept_id = ?1))`;
+    const r =
+      conversationId === null
+        ? this.db.prepare(`DELETE FROM map_relations WHERE ${both}`).run(aId, bId)
+        : this.db.prepare(`DELETE FROM map_relations WHERE conversation_id = ?3 AND ${both}`).run(aId, bId, conversationId);
     return Number(r.changes) > 0;
   }
 
-  listRelated(conceptId: string): (ConceptMatch & { label?: string })[] {
+  listRelated(conceptId: string, conversationId?: string): (ConceptMatch & { label?: string })[] {
     return this.db
       .prepare(
-        `SELECT c.id, c.name, l.label FROM concept_links l
+        `SELECT c.id, c.name, MAX(l.label) AS label FROM map_relations l
          JOIN concepts c ON c.id = CASE WHEN l.from_concept_id = ?1 THEN l.to_concept_id ELSE l.from_concept_id END
-         WHERE l.kind = 'related' AND (l.from_concept_id = ?1 OR l.to_concept_id = ?1) ORDER BY c.name`,
+         WHERE (l.from_concept_id = ?1 OR l.to_concept_id = ?1) AND (?2 IS NULL OR l.conversation_id = ?2)
+         GROUP BY c.id ORDER BY c.name`,
       )
-      .all(conceptId)
+      .all(conceptId, conversationId ?? null)
       .map((r) => ({ id: r.id as string, name: r.name as string, ...(r.label ? { label: r.label as string } : {}) }));
   }
 

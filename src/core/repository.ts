@@ -48,10 +48,8 @@ export interface Repository {
   getConceptDetail(id: string): ConceptDetail | undefined;
   /** Concepts matching a free-text query on names, visit titles and summaries, best first. */
   searchConcepts(query: string, limit: number): Concept[];
-  /** Nodes of every map whose title, summary or full detail contains the words, best first (one hit per node). */
-  searchText(query: string, limit: number): TextHit[];
-  /** Concepts reached from or leading to this one through drill-downs, most frequent first. */
-  neighbourConcepts(conceptId: string, limit: number): ConceptMatch[];
+  /** Nodes whose title, summary or full detail contains the words, best first (one hit per node): every map, or `only` one, or all `except` one. */
+  searchText(query: string, limit: number, scope?: { only?: string; except?: string }): TextHit[];
   rankConcepts(order: 'visits' | 'recent', limit: number): Concept[];
   countConcepts(): number;
 
@@ -79,11 +77,15 @@ export interface Repository {
   /** Sources of every visit of a concept, each once with the visits citing it, newest first. */
   listConceptSources(conceptId: string): ConceptSource[];
 
-  /** Adds a free relation between two concepts, or updates its label; false if nothing changed. */
-  addRelation(fromId: string, toId: string, label?: string | null): boolean;
-  /** Removes the relation between two concepts, whichever direction it was drawn; false if there was none. */
-  removeRelation(aId: string, bId: string): boolean;
-  listRelated(conceptId: string): (ConceptMatch & { label?: string })[];
+  /**
+   * Adds a free relation between two concepts in a map (D22), or updates its label; false if nothing changed.
+   * Without a map (null) it only relabels the relations that exist.
+   */
+  addRelation(fromId: string, toId: string, label: string | null | undefined, conversationId: string | null): boolean;
+  /** Removes the relation between two concepts, whichever direction it was drawn, from one map or (null) from all; false if there was none. */
+  removeRelation(aId: string, bId: string, conversationId: string | null): boolean;
+  /** Concepts related to this one in a map, or in any map when none is given. */
+  listRelated(conceptId: string, conversationId?: string): (ConceptMatch & { label?: string })[];
   /** Makes `parentId` the one superclass of a concept, replacing any previous one; null removes it. */
   setSuperclass(childId: string, parentId: string | null): void;
   getSuperclass(conceptId: string): ConceptMatch | undefined;

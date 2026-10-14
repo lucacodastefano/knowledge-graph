@@ -38,6 +38,18 @@ CREATE TABLE IF NOT EXISTS concept_links (
   PRIMARY KEY (from_concept_id, to_concept_id, kind)
 );
 
+-- Dashed relations between concepts belong to the map they were drawn in (D22); the global graph shows their union.
+CREATE TABLE IF NOT EXISTS map_relations (
+  conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  from_concept_id TEXT NOT NULL REFERENCES concepts(id) ON DELETE CASCADE,
+  to_concept_id TEXT NOT NULL REFERENCES concepts(id) ON DELETE CASCADE,
+  label TEXT,
+  created_at TEXT,
+  PRIMARY KEY (conversation_id, from_concept_id, to_concept_id)
+);
+CREATE INDEX IF NOT EXISTS map_relations_from ON map_relations(from_concept_id);
+CREATE INDEX IF NOT EXISTS map_relations_to ON map_relations(to_concept_id);
+
 -- "Who is under this superclass": without it every superclass lookup scans all links (2.5 s per kc_start at 10,000 concepts).
 CREATE INDEX IF NOT EXISTS concept_links_to ON concept_links(to_concept_id, kind);
 

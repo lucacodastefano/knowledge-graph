@@ -5,7 +5,6 @@ import { MetricsView } from './MetricsView.tsx';
 import { PersonalView } from './PersonalView.tsx';
 import { DetailPanel } from './DetailPanel.tsx';
 import { ConceptSearch } from './ConceptSearch.tsx';
-import { api, type Settings } from './api.ts';
 
 /** A tracker event with a sequence number, so views can react to every change. */
 export interface LiveEvent {
@@ -34,6 +33,12 @@ export function App() {
   const [live, setLive] = useState<LiveEvent | null>(null);
   const [online, setOnline] = useState(false);
   const [openConcept, setOpenConcept] = useState<string | null>(null);
+  // The map the open concept was opened from (D22): its page leads with that map's occurrence. Null = the global page.
+  const [openMap, setOpenMap] = useState<string | null>(null);
+  const openConceptIn = useCallback((conceptId: string, conversationId?: string) => {
+    setOpenConcept(conceptId);
+    setOpenMap(conversationId ?? null);
+  }, []);
   // Personal graph, hover mode: the panel follows the node under the pointer (`hoverConcept`) until a click
   // locks it (`openConcept`, focus mode). It opens after a short dwell and lingers on leaving, so crossing
   // empty space between nodes does not flash it.
@@ -97,11 +102,11 @@ export function App() {
           placeholder="Cerca nei concetti e nei testi…"
           className="header-search"
           onPick={(c) => {
-            setOpenConcept(c.id);
+            openConceptIn(c.id);
             setFound((prev) => ({ seq: (prev?.seq ?? 0) + 1, conceptId: c.id }));
           }}
           onPickHit={(h) => {
-            setOpenConcept(h.conceptId);
+            openConceptIn(h.conceptId, h.conversationId);
             setFound((prev) => ({ seq: (prev?.seq ?? 0) + 1, conceptId: h.conceptId, visitId: h.visitId, conversationId: h.conversationId }));
             if (view !== 'conversation') location.hash = '#conversazione';
           }}
@@ -111,19 +116,18 @@ export function App() {
           {tab('personal', 'Grafo globale', '#personale')}
           {tab('metrics', 'Metriche', '#metriche')}
         </nav>
-        <ModelSettings />
         <span className={`dot ${online ? 'on' : ''}`} title={online ? 'Collegato' : 'Non collegato'} />
       </header>
       <main>
         {view === 'metrics' ? (
           <MetricsView live={live} />
         ) : view === 'conversation' ? (
-          <ConversationView live={live} found={found} onOpenConcept={setOpenConcept} onBackgroundClick={closeConcept} />
+          <ConversationView live={live} found={found} onOpenConcept={openConceptIn} onBackgroundClick={closeConcept} />
         ) : (
           <PersonalView
             live={live}
             found={found}
-            onOpenConcept={setOpenConcept}
+            onOpenConcept={openConceptIn}
             onBackgroundClick={closeConcept}
             focusId={openConcept}
             onHoverConcept={onHoverConcept}
@@ -132,6 +136,7 @@ export function App() {
         {shown && view !== 'metrics' && (
           <DetailPanel
             conceptId={shown}
+            conversationId={view === 'conversation' && openConcept ? openMap : null}
             pinned={view === 'personal' && openConcept !== null}
             onPin={() => setOpenConcept(shown)}
             onPointer={(inside) => (inside ? holdHover() : openConcept === null && onHoverConcept(null))}
@@ -142,27 +147,5 @@ export function App() {
         )}
       </main>
     </div>
-  );
-}
-
-/** The canvas setting that changes what the server tells the model (D19 memory). */
-function ModelSettings() {
-  const [settings, setSettings] = useState<Settings | null>(null);
-  useEffect(() => void api.settings().then(setSettings, () => setSettings(null)), []);
-  if (!settings) return null;
-  const toggle = (key: keyof Settings, title: string, label: string) => (
-    <label className="setting" title={title}>
-      <input type="checkbox" checked={settings[key]} onChange={(e) => void api.updateSettings({ [key]: e.target.checked }).then(setSettings)} />
-      {label}
-    </label>
-  );
-  return (
-    <>
-      {toggle(
-        'memory',
-        "Il modello riceve all'avvio un breve profilo del tuo grafo e, quando un argomento c'è già, lo richiama prima di rispondere. Vale dalla prossima chat, dopo aver riavviato Claude Desktop.",
-        'Memoria automatica',
-      )}
-    </>
   );
 }
