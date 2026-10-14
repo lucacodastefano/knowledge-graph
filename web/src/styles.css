@@ -429,7 +429,8 @@ table.mini tr.bad td { color: #dc2626; }
 
 /* Fingers: no hover, so no side handles; tiny controls get a bigger hit area without growing. */
 @media (hover: none) {
-  .visit .react-flow__handle { display: none; }
+  /* Not display:none: React Flow measures the handles to place the edges, and unmeasured handles lose every line. */
+  .visit .react-flow__handle { opacity: 0 !important; pointer-events: none !important; }
   .visit .collapse-toggle.folded::before { content: ''; position: absolute; inset: -18px; }
   .relation-label button { width: 32px; height: 32px; line-height: 32px; }
 }

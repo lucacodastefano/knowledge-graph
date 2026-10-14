@@ -77,6 +77,14 @@ test('the canvas starts blank and grows live while the model tracks concepts', a
   assert.equal(await page.locator('[data-testid=visit]').count(), 12);
   await page.waitForFunction(() => document.querySelectorAll('.react-flow__edge.cross-link').length >= 2, undefined, { timeout: 10_000 });
   assert.ok((await page.locator('.react-flow__edge.cross-link').count()) >= 2, 'dashed cross-links for returning concepts');
+  // Every parent-child link is drawn: one visible solid line per visit that has a parent (a layer or handle regression loses them).
+  const [conv] = await (await page.request.get(`${base}/api/conversations`)).json();
+  const links = (await (await page.request.get(`${base}/api/conversations/${conv.id}/tree`)).json()).visits.filter((v: { parentVisitId: string | null }) => v.parentVisitId).length;
+  assert.equal(
+    await page.evaluate(() => [...document.querySelectorAll<SVGPathElement>('.react-flow__edge:not(.cross-link):not(.relation) path.react-flow__edge-path')].filter((p) => p.getTotalLength() > 5).length),
+    links,
+    'one visible line per parent-child link',
+  );
   await page.screenshot({ path: join(out, '3-completo.png') });
 
   // The radial layout spreads wider than the screen: fit the whole tree before hovering.
