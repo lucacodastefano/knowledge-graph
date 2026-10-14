@@ -18,10 +18,15 @@ test('token accepted as Bearer header, cookie, /t/<token> prefix or ?token= (whi
   assert.equal((await app.inject({ url: '/api/conversations', headers: { cookie: `kg_token=${TOKEN}` } })).statusCode, 200);
   assert.equal((await app.inject(`/t/${TOKEN}/api/conversations`)).statusCode, 200);
   assert.equal((await app.inject('/t/wrong/api/conversations')).statusCode, 401);
-  const login = await app.inject(`/api/conversations?token=${TOKEN}`);
-  assert.equal(login.statusCode, 302);
-  assert.equal(login.headers.location, '/api/conversations');
-  assert.match(String(login.headers['set-cookie']), /kg_token=.*HttpOnly.*Secure/);
+  const api = await app.inject(`/api/conversations?token=${TOKEN}`);
+  assert.equal(api.statusCode, 200);
+  assert.match(String(api.headers['set-cookie']), /kg_token=.*HttpOnly.*Secure.*SameSite=Lax/);
+  // Opening the canvas link: a 200 page (no redirect) that sets the cookie and moves to the clean URL.
+  const page = await app.inject(`/?token=${TOKEN}&x=1`);
+  assert.equal(page.statusCode, 200);
+  assert.match(String(page.headers['set-cookie']), /SameSite=Lax/);
+  assert.match(page.body, /location\.replace\("\/\?x=1"\)/);
+  assert.doesNotMatch(page.body, /replace\("[^"]*token/);
 });
 
 test('MCP initialize works through the secret URL', async () => {

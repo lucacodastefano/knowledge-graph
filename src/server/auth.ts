@@ -33,8 +33,16 @@ export function registerAuth(app: FastifyInstance, token: string) {
     if (given && safeEqual(given, token)) {
       query.delete('token');
       const rest = query.toString();
-      reply.header('set-cookie', `kg_token=${encodeURIComponent(token)}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=31536000`);
-      return reply.redirect(path + (rest ? `?${rest}` : ''));
+      const target = path + (rest ? `?${rest}` : '');
+      const value = encodeURIComponent(token);
+      // Lax, not Strict: Safari drops Strict cookies on a navigation that starts in another app (a tapped link).
+      const attrs = 'Path=/; Secure; SameSite=Lax; Max-Age=31536000';
+      reply.header('set-cookie', `kg_token=${value}; HttpOnly; ${attrs}`);
+      if (req.method !== 'GET' || path.startsWith('/api/') || path === '/ws') return; // authorised, no redirect
+      // A 200 page instead of a 302 (browsers differ on cookies set by redirects); it also sets the cookie from JS as a fallback.
+      return reply.type('text/html').send(
+        `<!doctype html><meta charset="utf-8"><title>Knowledge graph</title><script>document.cookie=${JSON.stringify(`kg_token=${value}; ${attrs}`)};location.replace(${JSON.stringify(target)})</script>`,
+      );
     }
     return reply.code(401).send({ error: 'Unauthorized' });
   });
