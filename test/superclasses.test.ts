@@ -14,8 +14,8 @@ function setup() {
   return { tracker, repo: tracker.repo, a, b, ea, sa };
 }
 
-test('a superclass groups concepts, has no visits, appears in the personal graph and in recall', () => {
-  const { tracker, repo, ea, sa } = setup();
+test('a superclass groups concepts, has no visits, appears in the personal graph and not in a map', () => {
+  const { tracker, repo, a, ea, sa } = setup();
   const sup = tracker.group('Architettura IT', [ea.conceptId, sa.conceptId]);
   assert.equal(repo.countVisitsOfConcept(sup.id), 0);
   assert.deepEqual(repo.listMembers(sup.id).map((m) => m.id).sort(), [ea.conceptId, sa.conceptId].sort());
@@ -23,9 +23,11 @@ test('a superclass groups concepts, has no visits, appears in the personal graph
   assert.equal(graph.concepts.find((c) => c.id === ea.conceptId)!.superclassId, sup.id);
   assert.ok(graph.concepts.some((c) => c.id === sup.id), 'the visit-less superclass is a node');
   assert.equal(graph.edges.length, 0, 'grouping draws no edges: areas, not lines');
-  const [hit] = new Reader(repo).recall('Solution architecture');
-  assert.equal(hit.in, 'Architettura IT');
-  assert.deepEqual(new Reader(repo).recall('Architettura IT')[0].members?.length, 2);
+  const page = new Reader(repo).conceptPage(ea.conceptId)!;
+  assert.equal(page.superclass?.name, 'Architettura IT');
+  const inMap = new Reader(repo).conceptPage(ea.conceptId, a.id)!;
+  assert.equal(inMap.superclass, null, 'superclasses are shown in the global graph only');
+  assert.deepEqual(inMap.members, []);
   assert.deepEqual(new Reader(repo).profile().groups, ['Architettura IT (2)']);
 });
 
@@ -61,31 +63,16 @@ test('merging keeps one superclass and refuses a loop', () => {
   assert.throws(() => tracker.mergeConcepts(z.id, merged.id), /loop/);
 });
 
-test('kc_relate by name: superclass (created if new) and a labelled relation', () => {
-  const { tracker, repo, b, ea } = setup();
-  assert.match(tracker.relateByName({ concept: 'enterprise architecture', superclass: 'Architettura IT' }), /under "Architettura IT"/);
-  assert.throws(() => tracker.relateByName({ concept: 'Nope', superclass: 'X' }), /not found/);
-  tracker.relateByName({ concept: 'Enterprise architecture', relatedTo: 'Kafka', label: 'usa' });
-  const r = new Reader(repo);
-  assert.deepEqual(r.recall('Kafka')[0].rel, ['Enterprise architecture (usa)']);
+test('kc_relate by name: superclass (created if new) and a labelled relation of the current map', () => {
+  const { tracker, repo, a, b, ea } = setup();
+  tracker.track(a.id, [{ title: 'Kafka', summary: 'k', parent: 'root' }]);
+  assert.match(tracker.relateByName(a.id, { concept: 'enterprise architecture', superclass: 'Architettura IT' }), /under "Architettura IT"/);
+  assert.throws(() => tracker.relateByName(a.id, { concept: 'Nope', superclass: 'X' }), /not in this graph/);
+  assert.throws(() => tracker.relateByName(a.id, { concept: 'Solution architecture', superclass: 'X' }), /not in this graph/, 'a concept only in another map');
+  assert.throws(() => tracker.relateByName(a.id, { concept: 'Enterprise architecture', relatedTo: 'Solution architecture' }), /not in this graph/);
+  tracker.relateByName(a.id, { concept: 'Enterprise architecture', relatedTo: 'Kafka', label: 'usa' });
+  assert.deepEqual(repo.listRelated(ea.conceptId, a.id).map((r) => r.label), ['usa']);
   assert.equal(repo.getPersonalGraph().edges.find((e) => e.relation)!.label, 'usa');
-  assert.equal(repo.getTree(b.id)!.relations.length, 0, 'not both in one conversation: no line there');
+  assert.equal(repo.getTree(b.id)!.relations.length, 0, 'Kafka is also in B but the relation was made in A');
   assert.equal(ea.conceptId, repo.findConceptByNorm('enterprise architecture')!.id);
-});
-
-test('suggestions group topics that share a word, offer joining an existing superclass, and can be ignored', () => {
-  const { tracker, repo, ea, sa } = setup();
-  const r = new Reader(repo);
-  const [s] = r.suggestions();
-  assert.equal(s.name, 'Architecture');
-  assert.deepEqual(s.concepts.map((c) => c.id).sort(), [ea.conceptId, sa.conceptId].sort());
-  tracker.ignoreSuggestion(s.key);
-  assert.deepEqual(r.suggestions(), []);
-
-  tracker.group('Architettura IT', [ea.conceptId]);
-  const c = tracker.startConversation('C', null);
-  tracker.track(c.id, [{ title: 'Data architecture', summary: 'd' }]);
-  const join = r.suggestions().find((x) => x.into);
-  assert.equal(join?.into?.name, 'Architettura IT');
-  assert.ok(join!.concepts.some((x) => x.name === 'Data architecture'));
 });

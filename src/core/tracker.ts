@@ -1,8 +1,8 @@
 import { EventEmitter } from 'node:events';
 import type { Repository } from './repository.ts';
-import type { Concept, ConceptMatch, Conversation, Settings, Visit } from './types.ts';
+import type { Concept, ConceptMatch, Conversation, Visit } from './types.ts';
 import { normalizeName } from './normalize.ts';
-import { restatesParent, sharesEnough } from './similarity.ts';
+import { restatesParent, sharesEnough, titleStems } from './similarity.ts';
 import { normalizeSources, normalizeSourceUrl } from './sources.ts';
 import { applyDetailEdit, type DetailEdit, DetailEditError } from './node-edit.ts';
 
@@ -49,9 +49,8 @@ export type TrackerEvent =
   | { type: 'concept.renamed'; concept: Concept }
   | { type: 'concept.merged'; fromId: string; into: Concept }
   | { type: 'concept.deleted'; conceptId: string }
-  | { type: 'concept.related'; from: string; to: string; related: boolean }
-  | { type: 'concept.grouped'; conceptId: string; superclassId: string | null }
-  | { type: 'settings.changed'; settings: Settings };
+  | { type: 'concept.related'; from: string; to: string; related: boolean; conversationId: string | null }
+  | { type: 'concept.grouped'; conceptId: string; superclassId: string | null };
 
 export interface VisitEdit {
   title?: string;
@@ -71,7 +70,6 @@ export interface NodeEdit extends DetailEdit {
 }
 
 const SIMILAR_LIMIT = 3;
-const DEFAULT_TITLE = 'Grafo';
 
 /**
  * Processing order of a kc_track batch: each node comes after the batch node it hangs under ("#n", or the title
@@ -143,16 +141,9 @@ export class Tracker {
   }
 
   /**
-   * kc_start: the map that already has this title (case, accents, plural folded), to resume instead of duplicating.
-   * The default title never matches, since it names nothing.
+   * A conversation by id, by exact title, or by a title sharing enough words (most recent first). When nothing matches,
+   * the error lists the closest titles (titles only).
    */
-  sameTitle(title: string | undefined): Conversation | undefined {
-    const t = title?.trim();
-    if (!t || t === DEFAULT_TITLE) return undefined;
-    return this.repo.listConversations().find((c) => normalizeName(c.title) === normalizeName(t));
-  }
-
-  /** A conversation by id, by exact title, or by a title sharing enough words (most recent first). */
   findConversation(ref: string): Conversation {
     const r = ref.trim();
     const all = this.repo.listConversations();
@@ -160,8 +151,12 @@ export class Tracker {
       all.find((c) => c.id === r) ??
       all.find((c) => normalizeName(c.title) === normalizeName(r)) ??
       all.find((c) => sharesEnough(r, c.title));
-    if (!found) throw new TrackerError(`No graph matches "${r}"`);
-    return found;
+    if (found) return found;
+    const words = new Set(titleStems(r));
+    const score = (c: Conversation) => titleStems(c.title).filter((w) => words.has(w)).length;
+    // Array.sort is stable: equal scores stay most recent first.
+    const closest = all.toSorted((a, b) => score(b) - score(a)).slice(0, 3);
+    throw new TrackerError(`No graph matches "${r}"${closest.length ? `. Closest: ${closest.map((c) => `"${c.title}"`).join(', ')}` : ''}`);
   }
 
   requireConversation(id: string): Conversation {
@@ -244,6 +239,7 @@ export class Tracker {
 
       // Possible duplicates of brand-new concepts, never the other nodes of this call or the node's own ancestors.
       const batch = new Set(out.map((r) => r.conceptId));
+      const here = fresh.length ? this.conceptsOf(conversationId) : new Set<string>();
       for (const index of fresh) {
         const ancestors = new Set<string>();
         for (let v = this.repo.getVisit(out[index].id)?.parentVisitId; v; ) {
@@ -252,7 +248,7 @@ export class Tracker {
           ancestors.add(p.conceptId);
           v = p.parentVisitId;
         }
-        out[index].similar = this.similar(nodes[index].title.trim(), out[index].conceptId).filter((m) => !batch.has(m.id) && !ancestors.has(m.id));
+        out[index].similar = this.similarAmong(nodes[index].title.trim(), out[index].conceptId, here).filter((m) => !batch.has(m.id) && !ancestors.has(m.id));
       }
 
       // The caller's last node is where the next topics hang.
@@ -278,13 +274,25 @@ export class Tracker {
     );
   }
 
-  /** Possible duplicates of a new concept: same words in another form first, then full-text neighbours. */
-  similar(name: string, excludeId: string): ConceptMatch[] {
+  /**
+   * Possible duplicates of a new concept: same words in another form first, then full-text neighbours. With a
+   * conversation, only concepts that have a node in it (D22): the model never learns what other maps hold.
+   */
+  similar(name: string, excludeId: string, conversationId?: string): ConceptMatch[] {
+    return this.similarAmong(name, excludeId, conversationId ? this.conceptsOf(conversationId) : undefined);
+  }
+
+  private similarAmong(name: string, excludeId: string, here?: Set<string>): ConceptMatch[] {
     const found = new Map<string, ConceptMatch>();
     for (const c of this.repo.findConceptsByKey(name, excludeId)) found.set(c.id, c);
     // Full-text neighbours must share more than one stray word ("event" alone is not enough).
-    for (const c of this.repo.similarConcepts(name, excludeId, SIMILAR_LIMIT * 3)) if (sharesEnough(name, c.name)) found.set(c.id, c);
-    return [...found.values()].slice(0, SIMILAR_LIMIT);
+    for (const c of this.repo.similarConcepts(name, excludeId, SIMILAR_LIMIT * (here ? 20 : 3))) if (sharesEnough(name, c.name)) found.set(c.id, c);
+    return [...found.values()].filter((c) => !here || here.has(c.id)).slice(0, SIMILAR_LIMIT);
+  }
+
+  /** Concepts that have a node in the conversation. */
+  private conceptsOf(conversationId: string): Set<string> {
+    return new Set((this.repo.getTree(conversationId)?.visits ?? []).map((v) => v.conceptId));
   }
 
   /** A parent outside the batch: "root", "current" (internal callers) or a node of the conversation. */
@@ -383,15 +391,6 @@ export class Tracker {
     this.deleteVisit(this.resolveNode(conversationId, nodeRef).id);
   }
 
-  settings(): Settings {
-    return { memory: this.repo.getSetting('memory') !== 'off' };
-  }
-
-  updateSettings(patch: Partial<Settings>): Settings {
-    if (patch.memory !== undefined) this.repo.setSetting('memory', patch.memory ? 'on' : 'off');
-    return this.settings();
-  }
-
   focus(conversationId: string, visitId: string | null): void {
     this.requireConversation(conversationId);
     if (visitId !== null) this.requireVisitIn(conversationId, visitId);
@@ -405,6 +404,7 @@ export class Tracker {
     const concept = this.repo.getConcept(conceptId);
     if (!concept) throw new TrackerError(`Concept ${conceptId} not found`);
     if (visit.conceptId === conceptId) return visit;
+    if (!this.conceptsOf(conversationId).has(conceptId)) throw new TrackerError(`Concept ${conceptId} is not in this graph`);
 
     let removedConceptId: string | null = null;
     const updated = this.repo.transaction(() => {
@@ -540,16 +540,20 @@ export class Tracker {
     this.repo.setVisitParent(visit.id, parentVisitId);
   }
 
-  /** Draws (or, with related=false, removes) a free relation between two different concepts, with an optional label. */
-  setRelation(fromId: string, toId: string, related: boolean, label?: string | null): void {
+  /**
+   * Draws (or, with related=false, removes) a free relation between two different concepts, with an optional label.
+   * A relation belongs to the map it is drawn in (D22); without a map, drawing only relabels and removing clears every map.
+   */
+  setRelation(fromId: string, toId: string, related: boolean, label?: string | null, conversationId: string | null = null): void {
     if (fromId === toId) throw new TrackerError('A concept cannot be related to itself: use merge for the same idea');
     this.requireConcept(fromId);
     this.requireConcept(toId);
+    if (conversationId !== null) this.requireConversation(conversationId);
     const changed = this.repo.transaction(() =>
-      related ? this.repo.addRelation(fromId, toId, label) : this.repo.removeRelation(fromId, toId),
+      related ? this.repo.addRelation(fromId, toId, label, conversationId) : this.repo.removeRelation(fromId, toId, conversationId),
     );
     if (!changed && !related) throw new TrackerError('Relation not found');
-    if (changed) this.emit({ type: 'concept.related', from: fromId, to: toId, related });
+    if (changed) this.emit({ type: 'concept.related', from: fromId, to: toId, related, conversationId });
   }
 
   /** Puts a concept under a superclass ("is a kind of"), or out of it with null. One superclass per concept, no cycles. */
@@ -598,11 +602,12 @@ export class Tracker {
     this.repo.setSetting('groupIgnored', JSON.stringify([...new Set([...ignored, ...keys])]));
   }
 
-  /** MCP entry (kc_relate): by names. A missing superclass is created; the other concepts must already exist. */
-  relateByName(input: { concept: string; superclass?: string; relatedTo?: string; label?: string }): string {
+  /** MCP entry (kc_relate): by names, concepts that have a node in this conversation. A missing superclass is created. */
+  relateByName(conversationId: string, input: { concept: string; superclass?: string; relatedTo?: string; label?: string }): string {
+    const here = this.conceptsOf(conversationId);
     const find = (name: string) => {
       const c = this.repo.findConceptByNorm(normalizeName(name));
-      if (!c) throw new TrackerError(`Concept "${name}" not found`);
+      if (!c || !here.has(c.id)) throw new TrackerError(`Concept "${name}" is not in this graph`);
       return c;
     };
     const concept = find(input.concept);
@@ -612,7 +617,7 @@ export class Tracker {
     }
     if (input.relatedTo) {
       const other = find(input.relatedTo);
-      this.setRelation(concept.id, other.id, true, input.label ?? null);
+      this.setRelation(concept.id, other.id, true, input.label ?? null, conversationId);
       return `"${concept.name}" related to "${other.name}"`;
     }
     throw new TrackerError('Give superclass or related_to');

@@ -22,6 +22,8 @@ interface Draft {
 
 interface Props {
   conceptId: string;
+  /** The map the panel was opened from: its occurrence leads, the others are collapsed (D22). Null = global graph. */
+  conversationId?: string | null;
   version: number;
   onClose: () => void;
   /** Panel opened by hovering (not locked): editing or the menu lock it on this concept. */
@@ -70,7 +72,7 @@ const readWidth = (): Width => {
   return 'third';
 };
 
-export function DetailPanel({ conceptId, version, onClose, pinned = true, onPin, onPointer, onOpen }: Props) {
+export function DetailPanel({ conceptId, conversationId = null, version, onClose, pinned = true, onPin, onPointer, onOpen }: Props) {
   const [page, setPage] = useState<ConceptPage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [menu, setMenu] = useState<Menu>('closed');
@@ -88,8 +90,16 @@ export function DetailPanel({ conceptId, version, onClose, pinned = true, onPin,
   };
 
   useEffect(() => {
-    api.concept(conceptId).then(setPage, (e: Error) => setError(e.message));
-  }, [conceptId, version]);
+    // A reply for a concept that is no longer open (merged, deleted, another one picked) is ignored.
+    let open = true;
+    api.concept(conceptId, conversationId).then(
+      (p) => open && setPage(p),
+      (e: Error) => open && setError(explain(e.message)),
+    );
+    return () => {
+      open = false;
+    };
+  }, [conceptId, conversationId, version]);
   // Esc cancels an edit first; only then does it reach the app, which leaves focus mode.
   useEffect(() => {
     if (!draft) return;
@@ -167,6 +177,20 @@ export function DetailPanel({ conceptId, version, onClose, pinned = true, onPin,
   const setNode = (id: string, patch: Partial<NodeDraft>) =>
     setDraft((d) => (d ? { ...d, nodes: { ...d.nodes, [id]: { ...d.nodes[id], ...patch } } } : d));
 
+  // Opened from a map: that map's occurrences first, the rest in a collapsed section.
+  const mine = page ? page.visits.filter((v) => !page.conversationId || v.conversationId === page.conversationId) : [];
+  const others = page && page.conversationId ? page.visits.filter((v) => v.conversationId !== page.conversationId) : [];
+  const occurrence = (v: ConceptOccurrence) => (
+    <Occurrence
+      key={v.id}
+      visit={v}
+      draft={draft?.nodes}
+      tree={trees[v.conversationId]}
+      onChange={setNode}
+      onDelete={() => api.deleteVisit(v.id).then(() => setDraft(null), (e: Error) => setError(explain(e.message)))}
+    />
+  );
+
   return (
     <aside
       className={`panel${draft ? ' editing' : ''} width-${width}`}
@@ -231,9 +255,11 @@ export function DetailPanel({ conceptId, version, onClose, pinned = true, onPin,
           </button>
           {menu === 'open' && (
             <div className="menu" role="menu">
-              <button type="button" role="menuitem" onClick={() => setMenu('group')}>
-                Raggruppa in…
-              </button>
+              {!page?.conversationId && (
+                <button type="button" role="menuitem" onClick={() => setMenu('group')}>
+                  Raggruppa in…
+                </button>
+              )}
               <button type="button" role="menuitem" onClick={() => setMenu('merge')}>
                 Unisci a…
               </button>
@@ -306,7 +332,8 @@ export function DetailPanel({ conceptId, version, onClose, pinned = true, onPin,
       {page && (
         <>
           <p className="muted">
-            Visto {page.visits.length} {page.visits.length === 1 ? 'volta' : 'volte'}, l'ultima {fmt(page.lastSeenAt)}
+            Visto {mine.length} {mine.length === 1 ? 'volta' : 'volte'}
+            {page.conversationId ? ' in questo grafo' : ''}, l'ultima {fmt(page.lastSeenAt)}
           </p>
           {(page.superclass || page.members.length > 0) && (
             <section className="groups" aria-label="Gruppi">
@@ -352,18 +379,13 @@ export function DetailPanel({ conceptId, version, onClose, pinned = true, onPin,
               )}
             </section>
           )}
-          <ol className="visits">
-            {page.visits.map((v) => (
-              <Occurrence
-                key={v.id}
-                visit={v}
-                draft={draft?.nodes}
-                tree={trees[v.conversationId]}
-                onChange={setNode}
-                onDelete={() => api.deleteVisit(v.id).then(() => setDraft(null), (e: Error) => setError(explain(e.message)))}
-              />
-            ))}
-          </ol>
+          <ol className="visits">{mine.map(occurrence)}</ol>
+          {others.length > 0 && (
+            <details className="other-maps">
+              <summary>Anche in altri grafi ({others.length})</summary>
+              <ol className="visits">{others.map(occurrence)}</ol>
+            </details>
+          )}
           {page.related.length > 0 && (
             <section className="related" aria-label="Relazioni">
               <h3>Relazioni</h3>
@@ -382,7 +404,7 @@ export function DetailPanel({ conceptId, version, onClose, pinned = true, onPin,
                         title="Etichetta"
                         onClick={() => {
                           const label = window.prompt('Etichetta della relazione (vuota per toglierla)', r.label ?? '');
-                          if (label !== null) void run(api.relate(conceptId, r.id, label.trim() || null));
+                          if (label !== null) void run(api.relate(conceptId, r.id, label.trim() || null, page.conversationId));
                         }}
                       >
                         ✎
@@ -392,7 +414,7 @@ export function DetailPanel({ conceptId, version, onClose, pinned = true, onPin,
                         className="rel-icon danger"
                         aria-label={`Rimuovi la relazione con ${r.name}`}
                         title="Rimuovi la relazione"
-                        onClick={() => void run(api.unrelate(conceptId, r.id))}
+                        onClick={() => void run(api.unrelate(conceptId, r.id, page.conversationId))}
                       >
                         ✕
                       </button>

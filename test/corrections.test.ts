@@ -116,17 +116,18 @@ test('edits keep the previous values in revisions (D16)', () => {
 
 test('a free relation links two different concepts, shows in the tree, page and personal graph, and can be removed', async () => {
   const { tracker, repo, c, kafka, part, offset, events } = setup();
-  assert.throws(() => tracker.setRelation(kafka.conceptId, kafka.conceptId, true), /itself/);
-  tracker.setRelation(kafka.conceptId, offset.conceptId, true);
-  tracker.setRelation(offset.conceptId, kafka.conceptId, true); // already there, either direction: no-op
+  assert.throws(() => tracker.setRelation(kafka.conceptId, kafka.conceptId, true, null, c.id), /itself/);
+  tracker.setRelation(kafka.conceptId, offset.conceptId, true, null, c.id);
+  tracker.setRelation(offset.conceptId, kafka.conceptId, true, null, c.id); // already there, either direction: no-op
   assert.deepEqual(repo.getTree(c.id)!.relations, [{ from: kafka.conceptId, to: offset.conceptId }]);
   assert.deepEqual(new Reader(repo).conceptPage(offset.conceptId)!.related.map((r) => r.id), [kafka.conceptId]);
+  assert.deepEqual(new Reader(repo).conceptPage(offset.conceptId, c.id)!.related.map((r) => r.id), [kafka.conceptId]);
   assert.ok(repo.getPersonalGraph().edges.some((e) => e.relation && e.source === kafka.conceptId && e.target === offset.conceptId));
   assert.ok(!repo.getPersonalGraph().edges.find((e) => e.source === kafka.conceptId && e.target === part.conceptId)?.relation);
   assert.equal(events.filter((e) => e.type === 'concept.related').length, 1);
 
   const app = await buildApp({ tracker });
-  const gone = await app.inject({ method: 'POST', url: '/api/relations/remove', payload: { from: offset.conceptId, to: kafka.conceptId } });
+  const gone = await app.inject({ method: 'POST', url: '/api/relations/remove', payload: { from: offset.conceptId, to: kafka.conceptId, conversationId: c.id } });
   assert.equal(gone.statusCode, 204);
   assert.deepEqual(repo.getTree(c.id)!.relations, []);
   const again = await app.inject({ method: 'POST', url: '/api/relations/remove', payload: { from: offset.conceptId, to: kafka.conceptId } });

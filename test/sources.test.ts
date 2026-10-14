@@ -37,7 +37,7 @@ test('sources are stored once per URL, added on re-track and shown on the concep
   const page = reader.conceptPage(kafka.conceptId)!;
   assert.deepEqual(page.sources.map((s) => s.domain).sort(), ['kafka.apache.org', 'wikipedia.org']);
   assert.equal(page.sources.find((s) => s.domain === 'kafka.apache.org')!.visitIds.length, 2);
-  assert.equal(reader.recall('Kafka')[0].sources?.length, 2);
+  assert.equal(reader.recall(conv.id, 'Kafka')[0].sources?.length, 2, 'the map\'s own sources');
   assert.equal(tracker.repo.getPersonalGraph().concepts[0].sourceCount, 2);
 });
 

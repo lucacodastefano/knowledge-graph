@@ -8,7 +8,6 @@ import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { type Tracker, TrackerError, type TrackerEvent, type VisitEdit } from '../core/tracker.ts';
 import { buildMetrics, periodStart, type Period } from '../core/metrics.ts';
 import { Reader } from '../core/reader.ts';
-import type { Settings } from '../core/types.ts';
 import { createMcpServer, type McpSessionState } from './mcp.ts';
 import { VERSION } from '../version.ts';
 import { registerAuth, tokenRewriteUrl } from './auth.ts';
@@ -139,8 +138,8 @@ export async function buildApp({ tracker, webRoot, logger = false, onShutdown, t
     },
   );
   app.get('/api/graph', async () => repo.getPersonalGraph());
-  app.get<{ Params: { id: string } }>('/api/concepts/:id', async (req, reply) => {
-    const page = new Reader(repo).conceptPage(req.params.id);
+  app.get<{ Params: { id: string }; Querystring: { conversation?: string } }>('/api/concepts/:id', async (req, reply) => {
+    const page = new Reader(repo).conceptPage(req.params.id, req.query.conversation);
     return page ?? reply.code(404).send({ error: 'Not found' });
   });
   app.get<{ Querystring: { conversation?: string; period?: Period } }>(
@@ -152,13 +151,6 @@ export async function buildApp({ tracker, webRoot, logger = false, onShutdown, t
       return buildMetrics(repo.listToolCalls(periodStart(period) ?? undefined), repo.graphSnapshot(), { ...req.query, period });
     },
   );
-  app.get('/api/settings', async () => tracker.settings());
-  app.patch<{ Body: Partial<Settings> }>(
-    '/api/settings',
-    { schema: { body: { type: 'object', properties: { memory: { type: 'boolean' } }, additionalProperties: false } } },
-    async (req) => tracker.updateSettings(req.body),
-  );
-
   app.get<{ Querystring: { q?: string } }>('/api/search', async (req) => new Reader(repo).search(req.query.q ?? ''));
 
   app.get<{ Querystring: { q?: string } }>('/api/search/text', async (req) => new Reader(repo).searchText(req.query.q ?? ''));
@@ -199,10 +191,11 @@ export async function buildApp({ tracker, webRoot, logger = false, onShutdown, t
   const relationBody = {
     type: 'object',
     required: ['from', 'to'],
-    properties: { from: { type: 'string' }, to: { type: 'string' }, label: { type: ['string', 'null'] } },
+    properties: { from: { type: 'string' }, to: { type: 'string' }, label: { type: ['string', 'null'] }, conversationId: { type: 'string' } },
   };
-  app.post<{ Body: { from: string; to: string; label?: string | null } }>('/api/relations', { schema: { body: relationBody } }, async (req, reply) => {
-    tracker.setRelation(req.body.from, req.body.to, true, req.body.label);
+  // A relation belongs to the map it is drawn in; without one, POST only relabels and remove clears every map.
+  app.post<{ Body: { from: string; to: string; label?: string | null; conversationId?: string } }>('/api/relations', { schema: { body: relationBody } }, async (req, reply) => {
+    tracker.setRelation(req.body.from, req.body.to, true, req.body.label, req.body.conversationId ?? null);
     return reply.code(204).send();
   });
   // Superclasses (D18): "Raggruppa in…", the suggestions and their accept / ignore.
@@ -236,8 +229,8 @@ export async function buildApp({ tracker, webRoot, logger = false, onShutdown, t
       return reply.code(204).send();
     },
   );
-  app.post<{ Body: { from: string; to: string } }>('/api/relations/remove', { schema: { body: relationBody } }, async (req, reply) => {
-    tracker.setRelation(req.body.from, req.body.to, false);
+  app.post<{ Body: { from: string; to: string; conversationId?: string } }>('/api/relations/remove', { schema: { body: relationBody } }, async (req, reply) => {
+    tracker.setRelation(req.body.from, req.body.to, false, undefined, req.body.conversationId ?? null);
     return reply.code(204).send();
   });
   app.delete<{ Params: { id: string }; Querystring: { children?: string } }>('/api/visits/:id', async (req, reply) => {

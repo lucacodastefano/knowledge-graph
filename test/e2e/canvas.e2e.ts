@@ -30,7 +30,7 @@ after(async () => {
   await app.close();
 });
 
-/** A node by its title only: the "anche in" badge is part of the node's text. */
+/** A node by its title only: the "compare anche sotto" badge is part of the node's text. */
 const titled = (page: import('playwright').Page, title: string | RegExp) =>
   page.locator('[data-testid=visit]').filter({ has: page.locator('.visit-title', { hasText: title }) });
 
@@ -75,6 +75,7 @@ test('the canvas starts blank and grows live while the model tracks concepts', a
 
   await page.waitForTimeout(800);
   assert.equal(await page.locator('[data-testid=visit]').count(), 12);
+  await page.waitForFunction(() => document.querySelectorAll('.react-flow__edge.cross-link').length >= 2, undefined, { timeout: 10_000 });
   assert.ok((await page.locator('.react-flow__edge.cross-link').count()) >= 2, 'dashed cross-links for returning concepts');
   await page.screenshot({ path: join(out, '3-completo.png') });
 
@@ -99,7 +100,20 @@ test('the canvas starts blank and grows live while the model tracks concepts', a
   // D17: sub-concepts as sections; D16: each occurrence says where it sits, and the node shows "anche in".
   await panel.getByRole('heading', { name: 'Chiave di partizionamento' }).waitFor();
   assert.match(await panel.innerText(), /sotto «Event sourcing»/);
-  assert.match(await titled(page, /^Partizioni$/).first().innerText(), /anche in:/);
+  assert.match(await titled(page, /^Partizioni$/).first().innerText(), /compare anche sotto «.+»/);
+  // The badge says where the other node sits and clicking it selects and centres that node.
+  await panel.getByRole('button', { name: 'Chiudi', exact: true }).click();
+  const badge = (await titled(page, /^Partizioni$/).first().locator('.also-link').first().boundingBox())!;
+  await page.mouse.click(badge.x + badge.width / 2, badge.y + badge.height / 2);
+  await page.mouse.move(5, 5);
+  await page.waitForFunction(() => [...document.querySelectorAll('[data-testid=visit].focus .visit-title')].some((e) => e.textContent === 'Partizioni'));
+  assert.equal(await titled(page, /^Partizioni$/).first().evaluate((e) => e.classList.contains('focus')), false, 'the clicked badge belongs to the other node');
+  // The view is now centred on the other node: show everything again before going on.
+  await page.locator('.react-flow__controls-fitview').click();
+  await page.waitForTimeout(500);
+  await titled(page, /^Partizioni$/).first().dblclick();
+  await panel.waitFor();
+  await panel.locator('.visits > li').nth(2).waitFor();
   // Sources cited by the model, normalized (no tracking parameters or fragment).
   assert.equal(await page.locator('[data-testid=visit] .source-badge').count(), 1, 'one node cites a source');
   assert.equal(await panel.getByRole('region', { name: 'Fonti' }).getByRole('link', { name: 'kafka.apache.org/documentation' }).count(), 1);
@@ -199,6 +213,9 @@ test('search finds a concept and the canvas corrects nodes and concepts (RF17, D
   await panel.getByRole('option', { name: /Consumer groups/ }).click();
   await panel.getByRole('heading', { name: 'Consumer groups' }).waitFor();
   await panel.locator('.visits > li').nth(1).waitFor();
+  // The merge deletes the old concept: the panel moves to the new one without a raw "404" in between.
+  await page.waitForTimeout(500);
+  assert.equal(await panel.getByRole('alert').count(), 0, 'no error after a merge');
   await panel.getByRole('button', { name: 'Chiudi', exact: true }).click();
 
   // Edit a node from its "Approfondisci": move it, rename it and edit its summary, in one save.
@@ -659,7 +676,7 @@ test('hovering an edge lifts it with its label and fades what covers it; draggin
   await fetch(`${base}/api/relations`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ from: c('Ramo uno'), to: c('Ramo due'), label: 'si oppone a' }),
+    body: JSON.stringify({ from: c('Ramo uno'), to: c('Ramo due'), label: 'si oppone a', conversationId: conv.id }),
   });
   const page = await browser.newPage({ viewport: { width: 1400, height: 820 } });
   await page.goto(base);
@@ -714,7 +731,7 @@ test('dashed relations can be bent, hidden and survive a refresh; Riordina undoe
   await fetch(`${base}/api/relations`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ from: c('Forma uno'), to: c('Forma due'), label: 'contrasta' }),
+    body: JSON.stringify({ from: c('Forma uno'), to: c('Forma due'), label: 'contrasta', conversationId: conv.id }),
   });
   const page = await browser.newPage({ viewport: { width: 1400, height: 820 } });
   await page.goto(base);

@@ -82,7 +82,7 @@ if (kind === 'graph') {
   // A third of the concepts sit under a superclass of ~12 members; a few free relations.
   const all = tracker.repo.getPersonalGraph().concepts;
   for (let i = 0; i + 12 <= all.length / 3; i += 12) tracker.group(`Area ${i / 12} ${pick()}`, all.slice(i, i + 12).map((c) => c.id));
-  for (let i = 0; i + 1 < Math.min(all.length, 400); i += 2) tracker.setRelation(all[i].id, all[i + 1].id, true, 'usa');
+  for (let i = 0; i + 1 < Math.min(all.length, 400); i += 2) tracker.setRelation(all[i].id, all[i + 1].id, true, 'usa', all[i].conversationIds[0]);
 }
 out.seedSeconds = Math.round((performance.now() - seedStart) / 100) / 10;
 trackTimes.sort((a, b) => a - b);
@@ -99,9 +99,7 @@ out.modelTokens = {
   kc_start_resume_or_tree_cut: tokens(outline),
   kc_tree_uncut: tokens(reader.tree(last, false, true, undefined, { depth: 99 })),
   kc_tree_with_summaries_uncut: tokens(reader.tree(last, true, false, undefined, { depth: 99 })),
-  memoryProfile: tokens(reader.memoryProfile()),
-  kc_profile: tokens(JSON.stringify(reader.profile())),
-  kc_recall: tokens(JSON.stringify(reader.recall(VOCAB[3]))),
+  kc_recall: tokens(JSON.stringify(reader.recall(last, VOCAB[3]))),
   kc_read_one_node: tokens(reader.read(last, uniqueTitle(index - 5))),
 };
 out.serverMs = {} as Record<string, number>;
@@ -117,8 +115,7 @@ timed('getPersonalGraph', () => tracker.repo.getPersonalGraph());
 timed('searchText', () => reader.searchText(`${VOCAB[10]} ${VOCAB[20]}`));
 timed('searchTextOneWord', () => reader.searchText(VOCAB[3]));
 timed('searchConcepts', () => reader.search(VOCAB[7]));
-timed('similarMaps', () => reader.similarMaps(`${VOCAB[1]} ${VOCAB[2]}`));
-timed('memoryProfile', () => reader.memoryProfile());
+timed('searchGraphs', () => reader.searchGraphs(last, `${VOCAB[1]} ${VOCAB[2]}`));
 timed('profile', () => reader.profile());
 timed('trackOneNode', () => tracker.track(last, [{ title: 'nodo nuovo di prova', summary: 'x.', detail: detail(), parent: 'root' }]));
 

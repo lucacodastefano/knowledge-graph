@@ -66,38 +66,41 @@ test('kc_edit changes only the asked part and keeps the rest', async () => {
   await c.close();
 });
 
-test('kc_start resumes a map with the same title, by id or title, and offers similar maps without creating an empty one', async () => {
+test('kc_start always makes a new empty map; only resume continues one, and a miss lists the closest titles', async () => {
   const c = await connect();
   const { text: first } = await call(c, 'kc_start', { title: 'Architettura event driven' });
-  assert.doesNotMatch(first, /Resumed/);
+  assert.match(first, /Tree: empty/);
   await call(c, 'kc_track', { nodes: [{ title: 'Evento', summary: 'Un fatto.', parent: 'root' }] });
   const before = tracker.repo.listConversations().length;
 
-  // Same title (case and article folded): resumed, no new map.
+  // Same title (case and article folded): still a new, empty map; the old one is untouched.
   const again = await connect();
-  const resumed = await call(again, 'kc_start', { title: 'architettura Event Driven' });
-  assert.match(resumed.text, /Resumed the existing graph "Architettura event driven"/);
-  assert.match(resumed.text, /- Evento/);
-  assert.equal(tracker.repo.listConversations().length, before);
-  await call(again, 'kc_track', { nodes: [{ title: 'Broker', summary: 'Smista.', parent: 'Evento' }] });
-  assert.equal(tracker.repo.getTree(tracker.repo.listConversations()[0].id)!.visits.length, 2, 'the node went into the resumed map');
+  const started = await call(again, 'kc_start', { title: 'architettura Event Driven' });
+  assert.doesNotMatch(started.text, /Resumed|Similar graphs|Evento/);
+  assert.match(started.text, /Tree: empty/);
+  assert.equal(tracker.repo.listConversations().length, before + 1);
+  await call(again, 'kc_track', { nodes: [{ title: 'Broker', summary: 'Smista.', parent: 'root' }] });
+  const [mine, old] = tracker.repo.listConversations();
+  assert.deepEqual(tracker.repo.getTree(mine.id)!.visits.map((v) => v.title), ['Broker']);
+  assert.deepEqual(tracker.repo.getTree(old.id)!.visits.map((v) => v.title), ['Evento']);
 
-  // Similar title: offered, nothing created yet; resume by title continues the right map.
+  // A similar title is no offer either: nothing listed, a map created.
   const similar = await connect();
   const offer = await call(similar, 'kc_start', { title: 'Event driven e Kafka' });
-  assert.match(offer.text, /Similar graphs: "Architettura event driven" \[[0-9a-f-]+\].*2 nodes/);
-  assert.equal(tracker.repo.listConversations().length, before, 'no empty map is left while the model decides');
-  assert.match((await call(similar, 'kc_start', { resume: 'event driven' })).text, /- Broker/);
-  await call(similar, 'kc_track', { nodes: [{ title: 'Kafka', summary: 'Log.', parent: 'Broker' }] });
-  assert.equal(tracker.repo.listConversations().length, before);
+  assert.doesNotMatch(offer.text, /Similar/);
+  assert.equal(tracker.repo.listConversations().length, before + 2);
 
-  // Ignoring the offer: the first kc_track creates the map with the title given to kc_start.
-  const fresh = await connect();
-  await call(fresh, 'kc_start', { title: 'Event driven e Kafka' });
-  await call(fresh, 'kc_track', { nodes: [{ title: 'Altro', summary: 'x.', parent: 'root' }] });
-  assert.equal(tracker.repo.listConversations()[0].title, 'Event driven e Kafka');
-  assert.equal((await call(fresh, 'kc_start', { resume: 'zzz inesistente' })).isError, true);
-  for (const x of [c, again, similar, fresh]) await x.close();
+  // Resume continues the right map (the most recent one with a matching title).
+  const resumed = await call(similar, 'kc_start', { resume: old.id });
+  assert.match(resumed.text, /- Evento/);
+  await call(similar, 'kc_track', { nodes: [{ title: 'Kafka', summary: 'Log.', parent: 'Evento' }] });
+  assert.equal(tracker.repo.getTree(old.id)!.visits.length, 2);
+  assert.equal(tracker.repo.listConversations().length, before + 2);
+
+  const miss = await call(similar, 'kc_start', { resume: 'zzz inesistente' });
+  assert.equal(miss.isError, true);
+  assert.match(miss.text, /No graph matches "zzz inesistente"\. Closest: "/);
+  for (const x of [c, again, similar]) await x.close();
 });
 
 test('kc_track: at most 10 nodes per call, sources by reference inside the call', async () => {

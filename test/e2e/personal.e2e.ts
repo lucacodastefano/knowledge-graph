@@ -198,3 +198,42 @@ test('a superclass gathers topics of different conversations into one named area
   await page.screenshot({ path: join(out, '13-superclasse.png') });
   await page.close();
 });
+
+test('dragging a concept onto a superclass makes it a member; elsewhere it just stays where it is dropped', async () => {
+  const sup = tracker.group('Gruppo di prova', [tracker.repo.findConceptByNorm('origami')!.id]);
+  const vulcani = tracker.repo.findConceptByNorm('vulcani')!;
+  const page = await browser.newPage({ viewport: { width: 1400, height: 820 } });
+  await page.goto(`${base}/#personale`);
+  await page.getByTestId('concept-count').waitFor();
+  await page.waitForTimeout(500);
+  const area = (await page.getByTestId('personal-graph').boundingBox())!;
+  const at = (label: string) => page.evaluate(`window.__kgPersonal.position(${JSON.stringify(label)})`) as Promise<{ x: number; y: number } | null>;
+  const from = (await at('Vulcani'))!;
+  const to = (await at('Gruppo di prova'))!;
+  assert.ok(from && to, 'both concepts are on screen');
+
+  // A drag in the open: nothing is grouped, the concept moved and no panel opened.
+  await page.mouse.move(area.x + from.x, area.y + from.y);
+  await page.mouse.down();
+  await page.mouse.move(area.x + from.x + 40, area.y + from.y + 40, { steps: 6 });
+  await page.mouse.up();
+  assert.equal(tracker.repo.getSuperclass(vulcani.id), undefined);
+  // The hover panel of the node under the pointer may cover part of the canvas: leave it.
+  await page.mouse.move(area.x + 5, area.y + 5);
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(700);
+  const moved = (await at('Vulcani'))!;
+  assert.ok(Math.hypot(moved.x - from.x, moved.y - from.y) > 20, 'the concept follows the pointer');
+
+  // Dropped on the superclass: it joins it.
+  await page.mouse.move(area.x + moved.x, area.y + moved.y);
+  await page.mouse.down();
+  await page.mouse.move(area.x + to.x, area.y + to.y, { steps: 10 });
+  assert.deepEqual(await page.evaluate('window.__kgPersonal.drag()'), { node: 'Vulcani', over: 'Gruppo di prova' }, 'the superclass is the drop target');
+  await page.screenshot({ path: join(out, '23-trascina-su-superclasse.png') });
+  await page.mouse.up();
+  const deadline = Date.now() + 5000;
+  while (tracker.repo.getSuperclass(vulcani.id)?.id !== sup.id && Date.now() < deadline) await page.waitForTimeout(100);
+  assert.equal(tracker.repo.getSuperclass(vulcani.id)?.id, sup.id);
+  await page.close();
+});

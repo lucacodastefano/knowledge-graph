@@ -6,13 +6,13 @@ description: Keep the user's knowledge-graph canvas up to date and use what they
 # knowledge-graph
 
 The knowledge-graph MCP server maps the concepts the user explores with you on a live canvas
-(http://localhost:7777) and remembers them across conversations. You write to it and read from it.
+(http://localhost:7777) and keeps one graph per chat. Everything you read and write is this chat's graph.
 
 ## Writing: one call per answer
 
 1. Call `kc_start` once per chat, when the first real topic comes up, titled with that topic (not "session" or the user's name). Never call it again
    for a new topic: that is a `kc_track` with `parent: "root"`.
-   To continue an earlier graph pass `resume` with its id (find it with `kc_profile`).
+   A title always makes a new empty graph. Only when the user asks to continue an earlier graph, pass `resume` (id or title).
 2. When your answer will introduce or deepen a concept, call `kc_track` **once**, **before** writing the answer, with all its new nodes; then write the answer once. `kc_start` alone needs no `kc_track`.
    One node per concept you explain: its parts are its children, different aspects of one topic are siblings under it.
    Nodes are concepts, not sections of your answer: when you go deeper into a node already on the canvas, its parts go directly under it.
@@ -27,10 +27,10 @@ The knowledge-graph MCP server maps the concepts the user explores with you on a
      `"root"` for an unrelated topic; `"#0"`, `"#1"`... (or its title) to hang a node under another node of the same call, in any order.
    - `excerpt`: leave it out unless a formula or code line is worth keeping as is.
    - `sources`: when your answer uses web search results or documents, put their URLs on the nodes they support (not on every node): one or two primary sources per node; a URL several nodes cite is written once in the call's `sources` and referenced as `"@0"`, `"@1"`. At most 10 nodes per `kc_track` call.
-   If `kc_start` lists similar graphs, or the user says to continue earlier research, call `kc_start` with `resume` (id or title) instead of starting another graph.
-3. "On the canvas" means this chat's graph ("Grafo" in the canvas). To go deeper into a node, `kc_track` its parts with `parent` = that node (no `kc_focus` needed); a concept that is only in the global graph ("Grafo globale") is tracked here, not focused. Use `kc_focus` only to make a node of this graph current again, and `kc_read` with a title to reread a node's full text.
+   Every `kc_track` result starts with `Graph: <title>`: if that graph is not this chat's topic, call `kc_start`.
+3. "On the canvas" means this chat's graph ("Grafo" in the canvas). To go deeper into a node, `kc_track` its parts with `parent` = that node (no `kc_focus` needed). Use `kc_focus` only to make a node of this graph current again, and `kc_read` with a title to reread a node's full text.
    A parent's `detail` holds only what concerns the whole (introduction, comparison, how the parts connect); each child's content lives only in that child.
-4. If `kc_track` reports a `Similar` concept that is clearly the same idea, call `kc_link` to merge.
+4. If `kc_track` reports a `Similar` concept (one of this graph) that is clearly the same idea, call `kc_link` to merge.
 5. When the user asks to change the canvas (move, rename, merge, remove, "fix the hierarchy"), use only the editing tools, never `kc_track`:
    `kc_edit` changes part of a node without resending it (replace a fragment of the detail, append text at the end or under a heading, new summary, add or remove a source): use it for corrections and additions, and rewrite a node with `kc_track` only if almost everything changes.
    `kc_move` hangs a node (with its children) under another one or `"root"`; `kc_rename` renames it; `kc_link` merges two names of the same
@@ -38,14 +38,12 @@ The knowledge-graph MCP server maps the concepts the user explores with you on a
 
 Never create nodes about the graph, the tools or the chat itself; do not track small talk, meta questions or clarifications. "Track this" / "don't track this" from the user always wins.
 
-## Reading: start from what the user knows
+## Reading: this chat's graph
 
-- When a topic first comes up in the conversation (not on follow-ups), call `kc_recall` with the topic. If the user has seen it, build on their notes
-  instead of starting from zero, and point out links to earlier topics (`near`) when they help. `sources` lists pages already cited on it.
-- When the user asks to pick up where they left off, call `kc_tree` (top levels; collapsed branches show `(+N)`), then `kc_tree` with `root` on the branch you need and `kc_read` on the node, and continue from the `*current` node.
-- When the user asks what they know or what is missing on a topic, read `kc_recall` (a result with `thin: true` is superficial) or `kc_profile` and answer from it.
-- When the user asks what they have been studying, or you need context at the start of a session, call `kc_profile`.
-- `kc_relate` (`concept`, then `superclass` or `related_to`, optional `label`) groups a concept under a superclass (one per concept) or relates two concepts. Use it after `kc_track` when `kc_recall` shows the topic belongs to an existing group (`in`), or when the user asks to tidy their graph (see `groups` and `ungrouped` in `kc_profile`).
+- To check what this graph already says on a topic, call `kc_recall` (a result with `thin: true` is superficial). It never returns anything from other graphs.
+- When the user asks to pick up where they left off (after `kc_start` with `resume`), call `kc_tree` (top levels; collapsed branches show `(+N)`), then `kc_tree` with `root` on the branch you need and `kc_read` on the node, and continue from the `*current` node.
+- Look in the user's other graphs only when they explicitly ask: `kc_search_graphs` (titles and summaries, grouped by graph), then `kc_read` with `node` and `graph` for a node's text. To bring something into this chat's graph, `kc_track` it in your own words.
+- `kc_relate` (`concept`, then `superclass` or `related_to`, optional `label`) groups a concept under a superclass (one per concept) or relates two concepts of this graph. Use it only when the user asks to tidy their graph.
 
 ## Style
 

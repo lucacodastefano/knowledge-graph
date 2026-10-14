@@ -8,7 +8,6 @@ import type {
   ConversationTree,
   PersonalGraph,
   GroupSuggestion,
-  Settings,
   TextHit,
   Visit,
 } from '../../src/core/types.ts';
@@ -16,7 +15,7 @@ import type { Metrics, Period } from '../../src/core/metrics.ts';
 import type { LayoutEntry } from '../../src/core/repository.ts';
 import type { TrackerEvent, VisitEdit } from '../../src/core/tracker.ts';
 
-export type { Metrics, Period, GroupSuggestion, Concept, ConceptOccurrence, ConceptPage, ConceptSection, ConceptSource, Conversation, ConversationTree, PersonalGraph, Settings, TextHit, TrackerEvent, Visit, VisitEdit };
+export type { Metrics, Period, GroupSuggestion, Concept, ConceptOccurrence, ConceptPage, ConceptSection, ConceptSource, Conversation, ConversationTree, PersonalGraph, TextHit, TrackerEvent, Visit, VisitEdit };
 
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(path);
@@ -44,7 +43,7 @@ export function explain(message: string): string {
   if (exists) return `Esiste già «${exists[1]}»: usa «Unisci a…» per fondere i due concetti.`;
   if (/related to itself/.test(message)) return 'Sono lo stesso concetto: per fonderli usa «Unisci a…».';
   if (/descendants/.test(message)) return 'Un nodo non può finire sotto sé stesso o un suo discendente.';
-  if (/not found/.test(message)) return 'Non esiste più: forse è stato già modificato.';
+  if (/not found|: 404$/.test(message)) return 'Non esiste più: forse è stato già modificato.';
   if (/Empty/.test(message)) return 'Il nome non può essere vuoto.';
   return `Modifica rifiutata: ${message}`;
 }
@@ -53,14 +52,13 @@ export const api = {
   conversations: () => get<Conversation[]>('/api/conversations'),
   deleteConversation: (id: string) => send<void>('DELETE', `/api/conversations/${id}`),
   tree: (id: string) => get<ConversationTree>(`/api/conversations/${id}/tree`),
-  concept: (id: string) => get<ConceptPage>(`/api/concepts/${id}`),
+  /** Opened from a map, the page leads with that map's occurrence (D22). */
+  concept: (id: string, conversationId?: string | null) => get<ConceptPage>(`/api/concepts/${id}${conversationId ? `?conversation=${encodeURIComponent(conversationId)}` : ''}`),
   layout: () => get<LayoutEntry[]>('/api/layout'),
   /** An item without x / y is forgotten. */
   saveLayout: (items: Partial<LayoutEntry>[]) => send<void>('POST', '/api/layout', { items }),
   metrics: (conversation: string, period: Period) =>
     get<Metrics>(`/api/metrics?period=${period}${conversation ? `&conversation=${encodeURIComponent(conversation)}` : ''}`),
-  settings: () => get<Settings>('/api/settings'),
-  updateSettings: (patch: Partial<Settings>) => send<Settings>('PATCH', '/api/settings', patch),
   graph: () => get<PersonalGraph>('/api/graph'),
   search: (q: string) => get<Concept[]>(`/api/search?q=${encodeURIComponent(q)}`),
   searchText: (q: string) => get<TextHit[]>(`/api/search/text?q=${encodeURIComponent(q)}`),
@@ -71,12 +69,15 @@ export const api = {
   /** `detach`: the children become roots instead of moving up to the parent. */
   deleteVisit: (id: string, detach = false) => send<void>('DELETE', `/api/visits/${id}${detach ? '?children=detach' : ''}`),
   restoreVisit: (input: object) => send<Visit>('POST', '/api/visits/restore', input),
-  relate: (from: string, to: string, label?: string | null) => send<void>('POST', '/api/relations', { from, to, label }),
+  /** A relation belongs to the map it is drawn in; without one it only relabels the existing ones. */
+  relate: (from: string, to: string, label?: string | null, conversationId?: string | null) =>
+    send<void>('POST', '/api/relations', { from, to, label, ...(conversationId ? { conversationId } : {}) }),
   setSuperclass: (id: string, superclassId: string | null) => send<void>('PATCH', `/api/concepts/${id}/superclass`, { superclassId }),
   group: (name: string, conceptIds: string[]) => send<Concept>('POST', '/api/groups', { name, conceptIds }),
   suggestions: () => get<GroupSuggestion[]>('/api/suggestions'),
   ignoreSuggestion: (key: string) => send<void>('POST', '/api/suggestions/ignore', { key }),
-  unrelate: (from: string, to: string) => send<void>('POST', '/api/relations/remove', { from, to }),
+  unrelate: (from: string, to: string, conversationId?: string | null) =>
+    send<void>('POST', '/api/relations/remove', { from, to, ...(conversationId ? { conversationId } : {}) }),
   removeSource: (visitId: string, sourceId: string) => send<void>('DELETE', `/api/visits/${visitId}/sources/${sourceId}`),
 };
 

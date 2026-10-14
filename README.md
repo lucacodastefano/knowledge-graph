@@ -51,18 +51,19 @@ Build it yourself from Linux or macOS with `npm run package:win` (needs Go and c
 
 | Tool | Purpose |
 |---|---|
-| `kc_start` | Start a graph, or resume one (same title, `resume`, similar graphs offered) |
+| `kc_start` | Start this chat's graph (always a new one), or `resume` an earlier one |
 | `kc_track` | Add the concept nodes of an answer (batch) |
 | `kc_edit` | Change part of a node (replace, append, summary, sources) without resending it |
 | `kc_focus` | Go back to a node already on the canvas |
-| `kc_link` | Merge a node into an existing concept |
+| `kc_link` | Merge a node into another concept of the graph |
 | `kc_move` | Move a node under another node |
 | `kc_rename` | Rename a node |
 | `kc_remove` | Remove a node; its children move up |
-| `kc_recall` | What the user already explored about a topic |
-| `kc_tree` | Outline of a graph, with its relations |
+| `kc_recall` | Nodes of this graph that already cover a topic |
+| `kc_tree` | Outline of this graph, with its relations |
 | `kc_read` | Full text of one node, with its children's titles |
-| `kc_profile` | Overview of the user's knowledge |
+| `kc_relate` | Group a concept under a superclass, or relate two concepts of this graph |
+| `kc_search_graphs` | Search the user's other graphs, only when they ask (titles and summaries) |
 
 The server sends its tracking instructions to the client automatically; they are also available as the `kc_instructions` prompt.
 

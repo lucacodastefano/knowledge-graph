@@ -16,22 +16,40 @@ const setup = () => {
   return { tracker, reader, kafka, es };
 };
 
-test('recall finds a concept by name with notes, dates and neighbours', () => {
-  const { reader } = setup();
-  const [kafka] = reader.recall('kafka');
-  assert.equal(kafka.name, 'Kafka');
-  assert.equal(kafka.seen, 2);
-  assert.match(kafka.last, /^\d{4}-\d{2}-\d{2}$/);
-  assert.deepEqual(kafka.notes, ['Usato come event store.', 'Log distribuito partizionato.']);
-  assert.deepEqual(kafka.near.sort(), ['Consumer group', 'Event sourcing']);
+test('recall finds the nodes of the current map only, compact, without anything from other maps', () => {
+  const { reader, kafka } = setup();
+  const [node] = reader.recall(kafka.id, 'kafka');
+  assert.deepEqual(node, { title: 'Kafka', summary: 'Log distribuito partizionato.', children: 1 });
+  const [leaf] = reader.recall(kafka.id, 'consumer group');
+  assert.deepEqual(leaf, { title: 'Consumer group', parent: 'Kafka', summary: 'Consumer che si dividono le partizioni.', thin: true });
+  assert.ok(!JSON.stringify(reader.recall(kafka.id, 'kafka')).includes('event store'), 'the other map\'s text stays out');
 });
 
-test('recall also matches what was said, not only names', () => {
-  const { reader } = setup();
-  const names = reader.recall('partizioni').map((c) => c.name);
-  assert.ok(names.includes('Consumer group'));
-  assert.deepEqual(reader.recall('quantum computing'), []);
-  assert.throws(() => reader.recall('  '), TrackerError);
+test('recall also matches what was said, not only titles', () => {
+  const { reader, kafka } = setup();
+  const titles = reader.recall(kafka.id, 'partizioni').map((c) => c.title);
+  assert.ok(titles.includes('Consumer group'));
+  assert.deepEqual(reader.recall(kafka.id, 'quantum computing'), []);
+  assert.deepEqual(reader.recall(kafka.id, 'sequenza di eventi'), [], 'that text is in another map');
+  assert.throws(() => reader.recall(kafka.id, '  '), TrackerError);
+});
+
+test('searchGraphs looks only outside the current map, grouped by map, with summaries and no detail', () => {
+  const { tracker, reader, kafka, es } = setup();
+  tracker.track(es.id, [{ title: 'Store', summary: 'Dove stanno gli eventi.', detail: 'Testo lungo sui partizioni nascosto', parent: 'root' }]);
+  const hits = reader.searchGraphs(kafka.id, 'kafka');
+  assert.deepEqual(hits, [{ graph: 'Event sourcing', id: es.id, nodes: [{ title: 'Kafka', summary: 'Usato come event store.' }] }]);
+  assert.ok(!JSON.stringify(reader.searchGraphs(kafka.id, 'nascosto')).includes('Testo lungo'));
+  assert.deepEqual(reader.searchGraphs(es.id, 'consumer'), [{ graph: 'Kafka', id: kafka.id, nodes: [{ title: 'Consumer group', summary: 'Consumer che si dividono le partizioni.' }] }]);
+  assert.deepEqual(reader.searchGraphs(es.id, 'quantum'), []);
+});
+
+test('read stays in the current map: a title only found elsewhere is an error, unless the other map is named', () => {
+  const { reader, kafka, es } = setup();
+  assert.throws(() => reader.read(kafka.id, 'Event sourcing'), /not in this graph/);
+  assert.match(reader.read(es.id, 'Event sourcing'), /sequenza di eventi/);
+  assert.match(reader.read(kafka.id, 'Consumer group'), /dividono le partizioni/);
+  assert.match(reader.read(es.id, 'Kafka'), /event store/, 'a shared concept reads this map\'s text');
 });
 
 test('tree is an indented outline without ids and with the current node', () => {
@@ -43,11 +61,9 @@ test('tree is an indented outline without ids and with the current node', () => 
   assert.match(reader.tree(kafka.id, true), /Consumer group .*: Consumer che si dividono/);
 });
 
-test('tree defaults to the latest conversation and reports unknown ids', () => {
+test('tree reports unknown ids', () => {
   const { reader } = setup();
-  assert.match(reader.tree(null, false), /^Event sourcing/);
   assert.throws(() => reader.tree('missing', false), TrackerError);
-  assert.equal(new Reader(new SqliteRepository(':memory:')).tree(null, false), 'No graphs yet.');
 });
 
 test('profile lists top and recent concepts and non-empty conversations', () => {
