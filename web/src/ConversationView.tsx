@@ -1,4 +1,5 @@
 import { DeleteConversation } from './DeleteConversation.tsx';
+import { BackToGraph, LinkGraph } from './GraphLinks.tsx';
 import { createPortal } from 'react-dom';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -279,6 +280,11 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
     void flowRef.current.fitView({ nodes: [{ id }], padding: 1, maxZoom: 1.2, duration: 400 });
   }, []);
   const fail = useCallback((e: unknown) => setNotice(explain((e as Error).message)), []);
+  // Reference nodes (D25): following one opens the other graph centred on the paired node. `trail` is the way back
+  // ("← torna a X"): each step remembers the graph left and the node it was left from.
+  const [trail, setTrail] = useState<{ graphId: string; title: string; visitId: string }[]>([]);
+  /** The node to select and centre once the graph being opened is laid out. */
+  const pendingGoto = useRef<{ graphId: string; visitId: string } | null>(null);
   /** Back to the laid-out positions after a drag that moved nothing. */
   const relayout = useCallback(() => setTree((t) => (t ? { ...t } : t)), []);
   const undoStack = useRef<Step[]>([]);
@@ -555,9 +561,17 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
       void persist(new Map(flow.getNodes().map((n) => [n.id, { ...n.position }])));
       const old = { ...(manual.current.get(v.id) ?? { x: 0, y: 0 }) };
       const childIds = (tree?.visits ?? []).filter((x) => x.parentVisitId === v.id).map((x) => x.id);
-      const page = await api.concept(v.conceptId).catch(() => null);
       let current = v.id;
       setSelected(null);
+      if (v.ref) {
+        // A reference goes with its return node; undo links the two graphs again (new nodes, same places).
+        const other = v.ref.conversationId;
+        return act({
+          redo: () => api.deleteVisit(current, true),
+          undo: async () => void ([{ id: current }] = await api.createReference(v.conversationId, other, v.parentVisitId)),
+        });
+      }
+      const page = await api.concept(v.conceptId).catch(() => null);
       act({
         redo: () => api.deleteVisit(current, true),
         undo: async () => {
@@ -629,6 +643,24 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
 
   const activeId = pinned || conversations[0]?.id || null;
 
+  /** Opens the graph on the other side of a reference node, centred on the paired node. */
+  const followReference = useCallback(
+    (v: Visit) => {
+      if (READONLY || !v.ref || !tree) return;
+      setTrail((t) => [...t, { graphId: tree.conversation.id, title: tree.conversation.title, visitId: v.id }]);
+      pendingGoto.current = { graphId: v.ref.conversationId, visitId: v.ref.visitId };
+      setPinned(v.ref.conversationId);
+    },
+    [tree],
+  );
+  const goBack = useCallback(() => {
+    const last = trail.at(-1);
+    if (!last) return;
+    setTrail((t) => t.slice(0, -1));
+    pendingGoto.current = { graphId: last.graphId, visitId: last.visitId };
+    setPinned(last.graphId);
+  }, [trail]);
+
   const loadConversations = useCallback(() => api.conversations().then(setConversations), []);
   const loadTree = useCallback(() => {
     if (!activeId) return setTree(null);
@@ -664,7 +696,8 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
     const e = live.event;
     const conv = 'conversationId' in e ? e.conversationId : 'visit' in e ? e.visit.conversationId : null;
     // Concept corrections can touch any conversation.
-    if (conv === activeId || e.type.startsWith('concept.')) loadTree();
+    const touched = e.type === 'reference.created' ? e.visits.some((v) => v.conversationId === activeId) : conv === activeId;
+    if (touched || e.type.startsWith('concept.')) loadTree();
   }, [live]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Rebuild nodes and layout whenever the tree changes; new nodes glow for a moment.
@@ -820,6 +853,20 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
     requestAnimationFrame(() => void flow.fitView({ nodes: ids, padding: 1, maxZoom: 1.2, duration: 400 }));
   }, [found, tree, nodes]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Arriving through a reference (or going back): select the paired node and bring it to the centre.
+  useEffect(() => {
+    const goto = pendingGoto.current;
+    if (!goto || !tree || tree.conversation.id !== goto.graphId) return;
+    if (!tree.visits.some((v) => v.id === goto.visitId)) {
+      pendingGoto.current = null;
+      return;
+    }
+    if (!nodes.some((n) => n.id === goto.visitId && n.measured?.width)) return;
+    pendingGoto.current = null;
+    setSelected(goto.visitId);
+    requestAnimationFrame(() => void flow.fitView({ nodes: [{ id: goto.visitId }], padding: 1, maxZoom: 1.2, duration: 400 }));
+  }, [tree, nodes]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Highlight around the pointed or selected node: parent, children and the other nodes of its concept; the
   // rest fades. Highlighted edges are drawn last, so they stay on top of the faded ones.
   const near = useMemo(() => {
@@ -887,7 +934,10 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
         <select
           className="bar-map"
           value={pinned}
-          onChange={(e) => setPinned(e.target.value)}
+          onChange={(e) => {
+            setTrail([]);
+            setPinned(e.target.value);
+          }}
           aria-label="Grafo"
           title={conversations.find((c) => c.id === pinned)?.title ?? "Segui l'ultimo grafo"}
         >
@@ -945,12 +995,24 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
             ┄
           </button>
         </div>
+        {trail.length > 0 && <BackToGraph title={trail.at(-1)!.title} onBack={goBack} />}
+        <LinkGraph
+          graph={tree?.conversation ?? null}
+          parentId={selected && !tree?.visits.find((v) => v.id === selected)?.ref ? selected : null}
+          parentTitle={selected ? tree?.visits.find((v) => v.id === selected)?.title : undefined}
+          onLinked={(refId) => {
+            setNotice(null);
+            setSelected(refId);
+          }}
+          onError={fail}
+        />
         <DeleteConversation
           id={pinned || conversations[0]?.id || null}
           title={conversations.find((c) => c.id === (pinned || conversations[0]?.id))?.title}
           layout={kind}
           onDeleted={() => {
             setPinned(AUTO);
+            setTrail([]);
             void loadConversations();
           }}
         />
@@ -968,7 +1030,7 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
           nodes={shown}
           edges={shownEdges}
           onNodesChange={onNodesChange}
-          onNodeClick={(_, n) => setSelected((s) => (s === n.id ? null : n.id))}
+          onNodeClick={(_, n) => (n.data.visit.ref ? followReference(n.data.visit) : setSelected((s) => (s === n.id ? null : n.id)))}
           onPaneClick={() => {
             setSelected(null);
             setArmed(null);
@@ -987,7 +1049,7 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
           onEdgeClick={onEdgeClick}
           onEdgeMouseEnter={onEdgeEnter}
           onEdgeMouseLeave={onEdgeLeave}
-          onNodeDoubleClick={(_, n) => onOpenConcept(n.data.visit.conceptId, n.data.visit.conversationId)}
+          onNodeDoubleClick={(_, n) => !n.data.visit.ref && onOpenConcept(n.data.visit.conceptId, n.data.visit.conversationId)}
           zoomOnDoubleClick={false}
           elementsSelectable={false}
           proOptions={{ hideAttribution: true }}
