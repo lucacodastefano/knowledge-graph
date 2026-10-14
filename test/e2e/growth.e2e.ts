@@ -108,6 +108,9 @@ const toggleOf = (page: Page, title: string) => titled(page, new RegExp(`^${titl
 const visible = (page: Page) => page.locator('[data-testid=visit]').count();
 
 test('a branch folds to "+N", keeps counting what the model adds under it, survives a refresh and opens for a search hit', async () => {
+  // Created first: the canvas follows the newest graph.
+  const other = tracker.startConversation('Altro tema', null);
+  tracker.track(other.id, [{ title: 'Tema', summary: 't', parent: 'root' }]);
   const conv = tracker.startConversation('Rami', null);
   tracker.track(conv.id, [
     { title: 'Radice rami', summary: 'r', parent: 'root' },
@@ -141,12 +144,17 @@ test('a branch folds to "+N", keeps counting what the model adds under it, survi
   assert.equal(await visible(page), 3);
   assert.equal(await titled(page, 'Figlio nuovo').count(), 0);
 
+  // A reference to another graph is a child like any other: hidden under the fold, counted, shown on opening.
+  tracker.createReference(conv.id, other.id, 'Ramo uno');
+  await page.waitForFunction(() => /\+5/.test(document.body.innerText));
+  assert.equal(await visible(page), 3);
+
   // A refresh keeps it folded.
   await page.reload();
   await titled(page, 'Ramo due').waitFor();
   await page.waitForTimeout(600);
   assert.equal(await visible(page), 3);
-  assert.equal((await toggleOf(page, 'Ramo uno').innerText()).trim(), '+4');
+  assert.equal((await toggleOf(page, 'Ramo uno').innerText()).trim(), '+5');
 
   // Search opens the path to the hit.
   await page.goto(`${base}#personale`);
@@ -154,7 +162,7 @@ test('a branch folds to "+N", keeps counting what the model adds under it, survi
   await page.getByRole('option', { name: /Foglia uno/ }).click();
   await titled(page, 'Foglia uno').waitFor();
   assert.equal((await toggleOf(page, 'Ramo uno').innerText()).trim(), '−', 'the branch above the hit is open');
-  assert.equal(await visible(page), 7);
+  assert.equal(await visible(page), 8);
 
   // "+" / "−" by hand, and "Riordina" does not unfold anything.
   await toggleOf(page, 'Ramo due').count();
