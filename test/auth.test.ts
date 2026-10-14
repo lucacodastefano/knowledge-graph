@@ -44,3 +44,12 @@ test('same-host origins are allowed in hosted mode, foreign ones are not', async
   assert.equal((await app.inject({ url: '/api/conversations', headers: { ...h, origin: 'https://kg.example.com' } })).statusCode, 200);
   assert.equal((await app.inject({ url: '/api/conversations', headers: { ...h, origin: 'https://evil.com' } })).statusCode, 403);
 });
+
+test('health reports the deployed commit when KG_COMMIT is set', async () => {
+  process.env.KG_COMMIT = 'abc1234';
+  try {
+    assert.equal((await app.inject('/api/health')).json().commit, 'abc1234');
+  } finally {
+    delete process.env.KG_COMMIT;
+  }
+});

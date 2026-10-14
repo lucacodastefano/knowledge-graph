@@ -4,6 +4,7 @@ services:
     restart: unless-stopped
     environment:
       KG_TOKEN: ${KG_TOKEN:?set in .env}
+      KG_COMMIT: ${KG_COMMIT:-}
     volumes:
       - kgdata:/data
   caddy:

@@ -99,7 +99,7 @@ export async function buildApp({ tracker, webRoot, logger = false, onShutdown, t
   // --- REST for the canvas ---
   const repo = tracker.repo;
   // The stdio bridge compares the version with its own and replaces an older daemon (stopping it via shutdown or pid).
-  app.get('/api/health', async () => ({ ok: true, version: VERSION, pid: process.pid }));
+  app.get('/api/health', async () => ({ ok: true, version: VERSION, pid: process.pid, ...(process.env.KG_COMMIT ? { commit: process.env.KG_COMMIT } : {}) }));
   if (onShutdown) {
     app.post('/api/shutdown', async (_req, reply) => {
       reply.code(202).send({ ok: true });
