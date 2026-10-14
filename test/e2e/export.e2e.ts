@@ -91,3 +91,25 @@ test('an exported map opens from file:// read only, with its detail, and talks t
   assert.deepEqual(errors, []);
   await page.close();
 });
+
+test('an exported map keeps the folded branches and their toggles', async () => {
+  const a = tracker.startConversation('Rami piegati', null);
+  const [root] = tracker.track(a.id, [{ title: 'Radice', summary: 'r', parent: 'root' }]);
+  tracker.track(a.id, [
+    { title: 'Uno', summary: 'u', parent: 'Radice' },
+    { title: 'Due', summary: 'd', parent: 'Radice' },
+  ]);
+  tracker.repo.setLayout([{ kind: 'collapsed', id: root.id, x: 0, y: 0 }]);
+  const file = join(tmpdir(), `kg-export-fold-${process.pid}.html`);
+  writeFileSync(file, await (await fetch(`${base}/api/conversations/${a.id}/export.html`)).text());
+  const page = await browser.newPage({ viewport: { width: 1400, height: 820 } });
+  await page.goto(`file://${file}`);
+  const toggle = page.getByTestId('collapse-toggle');
+  await toggle.waitFor();
+  assert.equal(await page.locator('[data-testid=visit]').count(), 1);
+  assert.equal((await toggle.innerText()).trim(), '+2');
+  await toggle.click();
+  await page.locator('[data-testid=visit]').nth(2).waitFor();
+  assert.equal((await toggle.innerText()).trim(), '−');
+  await page.close();
+});

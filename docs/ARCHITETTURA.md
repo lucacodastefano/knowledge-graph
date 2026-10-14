@@ -128,6 +128,8 @@ Più un **prompt MCP** `kc_instructions` con le regole di tracciamento scritte i
 - **Costanza del tracciamento**: quanto bene i modelli seguono le istruzioni senza essere ricordati. È il rischio principale: lo misuriamo per primo, con un prototipo minimo.
 - **Trasporto per Claude Desktop**: verificare se si collega direttamente via HTTP locale o serve il bridge stdio (il bridge è previsto comunque).
 - **Layout dell'albero mentre cresce**: i nodi non devono "saltare" a ogni inserimento (layout incrementale).
+  - Fatto: il layout completo gira solo alla prima apertura, su Riordina e cambiando layout; i nodi nuovi vanno accanto al padre nel punto libero più vicino (`web/src/placement.ts`), nulla di già disegnato si sposta. Le posizioni calcolate dal layout si salvano in `canvas_layout` con `kind` `auto-<layout>` (una serie per layout), quelle scelte a mano restano `visit`.
+  - Rami comprimibili: `canvas_layout` con `kind` `collapsed` (x e y inutilizzati), solo vista; i nodi nascosti restano nel layout, quindi nulla si sovrappone quando il ramo si riapre.
 
 ## 9. Piano di implementazione (dopo il tuo sì)
 

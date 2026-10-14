@@ -36,6 +36,22 @@ export function VisitNode({ data }: NodeProps<VisitNodeType>) {
           {visit.sourceCount}
         </span>
       )}
+      {data.collapsible && (
+        <button
+          type="button"
+          className={`collapse-toggle nodrag nopan${data.collapsed ? ' folded' : ''}`}
+          aria-label={data.collapsed ? `Espandi il ramo (${data.hiddenCount} nodi nascosti)` : 'Comprimi il ramo'}
+          title={data.collapsed ? `Mostra i ${data.hiddenCount} nodi nascosti` : 'Nascondi i nodi sotto questo'}
+          data-testid="collapse-toggle"
+          onClick={(e) => {
+            e.stopPropagation();
+            data.onToggle(visit.id);
+          }}
+          onDoubleClick={(e) => e.stopPropagation()}
+        >
+          {data.collapsed ? `+${data.hiddenCount}` : '−'}
+        </button>
+      )}
       {data.also.length > 0 && (
         <span className="also" title={`Compare anche sotto: ${data.also.map((o) => o.parent).join(', ')}`}>
           compare anche sotto{' '}

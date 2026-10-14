@@ -9,6 +9,7 @@ import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { type Tracker, TrackerError, type TrackerEvent, type VisitEdit } from '../core/tracker.ts';
 import { buildMetrics, periodStart, type Period } from '../core/metrics.ts';
 import { Reader } from '../core/reader.ts';
+import type { LayoutEntry } from '../core/repository.ts';
 import { createMcpServer, type McpSessionState } from './mcp.ts';
 import { VERSION } from '../version.ts';
 import { registerAuth, tokenRewriteUrl } from './auth.ts';
@@ -126,7 +127,7 @@ export async function buildApp({ tracker, webRoot, logger = false, onShutdown, t
   );
   // Where the user put nodes and relation bends on the canvas (kept across refreshes and layout changes).
   app.get('/api/layout', async () => repo.layoutEntries());
-  app.post<{ Body: { items: { kind: 'visit' | 'relation'; id: string; x?: number; y?: number }[] } }>(
+  app.post<{ Body: { items: { kind: LayoutEntry['kind']; id: string; x?: number; y?: number }[] } }>(
     '/api/layout',
     {
       schema: {
@@ -140,7 +141,7 @@ export async function buildApp({ tracker, webRoot, logger = false, onShutdown, t
               items: {
                 type: 'object',
                 required: ['kind', 'id'],
-                properties: { kind: { enum: ['visit', 'relation'] }, id: { type: 'string' }, x: { type: 'number' }, y: { type: 'number' } },
+                properties: { kind: { enum: ['visit', 'relation', 'collapsed', 'auto-radial', 'auto-mindmap', 'auto-tree'] }, id: { type: 'string' }, x: { type: 'number' }, y: { type: 'number' } },
               },
             },
           },
