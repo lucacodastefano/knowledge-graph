@@ -128,11 +128,15 @@ test('a branch folds to "+N", keeps counting what the model adds under it, survi
   assert.equal(await toggleOf(page, 'Foglia due').count(), 0, 'a leaf has no control');
   assert.equal((await toggleOf(page, 'Ramo uno').innerText()).trim(), '−');
   await page.screenshot({ path: join(out, '21-rami-aperti.png') });
+  await titled(page, /^Ramo uno$/).hover();
+  await page.waitForTimeout(250);
+  await page.screenshot({ path: join(out, '21b-rami-aperti-hover.png') });
 
+  await titled(page, /^Ramo uno$/).hover();
   await toggleOf(page, 'Ramo uno').click();
   await page.waitForTimeout(300);
   assert.equal(await visible(page), 3, 'the whole subtree is hidden');
-  assert.equal((await toggleOf(page, 'Ramo uno').innerText()).trim(), '+3', 'the fold shows how many nodes it hides');
+  assert.equal((await toggleOf(page, 'Ramo uno').innerText()).trim(), '3', 'the fold shows how many nodes it hides');
   assert.equal(await page.locator('.react-flow__edge').count(), 2, 'edges into the hidden nodes are gone');
   await page.screenshot({ path: join(out, '22-ramo-chiuso.png') });
   const saved = (await (await fetch(`${base}/api/layout`)).json()) as { kind: string }[];
@@ -140,13 +144,13 @@ test('a branch folds to "+N", keeps counting what the model adds under it, survi
 
   // The model adds under the folded node: hidden, and the counter goes up.
   tracker.track(conv.id, [{ title: 'Figlio nuovo', summary: 'x', parent: 'Ramo uno' }]);
-  await page.waitForFunction(() => /\+4/.test(document.body.innerText));
+  await page.waitForFunction(() => document.querySelector('.collapse-toggle.folded')?.textContent === '4');
   assert.equal(await visible(page), 3);
   assert.equal(await titled(page, 'Figlio nuovo').count(), 0);
 
   // A reference to another graph is a child like any other: hidden under the fold, counted, shown on opening.
   tracker.createReference(conv.id, other.id, 'Ramo uno');
-  await page.waitForFunction(() => /\+5/.test(document.body.innerText));
+  await page.waitForFunction(() => document.querySelector('.collapse-toggle.folded')?.textContent === '5');
   assert.equal(await visible(page), 3);
 
   // A refresh keeps it folded.
@@ -154,7 +158,7 @@ test('a branch folds to "+N", keeps counting what the model adds under it, survi
   await titled(page, 'Ramo due').waitFor();
   await page.waitForTimeout(600);
   assert.equal(await visible(page), 3);
-  assert.equal((await toggleOf(page, 'Ramo uno').innerText()).trim(), '+5');
+  assert.equal((await toggleOf(page, 'Ramo uno').innerText()).trim(), '5');
 
   // Search opens the path to the hit.
   await page.goto(`${base}#personale`);
@@ -165,10 +169,12 @@ test('a branch folds to "+N", keeps counting what the model adds under it, survi
   assert.equal(await visible(page), 8);
 
   // "+" / "−" by hand, and "Riordina" does not unfold anything.
-  await toggleOf(page, 'Ramo due').count();
+  await page.getByLabel('Chiudi').click(); // the panel opened by the search hit covers the right side
+  await titled(page, /^Foglia uno$/).hover();
   await toggleOf(page, 'Foglia uno').click();
   await page.waitForTimeout(200);
   assert.equal(await titled(page, 'Nipote').count(), 0);
+  await titled(page, /^Foglia uno$/).hover();
   await toggleOf(page, 'Foglia uno').click();
   await titled(page, 'Nipote').waitFor();
   await page.close();

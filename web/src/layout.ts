@@ -23,6 +23,8 @@ export interface VisitNodeData extends Record<string, unknown> {
   /** Branch toggle (view only): the node has children, its branch is folded, and how many nodes the fold hides. */
   collapsible: boolean;
   collapsed: boolean;
+  /** Side of the node where its branches leave, and so where the toggle sits. */
+  toggleSide?: 'left' | 'right';
   hiddenCount: number;
   onToggle: (visitId: string) => void;
   onHover: (visitId: string | null) => void;
