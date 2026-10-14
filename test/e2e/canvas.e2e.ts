@@ -351,10 +351,15 @@ test('mind map: balanced halves, edges on the facing side as branches move, and 
   assert.ok((await centreX('Ramo D')) < hub, 'Ramo D starts on the left');
   assert.deepEqual(await misattached(page, 'mindmap'), []);
 
-  // Ramo A grows to 4 leaves: the halves rebalance, B moves to the left and its edges must follow (no stale handles).
+  // Ramo A grows to 4 leaves: nothing already on the canvas moves (B stays on the right) ...
   await track([1, 2, 3].map((i) => ({ title: `Foglia A${i + 1}`, parent: 'Ramo A' })));
   await titled(page, 'Foglia A4').waitFor();
   await page.waitForTimeout(800);
+  assert.ok((await centreX('Ramo B')) > (await centreX('Centro')), 'Ramo B stays where it was');
+  assert.deepEqual(await misattached(page, 'mindmap'), []);
+  // ... until Riordina: the halves rebalance, B moves to the left and its edges must follow (no stale handles).
+  await page.getByLabel('Riordina').click();
+  await page.waitForTimeout(1000);
   assert.ok((await centreX('Ramo B')) < (await centreX('Centro')), 'Ramo B moved to the left');
   assert.deepEqual(await misattached(page, 'mindmap'), []);
   await page.screenshot({ path: join(out, '12-mappa-mentale.png') });
@@ -451,7 +456,8 @@ test('XMind gestures: drag a node onto another to move it with its children, pul
   const facing = (await titled(page, 'Figlio del ramo').locator(`.react-flow__handle.target.${side === 'right' ? 'left' : 'right'}`).boundingBox())!;
   await page.mouse.move(facing.x + facing.width / 2, facing.y + facing.height / 2, { steps: 12 });
   await page.mouse.up();
-  await page.locator('.react-flow__edge.relation').waitFor();
+  // Hand-placed nodes may sit on one line: the relation is then a flat path, which Playwright counts as hidden.
+  await page.locator('.react-flow__edge.relation').waitFor({ state: 'attached' });
   t = await state();
   assert.equal(t.relations.length, 1);
   await page.screenshot({ path: join(out, '12-gesti-xmind.png') });
@@ -483,7 +489,7 @@ test('XMind gestures: drag a node onto another to move it with its children, pul
   assert.deepEqual(await places(), placesBefore, 'removing a relation moves no node');
   assert.equal((await state()).relations.length, 0);
   await page.keyboard.press('Control+z');
-  await page.locator('.react-flow__edge.relation').waitFor();
+  await page.locator('.react-flow__edge.relation').waitFor({ state: 'attached' });
   await page.keyboard.press('Control+y');
   await page.waitForFunction(() => !document.querySelector('.react-flow__edge.relation'));
   // Undo also walks back the move: "Ramo uno" returns under "Radice gesti".
@@ -762,6 +768,9 @@ test('dashed relations can be bent, hidden and survive a refresh; Riordina undoe
     const r = (await titled(page, 'Radice forme').boundingBox())!;
     return [Math.round(((b.x - r.x) / r.width) * 10), Math.round(((b.y - r.y) / r.width) * 10)];
   };
+  // The bent relation is still armed: its handle may lie over a node, so disarm it before dragging.
+  await page.mouse.click(5, 300);
+  await page.waitForTimeout(200);
   const home = await pos('Forma uno');
   const nb = (await titled(page, 'Forma uno').boundingBox())!;
   await page.mouse.move(nb.x + nb.width / 2, nb.y + nb.height / 2);
@@ -778,6 +787,8 @@ test('dashed relations can be bent, hidden and survive a refresh; Riordina undoe
   assert.notEqual(await pathD(), before, 'and so does the bend');
   await page.getByRole('button', { name: 'Riordina', exact: true }).click();
   await page.waitForTimeout(900);
+  // Under load the layout can take longer than a fixed wait.
+  for (let i = 0; i < 20 && JSON.stringify(await pos('Forma uno')) === JSON.stringify(moved); i++) await page.waitForTimeout(250);
   assert.notDeepEqual(await pos('Forma uno'), moved, 'Riordina re-applies the layout');
   await page.mouse.click(5, 300);
   await page.keyboard.press('Control+z');

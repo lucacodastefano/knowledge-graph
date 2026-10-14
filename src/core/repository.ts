@@ -17,9 +17,13 @@ import type {
  * Storage boundary. Everything above this interface is storage-agnostic, so the
  * SQLite implementation can be swapped for a graph database later (D12).
  */
-/** A point the user chose on the canvas (node position, or bend offset of a relation). */
+/**
+ * What the canvas remembers about a map: a node the user placed ('visit'), the bend of a dashed relation ('relation'),
+ * a node the layout placed and froze so a refresh brings it back (`auto-<layout>`, one set per layout), or a node whose
+ * branch is collapsed ('collapsed', x and y unused).
+ */
 export interface LayoutEntry {
-  kind: 'visit' | 'relation';
+  kind: 'visit' | 'relation' | 'collapsed' | 'auto-radial' | 'auto-mindmap' | 'auto-tree';
   id: string;
   x: number;
   y: number;

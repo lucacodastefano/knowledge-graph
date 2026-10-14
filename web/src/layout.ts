@@ -20,6 +20,11 @@ export interface VisitNodeData extends Record<string, unknown> {
   dim: boolean;
   /** Under the hovered edge: faded to ~15% so the edge and its label can be read. */
   cover?: boolean;
+  /** Branch toggle (view only): the node has children, its branch is folded, and how many nodes the fold hides. */
+  collapsible: boolean;
+  collapsed: boolean;
+  hiddenCount: number;
+  onToggle: (visitId: string) => void;
   onHover: (visitId: string | null) => void;
   onOpen: (conceptId: string, conversationId?: string) => void;
   /** Select and centre another node of the conversation. */

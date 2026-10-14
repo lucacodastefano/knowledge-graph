@@ -173,7 +173,7 @@ export class Reader {
     if (!tree) throw new TrackerError('Conversation not found');
     const visitIds = new Set(tree.visits.map((v) => v.id));
     const relationIds = new Set(tree.relations.map((r) => `r-${r.from}-${r.to}`));
-    const layout = this.repo.layoutEntries().filter((e) => (e.kind === 'visit' ? visitIds.has(e.id) : relationIds.has(e.id)));
+    const layout = this.repo.layoutEntries().filter((e) => (e.kind === 'relation' ? relationIds.has(e.id) : visitIds.has(e.id)));
     const pages: Record<string, ConceptPage> = {};
     for (const conceptId of new Set(tree.visits.filter((v) => !v.ref).map((v) => v.conceptId))) {
       const page = this.conceptPage(conceptId, conversationId);

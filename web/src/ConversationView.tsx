@@ -14,6 +14,7 @@ import {
   ReactFlow,
   ReactFlowProvider,
   useReactFlow,
+  useUpdateNodeInternals,
   type Edge,
   type EdgeProps,
   ConnectionMode,
@@ -21,12 +22,15 @@ import {
   type NodeChange,
 } from '@xyflow/react';
 import { api, explain, READONLY, SNAPSHOT_LAYOUT, type Conversation, type Visit, type ConversationTree } from './api.ts';
+import type { LayoutEntry } from '../../src/core/repository.ts';
 import type { Found, LiveEvent } from './App.tsx';
 import {
   alsoIn,
   buildEdges,
   layout,
   neighbourhood,
+  NODE_H,
+  NODE_W,
   type EdgeData,
   type Half,
   type Placement,
@@ -34,6 +38,7 @@ import {
   type LayoutKind,
   type VisitNode as VisitNodeType,
 } from './layout.ts';
+import { placeNew, type Pos } from './placement.ts';
 import { VisitNode } from './VisitNode.tsx';
 
 /** A dashed cross-link (D1) drawn along the route the layout picked around the other nodes. */
@@ -185,6 +190,11 @@ function growth(kind: LayoutKind, n: VisitNodeType, placement: Placement | null,
   return isRoot ? ['left', 'right'] : [x >= centreX ? 'right' : 'left'];
 }
 
+/** Whether `id` sits somewhere below `root`. */
+function inBranch(kids: Map<string, string[]>, root: string, id: string): boolean {
+  return (kids.get(root) ?? []).some((c) => c === id || inBranch(kids, c, id));
+}
+
 /** The grey dashed edge previewing where a dragged node would attach. */
 function previewEdge(drop: Drop): Edge<EdgeData> {
   return {
@@ -247,6 +257,8 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
   const [pinned, setPinned] = useState<string>(AUTO);
   const [tree, setTree] = useState<ConversationTree | null>(null);
   const [nodes, setNodes] = useState<VisitNodeType[]>([]);
+  const nodesRef = useRef(nodes);
+  nodesRef.current = nodes;
   const [edges, setEdges] = useState<Edge<EdgeData>[]>([]);
   const [fresh, setFresh] = useState<Set<string>>(new Set());
   const [notice, setNotice] = useState<string | null>(null);
@@ -272,12 +284,21 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
   /** Bent dashed relations: key `r-from-to` -> offset of the curve's control point. */
   const [bends, setBends] = useState<Map<string, { x: number; y: number }>>(new Map());
   const flow = useReactFlow();
+  const updateInternals = useUpdateNodeInternals();
+  /** Folded branches (view only, saved per graph): the node stays, everything under it is hidden. */
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const collapsedLoaded = useRef(false);
   /** The "compare anche sotto" link of a node: select the other node of the same concept and bring it to the centre. */
   const flowRef = useRef(flow);
   flowRef.current = flow;
+  const revealRef = useRef<(ids: string[]) => boolean>(() => false);
   const gotoNode = useCallback((id: string) => {
     setSelected(id);
-    void flowRef.current.fitView({ nodes: [{ id }], padding: 1, maxZoom: 1.2, duration: 400 });
+    // A target inside a folded branch opens the branch first; the view moves once the nodes are on screen.
+    const opened = revealRef.current([id]);
+    const go = () => void flowRef.current.fitView({ nodes: [{ id }], padding: 1, maxZoom: 1.2, duration: 400 });
+    if (opened) setTimeout(go, 120);
+    else go();
   }, []);
   const fail = useCallback((e: unknown) => setNotice(explain((e as Error).message)), []);
   // Reference nodes (D25): following one opens the other graph centred on the paired node. `trail` is the way back
@@ -350,8 +371,14 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
   );
   /** Saves where the user put nodes (null forgets one), so the places survive a refresh. */
   const persist = useCallback(
-    (positions: Map<string, { x: number; y: number } | null>) =>
-      api.saveLayout([...positions].map(([id, p]) => ({ kind: 'visit' as const, id, ...(p ?? {}) }))).catch(fail),
+    async (positions: Map<string, { x: number; y: number } | null>, kind: LayoutEntry['kind'] = 'visit') => {
+      const items = [...positions].map(([id, p]) => ({ kind, id, ...(p ?? {}) }));
+      try {
+        for (let i = 0; i < items.length; i += 1000) await api.saveLayout(items.slice(i, i + 1000));
+      } catch (e) {
+        fail(e);
+      }
+    },
     [fail],
   );
   const placeNodes = useCallback((positions: Map<string, { x: number; y: number }>) => {
@@ -362,7 +389,10 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
       // Dragging closes the Approfondisci panel at once.
       onBackgroundClick?.();
       const ids = subtreeOf(node.id);
-      dragStart.current = new Map(flow.getNodes().filter((n) => ids.has(n.id)).map((n) => [n.id, { ...n.position }]));
+      // Nodes hidden inside a folded branch travel with it, so they are where the branch is when it opens again.
+      const all = new Map(nodesRef.current.map((n) => [n.id, n.position]));
+      for (const n of flow.getNodes()) all.set(n.id, n.position);
+      dragStart.current = new Map([...all].filter(([id]) => ids.has(id)).map(([id, p]) => [id, { ...p }]));
     },
     [subtreeOf, flow, onBackgroundClick],
   );
@@ -430,9 +460,10 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
       }
       if (!start) return;
       // Dropped in place: the subtree stays where it was put, and Ctrl+Z puts all of it back.
-      const now = new Map(flow.getNodes().filter((n) => start.has(n.id)).map((n) => [n.id, { ...n.position }]));
       const here = start.get(node.id)!;
-      if (now.get(node.id)!.x === here.x && now.get(node.id)!.y === here.y) return;
+      const [dx, dy] = [node.position.x - here.x, node.position.y - here.y];
+      if (!dx && !dy) return;
+      const now = new Map([...start].map(([id, p]) => [id, { x: p.x + dx, y: p.y + dy }]));
       const apply = (positions: Map<string, { x: number; y: number }>) => {
         for (const [id, p] of positions) manual.current.set(id, p);
         placeNodes(positions);
@@ -514,7 +545,9 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
         attachSides.current.clear();
         needsLayout.current = true;
         fitAll.current = true;
-        await persist(new Map([...before.keys()].map((id) => [id, null])));
+        autos.current.get(kind)?.clear();
+        const forget = new Map([...before.keys(), ...(tree?.visits ?? []).map((v) => v.id)].map((id) => [id, null]));
+        await Promise.all([persist(forget), persist(forget, `auto-${kind}`)]);
         relayout();
       },
       undo: async () => {
@@ -524,7 +557,7 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
         relayout();
       },
     });
-  }, [flow, act, persist, relayout, bends, fail]);
+  }, [flow, act, persist, relayout, bends, fail, kind, tree]);
   // Hovering an edge lifts it (with its label) above the nodes that cover it, which fade; its endpoints stay opaque.
   const [edgeHover, setEdgeHover] = useState<{ id: string; covering: Set<string> } | null>(null);
   const onEdgeEnter = useCallback(
@@ -634,6 +667,10 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
   );
   const knownIds = useRef<Set<string>>(new Set());
   const needsLayout = useRef(false);
+  /** Positions the layout gave, per layout, frozen so a refresh and later growth do not shuffle the picture. */
+  const autos = useRef<Map<string, Map<string, Pos>>>(new Map());
+  /** The layout the nodes on screen were placed with. */
+  const placedKind = useRef<LayoutKind | null>(null);
   const lastPlacement = useRef<Placement | null>(null);
   const lastCurrent = useRef<string | null | undefined>(undefined);
   /** Mind map halves of the first-level branches, so a growing map moves a branch only when the balance pays. */
@@ -668,7 +705,19 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
     // nodes of this page session win over what was saved.
     Promise.all([api.tree(activeId), api.layout().catch(() => [])]).then(([t, saved]) => {
       const ids = new Set(t.visits.map((v) => v.id));
-      for (const e of saved) if (e.kind === 'visit' && ids.has(e.id) && !manual.current.has(e.id)) manual.current.set(e.id, { x: e.x, y: e.y });
+      for (const e of saved) {
+        if (!ids.has(e.id)) continue;
+        if (e.kind === 'visit' && !manual.current.has(e.id)) manual.current.set(e.id, { x: e.x, y: e.y });
+        else if (e.kind.startsWith('auto-')) {
+          const frozen = autos.current.get(e.kind.slice(5)) ?? new Map<string, Pos>();
+          autos.current.set(e.kind.slice(5), frozen);
+          if (!frozen.has(e.id)) frozen.set(e.id, { x: e.x, y: e.y });
+        }
+      }
+      if (!collapsedLoaded.current) {
+        collapsedLoaded.current = true;
+        setCollapsed(new Set(saved.filter((e) => e.kind === 'collapsed' && ids.has(e.id)).map((e) => e.id)));
+      }
       setBends(new Map(saved.filter((e) => e.kind === 'relation').map((e) => [e.id, { x: e.x, y: e.y }])));
       setTree(t);
     });
@@ -679,6 +728,10 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
     knownIds.current = new Set();
     lastPlacement.current = null;
     needsLayout.current = false;
+    placedKind.current = null;
+    autos.current = new Map();
+    collapsedLoaded.current = false;
+    setCollapsed(new Set());
     manual.current.clear();
     undoStack.current = [];
     redoStack.current = [];
@@ -719,15 +772,20 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
     // Places chosen by the user stay across layout changes; "Riordina" is how they go back to the layout.
     if (kindChanged) fitAll.current = true;
     laidOut.current = kind;
-    // Auto layout runs for new nodes and when the layout is switched. After any other edit (removing a relation,
-    // moving, attaching, detaching, undo) every node stays exactly where it is: only the edges change.
+    // The full layout runs on the first load, on "Riordina" and when the layout is switched. Nodes the model adds
+    // later go next to their parent in free space; every other node stays exactly where it is, and so does every
+    // edit afterwards (removing a relation, moving, attaching, detaching, undo): only the edges change.
     // Two quick reloads can cancel the layout of the first one: keep asking for it until one has been applied.
-    if (added.length > 0) needsLayout.current = true;
-    const keep = !firstLoad && !kindChanged && !needsLayout.current && lastPlacement.current !== null;
-    const kept = (): Placement => {
-      const previous = lastPlacement.current!;
-      const current = new Map(flow.getNodes().map((n) => [n.id, n.position]));
-      const position = new Map(tree.visits.map((v) => [v.id, current.get(v.id) ?? previous.position.get(v.id) ?? { x: 0, y: 0 }]));
+    // Where each node is, in order of trust: put there by hand, shown now, frozen from an earlier layout.
+    const frozen = autos.current.get(kind) ?? new Map<string, Pos>();
+    autos.current.set(kind, frozen);
+    const sameKind = placedKind.current === kind;
+    if (frozen.size === 0 && (firstLoad || !sameKind)) needsLayout.current = true;
+    const keep = !needsLayout.current;
+    const shownAt = new Map(flow.getNodes().map((n) => [n.id, n.position]));
+    const known = (id: string): Pos | undefined =>
+      manual.current.get(id) ?? (sameKind ? (shownAt.get(id) ?? lastPlacement.current?.position.get(id)) : undefined) ?? frozen.get(id);
+    const sides = (position: Map<string, Pos>) => {
       const side = new Map<string, Side>();
       for (const v of tree.visits) {
         if (!v.parentVisitId) continue;
@@ -738,38 +796,74 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
           side.set(v.id, anchored.side);
           continue;
         }
-        side.set(v.id, kind === 'radial' ? (previous.side.get(v.id) ?? 'around') : from && to && from.x > to.x ? 'left' : 'right');
+        side.set(v.id, kind === 'radial' ? 'around' : from && to && from.x > to.x ? 'left' : 'right');
       }
-      return { position, side, branches: previous.branches };
+      return side;
     };
-    void (keep ? Promise.resolve(kept()) : layout(tree.visits, kind, halves.current)).then((placement) => {
+    const none: Placement = { position: new Map(), side: new Map(), branches: lastPlacement.current?.branches ?? new Map() };
+    void (keep ? Promise.resolve(none) : layout(tree.visits, kind, halves.current)).then((placement) => {
       if (cancelled) return;
-      lastPlacement.current = placement;
       if (!keep) {
         needsLayout.current = false;
         attachSides.current.clear();
       }
-      // Nodes the user never placed follow a parent that was moved by hand (so a new child appears next to it).
-      const pos = new Map(placement.position);
-      const parentOf = new Map(tree.visits.map((v) => [v.id, v.parentVisitId]));
-      const shift = (id: string): { x: number; y: number } => {
-        const hand = manual.current.get(id);
-        const auto = placement.position.get(id);
-        if (hand && auto) return { x: hand.x - auto.x, y: hand.y - auto.y };
-        const parent = parentOf.get(id);
-        return parent ? shift(parent) : { x: 0, y: 0 };
-      };
-      for (const [id, p] of placement.position) {
-        if (manual.current.has(id)) continue;
-        const d = shift(id);
-        if (d.x || d.y) pos.set(id, { x: p.x + d.x, y: p.y + d.y });
+      placedKind.current = kind;
+      const pos = new Map<string, Pos>();
+      const preferred = new Map<string, Pos>();
+      const fixed = new Map<string, Pos>();
+      const todo: string[] = [];
+      if (keep) {
+        // Every node keeps its place; the ones that have none (the model just added them) are placed below.
+        for (const v of tree.visits) {
+          const p = known(v.id);
+          if (p) fixed.set(v.id, p);
+          else todo.push(v.id);
+        }
+      } else {
+        // Nodes the user never placed follow a parent that was moved by hand (so a new child appears next to it).
+        const parentOf = new Map(tree.visits.map((v) => [v.id, v.parentVisitId]));
+        const shift = (id: string): { x: number; y: number } => {
+          const hand = manual.current.get(id);
+          const auto = placement.position.get(id);
+          if (hand && auto) return { x: hand.x - auto.x, y: hand.y - auto.y };
+          const parent = parentOf.get(id);
+          return parent ? shift(parent) : { x: 0, y: 0 };
+        };
+        for (const [id, p] of placement.position) {
+          const hand = manual.current.get(id);
+          if (hand) {
+            fixed.set(id, hand);
+            continue;
+          }
+          const d = shift(id);
+          preferred.set(id, { x: p.x + d.x, y: p.y + d.y });
+          todo.push(id);
+        }
       }
-      for (const [id, p] of manual.current) if (pos.has(id)) pos.set(id, p);
-      const placed: Placement = { ...placement, position: pos };
+      // New nodes go next to their parent in the nearest free spot; a layout place that a hand-placed node covers
+      // moves the same way. Nothing already placed moves.
+      for (const [id, p] of fixed) pos.set(id, p);
+      for (const [id, p] of placeNew({ visits: tree.visits, fixed, todo, preferred, kind, w: NODE_W, h: NODE_H })) pos.set(id, p);
+      // What the layout placed is saved too, so a refresh shows the same picture instead of laying everything out again.
+      const freeze = new Map<string, Pos>();
+      for (const [id, p] of pos) {
+        const f = frozen.get(id);
+        if (manual.current.has(id) || (f && f.x === p.x && f.y === p.y)) continue;
+        frozen.set(id, p);
+        freeze.set(id, p);
+      }
+      if (freeze.size && !READONLY) void persist(freeze, `auto-${kind}`);
+      const placed: Placement = { position: pos, side: keep ? sides(pos) : placement.side, branches: placement.branches };
+      lastPlacement.current = placed;
       if (kind === 'mindmap') halves.current = placement.branches;
       const also = alsoIn(tree.visits);
       setNodes((prev) => {
+        // The sizes React Flow already holds are newer than our state when two rebuilds follow each other quickly.
         const measured = new Map(prev.map((n) => [n.id, n.measured]));
+        for (const n of shownAt.keys()) {
+          const m = flow.getNode(n)?.measured;
+          if (m?.width) measured.set(n, m);
+        }
         return tree.visits.map((v) => ({
           id: v.id,
           measured: measured.get(v.id),
@@ -784,6 +878,10 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
             related: false,
             dim: false,
             also: also.get(v.id) ?? [],
+            collapsible: false,
+            collapsed: false,
+            hiddenCount: 0,
+            onToggle: () => undefined,
             onHover,
             onOpen: onOpenConcept,
             onGoto: gotoNode,
@@ -811,6 +909,10 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
         });
       }
       setEdges([...buildEdges(tree.visits, kind, placed), ...relEdges]);
+      // Two rebuilds in quick succession can leave a node without its handle positions, and its edges are then
+      // never drawn: measure again (every node on a small map, the new ones on a big one).
+      const remeasure = tree.visits.length <= 400 ? tree.visits.map((v) => v.id) : todo;
+      requestAnimationFrame(() => updateInternals(remeasure));
       // Only a new node or a new current node moves the view: touching nodes or editing relations never does.
       const current = tree.conversation.currentVisitId;
       pendingFit.current = fitAll.current ? 'all' : added.length > 0 || current !== lastCurrent.current ? 'current' : null;
@@ -820,20 +922,81 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [tree, kind, onHover, onOpenConcept, gotoNode]);
+  }, [tree, kind, onHover, onOpenConcept, gotoNode, persist, updateInternals]);
+
+  // Folded branches: how many nodes each branch holds below it, and the nodes hidden by a fold.
+  const branches = useMemo(() => {
+    const kids = new Map<string, string[]>();
+    for (const v of tree?.visits ?? []) if (v.parentVisitId) kids.set(v.parentVisitId, [...(kids.get(v.parentVisitId) ?? []), v.id]);
+    const size = new Map<string, number>();
+    const count = (id: string, seen = new Set<string>()): number => {
+      if (seen.has(id)) return 0;
+      seen.add(id);
+      const n = (kids.get(id) ?? []).reduce((a, c) => a + 1 + count(c, seen), 0);
+      size.set(id, n);
+      return n;
+    };
+    for (const v of tree?.visits ?? []) if (!v.parentVisitId) count(v.id);
+    const hidden = new Set<string>();
+    const hide = (id: string) => {
+      for (const c of kids.get(id) ?? []) if (!hidden.has(c)) (hidden.add(c), hide(c));
+    };
+    for (const id of collapsed) if (kids.has(id)) hide(id);
+    return { kids, size, hidden };
+  }, [tree, collapsed]);
+  const branchesRef = useRef(branches);
+  branchesRef.current = branches;
+  const saveCollapsed = useCallback(
+    (id: string, folded: boolean) => {
+      if (!READONLY) void api.saveLayout([{ kind: 'collapsed', id, ...(folded ? { x: 0, y: 0 } : {}) }]).catch(fail);
+    },
+    [fail],
+  );
+  const toggle = useCallback(
+    (id: string) => {
+      const folded = !collapsed.has(id);
+      setCollapsed((c) => {
+        const next = new Set(c);
+        if (folded) next.add(id);
+        else next.delete(id);
+        return next;
+      });
+      saveCollapsed(id, folded);
+      if (folded) setSelected((s) => (s && branchesRef.current.kids.has(id) && s !== id && inBranch(branchesRef.current.kids, id, s) ? id : s));
+    },
+    [collapsed, saveCollapsed],
+  );
+  /** Opens every folded branch above the given nodes; says whether anything was folded. */
+  const reveal = useCallback(
+    (ids: string[]) => {
+      const parents = new Map((tree?.visits ?? []).map((v) => [v.id, v.parentVisitId]));
+      const open = new Set<string>();
+      for (const id of ids) for (let p = parents.get(id); p; p = parents.get(p)) if (collapsed.has(p)) open.add(p);
+      if (!open.size) return false;
+      setCollapsed((c) => new Set([...c].filter((x) => !open.has(x))));
+      for (const id of open) saveCollapsed(id, false);
+      return true;
+    },
+    [tree, collapsed, saveCollapsed],
+  );
+  revealRef.current = reveal;
 
   // Frame the view after React Flow has taken the new positions and measured every node: fitting earlier
   // frames the old positions (or nothing, on the first load).
   useEffect(() => {
-    if (!pendingFit.current || !nodes.length || !nodes.every((n) => n.measured?.width)) return;
+    const onScreen = nodes.filter((n) => !branches.hidden.has(n.id));
+    if (!pendingFit.current || !onScreen.length || !onScreen.every((n) => n.measured?.width)) return;
     const fit = pendingFit.current;
     pendingFit.current = null;
-    const cur = tree?.conversation.currentVisitId;
+    // The current node may sit inside a folded branch: the view goes to the fold instead.
+    let cur = tree?.conversation.currentVisitId;
+    const parents = new Map((tree?.visits ?? []).map((v) => [v.id, v.parentVisitId]));
+    while (cur && branches.hidden.has(cur)) cur = parents.get(cur) ?? null;
     requestAnimationFrame(() => {
       if (fit === 'all') void flow.fitView({ padding: 0.2, maxZoom: 1.2 });
       else if (cur) void flow.fitView({ nodes: [{ id: cur }], padding: 2, maxZoom: 1.2, duration: 400 });
     });
-  }, [nodes, tree, flow]);
+  }, [nodes, tree, flow, branches]);
 
   // The concept picked in the search glows in the tree, and the view moves to it. A text hit also switches to
   // the map that holds the node and selects it; this waits until that map is laid out.
@@ -850,7 +1013,11 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
     handledFound.current = found.seq;
     if (!ids.length) return;
     if (found.visitId) setSelected(found.visitId);
-    requestAnimationFrame(() => void flow.fitView({ nodes: ids, padding: 1, maxZoom: 1.2, duration: 400 }));
+    // A hit inside a folded branch opens the branch first.
+    const opened = reveal(ids.map((n) => n.id));
+    const go = () => void flow.fitView({ nodes: ids, padding: 1, maxZoom: 1.2, duration: 400 });
+    if (opened) setTimeout(go, 120);
+    else requestAnimationFrame(go);
   }, [found, tree, nodes]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Arriving through a reference (or going back): select the paired node and bring it to the centre.
@@ -861,11 +1028,13 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
       pendingGoto.current = null;
       return;
     }
+    // A node inside a folded branch: open the branch first, the effect runs again once the node is on screen.
+    if (reveal([goto.visitId])) return;
     if (!nodes.some((n) => n.id === goto.visitId && n.measured?.width)) return;
     pendingGoto.current = null;
     setSelected(goto.visitId);
     requestAnimationFrame(() => void flow.fitView({ nodes: [{ id: goto.visitId }], padding: 1, maxZoom: 1.2, duration: 400 }));
-  }, [tree, nodes]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [tree, nodes, collapsed]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Highlight around the pointed or selected node: parent, children and the other nodes of its concept; the
   // rest fades. Highlighted edges are drawn last, so they stay on top of the faded ones.
@@ -876,7 +1045,12 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
   const focusId = near ? (pointed ?? selected) : null;
   const shown = useMemo(
     () =>
-      nodes.map((n) => {
+      nodes.filter((n) => !branches.hidden.has(n.id)).map((n0) => {
+        const folded = collapsed.has(n0.id) && branches.kids.has(n0.id);
+        const n =
+          branches.kids.has(n0.id)
+            ? { ...n0, data: { ...n0.data, collapsible: true, collapsed: folded, hiddenCount: folded ? (branches.size.get(n0.id) ?? 0) : 0, onToggle: toggle } }
+            : n0;
         const match = n.data.visit.conceptId === matchConcept;
         const focus = n.id === focusId || n.id === drop?.target;
         const related = !focus && !!near?.nodes.has(n.id);
@@ -886,11 +1060,12 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
           ? { ...n, data: { ...n.data, fresh: fresh.has(n.id), match, focus, related, dim, cover } }
           : n;
       }),
-    [nodes, fresh, matchConcept, near, focusId, drop, edgeHover],
+    [nodes, fresh, matchConcept, near, focusId, drop, edgeHover, branches, collapsed, toggle],
   );
   const base = edges;
   const shownEdges = useMemo(() => {
     const edges = base
+      .filter((e) => !branches.hidden.has(e.source) && !branches.hidden.has(e.target))
       .filter((e) => !hideDashed || (e.className !== 'relation' && e.className !== 'cross-link'))
       .map((e) =>
       e.className === 'relation'
@@ -921,7 +1096,7 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
       ...edges.filter((e) => !near.edges.has(e.id)).map((e) => mark(e, 'dim')),
       ...edges.filter((e) => near.edges.has(e.id)).map((e) => mark(e, 'related')),
     ];
-  }, [base, near, armed, removeRelation, labelRelation, bendRelation, bends, hideDashed, drop, nodes, edgeHover]);
+  }, [base, near, armed, removeRelation, labelRelation, bendRelation, bends, hideDashed, drop, nodes, edgeHover, branches]);
 
   return (
     <>

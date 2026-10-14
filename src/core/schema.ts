@@ -84,7 +84,7 @@ CREATE TABLE IF NOT EXISTS settings (
   value TEXT NOT NULL
 );
 
--- Where the user put things on the canvas: a node (kind 'visit') or the bend of a dashed relation (kind 'relation').
+-- What the canvas remembers: node places ('visit', 'auto-<layout>'), relation bends ('relation'), collapsed branches ('collapsed').
 CREATE TABLE IF NOT EXISTS canvas_layout (
   kind TEXT NOT NULL,
   id TEXT NOT NULL,
