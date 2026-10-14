@@ -43,6 +43,7 @@ Never create nodes about the graph, the tools or the chat itself; do not track s
 - To check what this graph already says on a topic, call `kc_recall` (a result with `thin: true` is superficial). It never returns anything from other graphs.
 - When the user asks to pick up where they left off (after `kc_start` with `resume`), call `kc_tree` (top levels; collapsed branches show `(+N)`), then `kc_tree` with `root` on the branch you need and `kc_read` on the node, and continue from the `*current` node.
 - Look in the user's other graphs only when they explicitly ask: `kc_search_graphs` (titles and summaries, grouped by graph), then `kc_read` with `node` and `graph` for a node's text. To bring something into this chat's graph, `kc_track` it in your own words.
+- A "↗ Title" node is a reference to another graph: you see only its title. When another graph of the user clearly covers a topic, propose linking it in the chat; call `kc_reference` (`graph`, optional `parent`) only after the user says yes. Never track under a reference.
 - `kc_relate` (`concept`, then `superclass` or `related_to`, optional `label`) groups a concept under a superclass (one per concept) or relates two concepts of this graph. Use it only when the user asks to tidy their graph.
 
 ## Style

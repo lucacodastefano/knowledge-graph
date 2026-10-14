@@ -24,7 +24,7 @@ const json = (r: unknown) => JSON.parse((r as { content: { text: string }[] }).c
 test('exposes the tracking tools, the instructions prompt and server instructions', async () => {
   const client = await connect();
   const tools = (await client.listTools()).tools.map((t) => t.name).sort();
-  assert.deepEqual(tools, ['kc_edit', 'kc_focus', 'kc_link', 'kc_move', 'kc_read', 'kc_recall', 'kc_relate', 'kc_remove', 'kc_rename', 'kc_search_graphs', 'kc_start', 'kc_track', 'kc_tree']);
+  assert.deepEqual(tools, ['kc_edit', 'kc_focus', 'kc_link', 'kc_move', 'kc_read', 'kc_recall', 'kc_reference', 'kc_relate', 'kc_remove', 'kc_rename', 'kc_search_graphs', 'kc_start', 'kc_track', 'kc_tree']);
   assert.equal((await client.listPrompts()).prompts[0].name, 'kc_instructions');
   assert.match(client.getInstructions() ?? '', /kc_track/);
   // Transparent wording: the graph is explained to the model, nothing asks to hide it or to copy words verbatim.

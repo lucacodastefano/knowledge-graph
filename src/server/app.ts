@@ -256,6 +256,28 @@ export async function buildApp({ tracker, webRoot, logger = false, onShutdown, t
     tracker.deleteConversation(req.params.id);
     return reply.code(204).send();
   });
+  // Reference nodes between two graphs (D25): creates the node and its return node.
+  app.post<{ Body: { conversationId: string; targetConversationId: string; parentVisitId?: string | null; targetParentVisitId?: string | null } }>(
+    '/api/references',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          required: ['conversationId', 'targetConversationId'],
+          properties: {
+            conversationId: { type: 'string' },
+            targetConversationId: { type: 'string' },
+            parentVisitId: { type: ['string', 'null'] },
+            targetParentVisitId: { type: ['string', 'null'] },
+          },
+        },
+      },
+    },
+    async (req) => {
+      const b = req.body;
+      return tracker.createReference(b.conversationId, b.targetConversationId, b.parentVisitId, b.targetParentVisitId).visits;
+    },
+  );
   // Undo of a node deleted from the canvas.
   app.post<{ Body: Parameters<Tracker['restoreVisit']>[0] }>('/api/visits/restore', async (req) => tracker.restoreVisit(req.body));
   app.delete<{ Params: { id: string; sourceId: string } }>('/api/visits/:id/sources/:sourceId', async (req, reply) => {

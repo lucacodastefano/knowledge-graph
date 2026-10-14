@@ -1,5 +1,6 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { HANDLES, type VisitNode as VisitNodeType } from './layout.ts';
+import { READONLY } from './api.ts';
 
 const POSITION = { left: Position.Left, right: Position.Right, center: Position.Top };
 
@@ -14,9 +15,10 @@ export function VisitNode({ data }: NodeProps<VisitNodeType>) {
 
   return (
     <div
-      className={`visit${data.also.length ? ' shared' : ''}${current ? ' current' : ''}${fresh ? ' fresh' : ''}${match ? ' match' : ''}${
+      className={`visit${visit.ref ? (READONLY ? ' ref disabled' : ' ref') : ''}${data.also.length ? ' shared' : ''}${current ? ' current' : ''}${fresh ? ' fresh' : ''}${match ? ' match' : ''}${
         data.cover ? ' cover' : data.focus ? ' focus' : data.related ? ' related' : data.dim ? ' dim' : ''
       }`}
+      title={visit.ref ? (READONLY ? `Rimando al grafo «${visit.ref.title}» (non incluso in questa pagina)` : `Rimando al grafo «${visit.ref.title}»: clic per aprirlo`) : undefined}
       onMouseEnter={show}
       onMouseLeave={hide}
       data-testid="visit"
@@ -28,7 +30,7 @@ export function VisitNode({ data }: NodeProps<VisitNodeType>) {
       {HANDLES.map((h) => (
         <Handle key={`s-${h}`} id={`s-${h}`} type="source" position={POSITION[h]} className={h} />
       ))}
-      <span className="visit-title">{visit.title}</span>
+      <span className="visit-title">{visit.ref ? <>↗ {visit.ref.title}</> : visit.title}</span>
       {visit.sourceCount > 0 && (
         <span className="source-badge" title={visit.sourceCount === 1 ? '1 fonte' : `${visit.sourceCount} fonti`} aria-label="Fonti">
           {visit.sourceCount}

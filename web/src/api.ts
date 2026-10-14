@@ -45,14 +45,27 @@ export function explain(message: string): string {
   if (/related to itself/.test(message)) return 'Sono lo stesso concetto: per fonderli usa «Unisci a…».';
   if (/descendants/.test(message)) return 'Un nodo non può finire sotto sé stesso o un suo discendente.';
   if (/not found|: 404$/.test(message)) return 'Non esiste più: forse è stato già modificato.';
+  if (/reference to another graph/.test(message)) return 'Un rimando ad altro grafo si può solo spostare o cancellare, e non può avere figli.';
   if (/Empty/.test(message)) return 'Il nome non può essere vuoto.';
   return `Modifica rifiutata: ${message}`;
 }
 
+/**
+ * Every reference node shares one placeholder concept on the server (D25). The canvas groups nodes by concept ("compare
+ * anche sotto", highlights), so here each reference gets a concept of its own: it never links to another node.
+ */
+const withOwnConcepts = (tree: ConversationTree): ConversationTree => ({
+  ...tree,
+  visits: tree.visits.map((v) => (v.ref ? { ...v, conceptId: `ref:${v.id}` } : v)),
+});
+
 const live = {
   conversations: () => get<Conversation[]>('/api/conversations'),
   deleteConversation: (id: string) => send<void>('DELETE', `/api/conversations/${id}`),
-  tree: (id: string) => get<ConversationTree>(`/api/conversations/${id}/tree`),
+  tree: (id: string) => get<ConversationTree>(`/api/conversations/${id}/tree`).then(withOwnConcepts),
+  /** Links two graphs: returns the new node here and its return node in the other graph (D25). */
+  createReference: (conversationId: string, targetConversationId: string, parentVisitId: string | null) =>
+    send<[Visit, Visit]>('POST', '/api/references', { conversationId, targetConversationId, parentVisitId }),
   /** Opened from a map, the page leads with that map's occurrence (D22). */
   concept: (id: string, conversationId?: string | null) => get<ConceptPage>(`/api/concepts/${id}${conversationId ? `?conversation=${encodeURIComponent(conversationId)}` : ''}`),
   layout: () => get<LayoutEntry[]>('/api/layout'),
@@ -107,6 +120,7 @@ function searchSnapshot(snap: MapSnapshot, q: string): TextHit[] {
   if (!words.length) return [];
   const hits: TextHit[] = [];
   for (const v of snap.tree.visits) {
+    if (v.ref) continue;
     const fields = { title: v.title, summary: v.summary, detail: v.detail ?? '' };
     const hay = fold(Object.values(fields).join('\n'));
     if (!words.every((w) => hay.includes(w))) continue;
@@ -127,7 +141,7 @@ function offlineApi(snap: MapSnapshot): typeof live {
   return {
     ...refused,
     conversations: () => Promise.resolve([snap.tree.conversation]),
-    tree: () => Promise.resolve(snap.tree),
+    tree: () => Promise.resolve(withOwnConcepts(snap.tree)),
     concept: (id: string) => (snap.pages[id] ? Promise.resolve(snap.pages[id]) : Promise.reject(new Error('Not found'))),
     layout: () => Promise.resolve(snap.layout),
     search: (q: string) => {

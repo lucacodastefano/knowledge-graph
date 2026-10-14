@@ -326,3 +326,12 @@ table.mini tr.bad td { color: #dc2626; }
 .sunburst .sun-label { font-size: 9px; font-weight: 600; fill: var(--text); pointer-events: none; }
 .sunburst .sun-sub { font-size: 8px; fill: var(--muted); pointer-events: none; }
 .graph-notice { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); margin: 0; padding: 6px 10px; border-radius: 6px; background: var(--surface); border: 1px solid var(--border); z-index: 5; }
+
+/* Reference nodes (D25): a link to another graph. */
+.visit.ref { border-style: dashed; border-color: var(--accent); background: var(--accent-soft); cursor: pointer; }
+.visit.ref .visit-title { color: var(--accent); }
+.visit.ref.disabled { cursor: not-allowed; opacity: 0.65; }
+.overlay-bar .back-graph { max-width: min(320px, 50vw); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.overlay-bar .link-picker { display: flex; flex-direction: column; min-width: 260px; max-height: 320px; overflow: auto; }
+.overlay-bar .link-picker input { margin: 6px; padding: 5px 8px; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; }
+.overlay-bar .link-picker .muted { margin: 6px 10px; font-size: 13px; }

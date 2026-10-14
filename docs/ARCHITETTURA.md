@@ -62,6 +62,7 @@ conversations(id, title, client, started_at, last_activity_at)
 concepts(id, name, name_norm UNIQUE, name_key, created_at, last_seen_at, visit_count)  -- name_key: quasi-duplicati
 visits(id, conversation_id, concept_id, parent_visit_id NULL, title, summary, excerpt NULL, detail NULL, seq, created_at)
 concept_links(from_concept_id, to_concept_id, kind)      -- kind "is_a" = superclasse (D18, una sola per concetto, i concetti senza visite sono ammessi), globale: si vede solo nel grafo globale
+visits.ref_visit_id  -- nodo rimando (D25): il nodo gemello nell'altro grafo; concept_id punta a un concetto segnaposto nascosto (grafo globale, ricerca, conteggi lo escludono); titolo = titolo dell'altro grafo; POST /api/references crea la coppia, cancellarne uno cancella l'altro
 map_relations(conversation_id, from_concept_id, to_concept_id, label, created_at)  -- relazione libera (tratteggiata) tra concetti diversi, per grafo (D22): nasce da kc_relate o dal canvas (POST /api/relations con conversationId) e si vede solo in quel grafo; il grafo globale mostra l'unione, una coppia una volta sola; si cancella con il grafo o con uno dei due concetti
 fts_concepts(name, summaries)                            -- FTS5 per ricerca e somiglianza
 revisions(target_kind, target_id, field, old_value, created_at)  -- valori precedenti a ogni modifica (D16), senza UI
@@ -93,6 +94,7 @@ settings(key, value)                                     -- impostazioni varie (
 | `kc_recall(query)` | "Cosa dice già questo grafo su X?": solo nodi del grafo corrente | RF8, D22 |
 | `kc_tree(summaries?, root?, depth?, relations?)` | Albero compatto del grafo corrente (senza `kc_start` è un errore, nessun "ultimo grafo") | RF9, D22 |
 | `kc_read(node, graph?)` | Testo pieno di un nodo del grafo corrente; un titolo assente è l'errore "not in this graph". `graph` (id o titolo) legge un nodo di un altro grafo, solo dopo `kc_search_graphs` | D22 |
+| `kc_reference(graph, parent?)` | Collega questo grafo a un altro con un nodo rimando ↗ (e il nodo di ritorno nell'altro): il modello lo propone in chat e lo chiama solo dopo il sì di Luca; dell'altro grafo vede solo il titolo | D25 |
 | `kc_search_graphs(query)` | **L'unico strumento che guarda fuori dal grafo corrente**, solo su richiesta esplicita di Luca: gli altri grafi (il corrente è escluso), raggruppati per grafo, con titolo del grafo, titolo del nodo e riassunto accorciato; mai il `detail` | D22 |
 
 Gli strumenti di lettura stanno in `src/core/reader.ts` (non scrivono mai) e rispondono in forma compatta:

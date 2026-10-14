@@ -29,6 +29,15 @@ export interface Visit {
   createdAt: string;
   /** How many sources (cited URLs) support this node: for the badge on the canvas node. */
   sourceCount: number;
+  /** Set on a reference node (D25): the paired node in the other graph. Its title is the other graph's title. */
+  ref: VisitRef | null;
+}
+
+/** The other end of a reference node: the paired node, the graph it lives in and that graph's title. */
+export interface VisitRef {
+  visitId: string;
+  conversationId: string;
+  title: string;
 }
 
 /** A web page or document the model cited for a node, stored once per normalized URL. */

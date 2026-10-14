@@ -45,6 +45,7 @@ export type TrackerEvent =
   | { type: 'focus.changed'; conversationId: string; visitId: string | null }
   | { type: 'visit.updated'; visit: Visit }
   | { type: 'visit.deleted'; visitId: string; conversationId: string; removedConceptId: string | null }
+  | { type: 'reference.created'; visits: Visit[]; concept: Concept }
   | { type: 'conversation.deleted'; conversationId: string; removedConceptIds: string[] }
   | { type: 'concept.renamed'; concept: Concept }
   | { type: 'concept.merged'; fromId: string; into: Concept }
@@ -191,7 +192,11 @@ export class Tracker {
         const title = node.title.trim();
         if (!title) throw new TrackerError(`Node #${index} has an empty title`);
         const parentVisitId = parentIndex !== null ? out[parentIndex].id : this.resolveParent(conversationId, node.parent, current);
-        if (parentVisitId !== null) this.rejectWrapper(nodes, index, this.repo.getVisit(parentVisitId)!.title);
+        if (parentVisitId !== null) {
+          const parent = this.repo.getVisit(parentVisitId)!;
+          if (parent.ref) throw new TrackerError(`"${parent.title}" is a reference to another graph: nothing can hang under it`);
+          this.rejectWrapper(nodes, index, parent.title);
+        }
 
         let concept: Concept | undefined;
         if (node.conceptId) {
@@ -319,6 +324,7 @@ export class Tracker {
   /** Partial edit of a node (kc_edit): text replaced or appended, summary, sources; the rest stays as it is. */
   editNode(conversationId: string, nodeRef: string, edit: NodeEdit): { visit: Visit; changes: string[] } {
     const node = this.resolveNode(conversationId, nodeRef);
+    this.rejectReference(node);
     const textEdit = edit.find !== undefined || edit.replace !== undefined || edit.append !== undefined || edit.under !== undefined;
     const summary = edit.summary?.trim();
     if (edit.summary !== undefined && !summary) throw new TrackerError('Empty summary');
@@ -373,6 +379,7 @@ export class Tracker {
    */
   rename(conversationId: string, nodeRef: string, title: string): Visit {
     const node = this.resolveNode(conversationId, nodeRef);
+    this.rejectReference(node);
     const trimmed = title.trim();
     if (!trimmed) throw new TrackerError('Empty title');
     const norm = normalizeName(trimmed);
@@ -401,6 +408,7 @@ export class Tracker {
   /** Re-attaches a node to an existing concept; the old concept is dropped if nothing else uses it. */
   link(conversationId: string, visitId: string, conceptId: string): Visit {
     const visit = this.requireVisitIn(conversationId, visitId);
+    this.rejectReference(visit);
     const concept = this.repo.getConcept(conceptId);
     if (!concept) throw new TrackerError(`Concept ${conceptId} not found`);
     if (visit.conceptId === conceptId) return visit;
@@ -417,6 +425,47 @@ export class Tracker {
     });
     this.emit({ type: 'visit.relinked', visit: updated, concept: this.repo.getConcept(conceptId)!, removedConceptId });
     return updated;
+  }
+
+  /** A reference node (D25) is only created, moved or removed: its text is the other graph's title. */
+  private rejectReference(visit: Visit) {
+    if (visit.ref) throw new TrackerError(`"${visit.title}" is a reference to another graph: it can only be moved or removed`);
+  }
+
+  /**
+   * Links two graphs (D25): a reference node under `parentRef` of `conversationId` (root when omitted) and its return
+   * node at the root of the target graph (or under `targetParentRef`), each titled with the other graph. Asking again for
+   * the same pair under the same parent returns the existing nodes.
+   */
+  createReference(conversationId: string, targetConversationId: string, parentRef?: string | null, targetParentRef?: string | null): { visits: [Visit, Visit]; created: boolean } {
+    const source = this.requireConversation(conversationId);
+    if (conversationId === targetConversationId) throw new TrackerError('A reference links two different graphs');
+    const target = this.requireConversation(targetConversationId);
+    const parentId = (cid: string, ref: string | null | undefined) => {
+      const r = ref?.trim();
+      return r && r !== 'root' ? this.resolveNode(cid, r).id : null;
+    };
+    const parentVisitId = parentId(conversationId, parentRef);
+    const targetParentVisitId = parentId(targetConversationId, targetParentRef);
+    for (const p of [this.repo.getVisit(parentVisitId ?? ''), this.repo.getVisit(targetParentVisitId ?? '')]) {
+      if (p?.ref) throw new TrackerError(`"${p.title}" is a reference to another graph: nothing can hang under it`);
+    }
+    const existing = (this.repo.getTree(conversationId)?.visits ?? []).find(
+      (v) => v.ref?.conversationId === targetConversationId && v.parentVisitId === parentVisitId,
+    );
+    if (existing) return { visits: [existing, this.requireVisit(existing.ref!.visitId)], created: false };
+
+    const concept = this.repo.referenceConcept();
+    const visits = this.repo.transaction((): [Visit, Visit] => {
+      const make = (cid: string, parent: string | null, other: string) =>
+        this.repo.createVisit({ conversationId: cid, conceptId: concept.id, parentVisitId: parent, title: other, summary: '', excerpt: null, detail: null });
+      const a = make(conversationId, parentVisitId, target.title);
+      const b = make(targetConversationId, targetParentVisitId, source.title);
+      this.repo.pairReferences(a.id, b.id);
+      return [this.requireVisit(a.id), this.requireVisit(b.id)];
+    });
+    this.emit({ type: 'reference.created', visits, concept: this.repo.getConcept(concept.id)! });
+    return { visits, created: true };
   }
 
   // --- Manual corrections from the canvas (D8, RF18) ---
@@ -496,6 +545,7 @@ export class Tracker {
   /** Renames a node, moves it under another parent, or links it to another concept. */
   editVisit(visitId: string, edit: VisitEdit): Visit {
     const visit = this.requireVisit(visitId);
+    if (edit.title !== undefined || edit.summary !== undefined || edit.detail !== undefined || edit.conceptId !== undefined) this.rejectReference(visit);
     let removedConceptId: string | null = null;
     const updated = this.repo.transaction(() => {
       if (edit.title !== undefined) {
@@ -531,7 +581,8 @@ export class Tracker {
 
   private moveVisit(visit: Visit, parentVisitId: string | null) {
     if (parentVisitId !== null) {
-      this.requireVisitIn(visit.conversationId, parentVisitId);
+      const parent = this.requireVisitIn(visit.conversationId, parentVisitId);
+      if (parent.ref) throw new TrackerError(`"${parent.title}" is a reference to another graph: nothing can hang under it`);
       // Walk up from the new parent: reaching the node itself would create a cycle.
       for (let p: string | null = parentVisitId; p; p = this.repo.getVisit(p)!.parentVisitId) {
         if (p === visit.id) throw new TrackerError('A node cannot move under itself or one of its descendants');
@@ -659,23 +710,32 @@ export class Tracker {
    */
   deleteVisit(visitId: string, detachChildren = false): void {
     const visit = this.requireVisit(visitId);
-    const removedConceptId = this.repo.transaction(() => this.removeVisit(visitId, detachChildren));
+    const partners: Visit[] = [];
+    const removedConceptId = this.repo.transaction(() => this.removeVisit(visitId, detachChildren, partners));
     this.emit({ type: 'visit.deleted', visitId, conversationId: visit.conversationId, removedConceptId });
+    this.emitPartnersDeleted(partners);
+  }
+
+  /** The other end of a deleted reference goes with it (D25): the canvases showing that graph drop it too. */
+  private emitPartnersDeleted(partners: Visit[]) {
+    for (const p of partners) this.emit({ type: 'visit.deleted', visitId: p.id, conversationId: p.conversationId, removedConceptId: null });
   }
 
   /** Deletes a conversation's map; concepts used nowhere else go too, the others stay in the personal graph. */
   deleteConversation(conversationId: string): void {
     this.requireConversation(conversationId);
+    const partners: Visit[] = [];
     const removedConceptIds = this.repo.transaction(() => {
       const removed: string[] = [];
       for (const v of this.repo.getTree(conversationId)?.visits ?? []) {
-        const gone = this.removeVisit(v.id, true);
+        const gone = this.removeVisit(v.id, true, partners);
         if (gone) removed.push(gone);
       }
       this.repo.deleteConversation(conversationId);
       return removed;
     });
     this.emit({ type: 'conversation.deleted', conversationId, removedConceptIds });
+    this.emitPartnersDeleted(partners);
   }
 
   /**
@@ -701,12 +761,19 @@ export class Tracker {
     return visit;
   }
 
-  private removeVisit(visitId: string, detachChildren = false): string | null {
+  /** `partners` collects the paired reference node deleted along with a reference node (D25). */
+  private removeVisit(visitId: string, detachChildren = false, partners: Visit[] = []): string | null {
     const visit = this.repo.getVisit(visitId)!;
+    const partner = visit.ref ? this.repo.getVisit(visit.ref.visitId) : undefined;
     const conversation = this.repo.getConversation(visit.conversationId)!;
     this.repo.reparentChildren(visitId, detachChildren ? null : visit.parentVisitId);
     this.repo.deleteVisit(visitId);
     if (conversation.currentVisitId === visitId) this.repo.setCurrentVisit(visit.conversationId, visit.parentVisitId);
+    if (partner && !partners.some((p) => p.id === partner.id)) {
+      partners.push(partner);
+      // The partner no longer points anywhere once this node is gone: it is removed the same way, children moving up.
+      this.removeVisit(partner.id, detachChildren, partners);
+    }
     if (!this.isUnused(visit.conceptId)) return null;
     const up = this.repo.getSuperclass(visit.conceptId)?.id;
     this.repo.deleteConcept(visit.conceptId);

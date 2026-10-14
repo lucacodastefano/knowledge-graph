@@ -89,7 +89,7 @@ export class Reader {
     const byId = new Map(visits.map((v) => [v.id, v]));
     const norm = normalizeName(q);
     const found = new Map<string, Visit>();
-    for (const v of visits) if (normalizeName(v.title) === norm) found.set(v.id, v);
+    for (const v of visits) if (!v.ref && normalizeName(v.title) === norm) found.set(v.id, v);
     for (const h of this.repo.searchText(q, RECALL_LIMIT, { only: conversationId })) {
       const v = byId.get(h.visitId);
       if (v) found.set(v.id, v);
@@ -175,7 +175,7 @@ export class Reader {
     const relationIds = new Set(tree.relations.map((r) => `r-${r.from}-${r.to}`));
     const layout = this.repo.layoutEntries().filter((e) => (e.kind === 'visit' ? visitIds.has(e.id) : relationIds.has(e.id)));
     const pages: Record<string, ConceptPage> = {};
-    for (const conceptId of new Set(tree.visits.map((v) => v.conceptId))) {
+    for (const conceptId of new Set(tree.visits.filter((v) => !v.ref).map((v) => v.conceptId))) {
       const page = this.conceptPage(conceptId, conversationId);
       if (!page) continue;
       const visits = page.visits.filter((v) => v.conversationId === conversationId);
@@ -247,7 +247,8 @@ export class Reader {
         const current = !compact && v.id === conversation.currentVisitId ? ' *current' : '';
         const summary = withSummaries && v.summary ? `: ${v.summary}` : '';
         const more = depth >= maxDepth && !touched ? hidden(v.id) : 0;
-        lines.push(`${'  '.repeat(depth)}- ${v.title}${dup}${current}${more ? ` (+${more})` : ''}${summary}`);
+        // A reference (D25) shows only the other graph's title: the model never sees what that graph holds.
+        lines.push(`${'  '.repeat(depth)}- ${v.ref ? '↗ ' : ''}${v.title}${dup}${current}${more ? ` (+${more})` : ''}${v.ref ? '' : summary}`);
         if (depth < maxDepth || touched) walk(v.id, depth + 1);
       }
     };
@@ -279,6 +280,7 @@ export class Reader {
     const norm = normalizeName(q);
     const visit = visits.find((v) => v.id === q) ?? visits.findLast((v) => normalizeName(v.title) === norm);
     if (!visit) throw new TrackerError(`"${q}" is not in this graph`);
+    if (visit.ref) return `# ↗ ${visit.title}\nReference to the user's graph "${visit.title}". Its content is not shared here: ask the user before looking into it (kc_search_graphs).`;
     const kids = visits.filter((v) => v.parentVisitId === visit.id).map((v) => v.title);
     const urls = this.repo.listConceptSources(visit.conceptId).filter((s) => s.visitIds.includes(visit.id)).map((s) => s.url);
     return [`# ${visit.title}`, visit.summary, visit.detail ?? '', kids.length ? `Children: ${kids.join(', ')}` : '', urls.length ? `Sources: ${urls.join(' ')}` : '']

@@ -221,6 +221,25 @@ export function createMcpServer(tracker: Tracker, state: McpSessionState): McpSe
   );
 
   server.registerTool(
+    'kc_reference',
+    {
+      description:
+        "Link this graph to another graph of the user with a reference node (↗; a return node appears in the other graph). Propose it in the chat first and call this ONLY after the user says yes. You see only the other graph's title, never its content.",
+      inputSchema: {
+        graph: z.string().describe('Title or id of the other graph'),
+        parent: z.string().optional().describe('Node of this graph to hang the reference under (default: root)'),
+      },
+    },
+    ({ graph, parent }) =>
+      guarded(() => {
+        const id = conversationId();
+        const target = tracker.findConversation(graph);
+        const { visits, created } = tracker.createReference(id, target.id, parent);
+        return text(`${created ? 'Reference created' : 'Reference already there'}: ↗ ${visits[0].title}\n${reader.tree(id, false, true)}`);
+      }),
+  );
+
+  server.registerTool(
     'kc_recall',
     {
       description: 'Nodes of this graph that already cover a topic: summaries, parent, sources (thin:true = superficial). Not for other graphs.',

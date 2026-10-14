@@ -56,13 +56,18 @@ function toVisit(r: Row): Visit {
     seq: Number(r.seq),
     createdAt: r.created_at as string,
     sourceCount: Number(r.source_count ?? 0),
+    ref: r.ref_conversation_id ? { visitId: r.ref_visit_id as string, conversationId: r.ref_conversation_id as string, title: r.ref_title as string } : null,
   };
 }
 
+/** Name key of the placeholder concept behind every reference node (D25); it cannot collide with a typed name. */
+const REF_NORM = '↗reference';
+
 /** Visits with their number of sources (the canvas badge). */
 const VISIT_SELECT = `
-  SELECT v.*, (SELECT COUNT(*) FROM visit_sources vs WHERE vs.visit_id = v.id) AS source_count
-  FROM visits v`;
+  SELECT v.*, (SELECT COUNT(*) FROM visit_sources vs WHERE vs.visit_id = v.id) AS source_count,
+    rv.conversation_id AS ref_conversation_id, rc.title AS ref_title
+  FROM visits v LEFT JOIN visits rv ON rv.id = v.ref_visit_id LEFT JOIN conversations rc ON rc.id = rv.conversation_id`;
 
 const CONCEPT_SELECT = `
   SELECT c.*, (SELECT COUNT(*) FROM visits v WHERE v.concept_id = c.id) AS visit_count
@@ -135,6 +140,22 @@ export class SqliteRepository implements Repository {
     return this.getConcept(id)!;
   }
 
+  referenceConcept(): Concept {
+    const found = this.findConceptByNorm(REF_NORM);
+    if (found) return found;
+    const id = randomUUID();
+    const t = now();
+    // Not in concepts_fts and without a name key: never offered as a similar concept.
+    this.db.prepare('INSERT INTO concepts (id, name, name_norm, name_key, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?)').run(id, '↗', REF_NORM, '', t, t);
+    return this.getConcept(id)!;
+  }
+
+  pairReferences(aId: string, bId: string): void {
+    const set = this.db.prepare('UPDATE visits SET ref_visit_id = ? WHERE id = ?');
+    set.run(bId, aId);
+    set.run(aId, bId);
+  }
+
   deleteConcept(id: string): void {
     this.db.prepare('DELETE FROM concepts_fts WHERE concept_id = ?').run(id);
     this.db.prepare('DELETE FROM concepts WHERE id = ?').run(id);
@@ -184,6 +205,8 @@ export class SqliteRepository implements Repository {
     if (!has('concept_links', 'label')) this.db.exec('ALTER TABLE concept_links ADD COLUMN label TEXT');
     if (!has('visits', 'detail')) this.db.exec('ALTER TABLE visits ADD COLUMN detail TEXT');
     if (!has('concept_links', 'created_at')) this.db.exec('ALTER TABLE concept_links ADD COLUMN created_at TEXT');
+    if (!has('visits', 'ref_visit_id')) this.db.exec('ALTER TABLE visits ADD COLUMN ref_visit_id TEXT');
+    this.db.exec('CREATE INDEX IF NOT EXISTS visits_ref ON visits(ref_visit_id)');
     this.migrateTextSearch();
     this.migrateRelations();
   }
@@ -236,6 +259,7 @@ export class SqliteRepository implements Repository {
     const words = [...new Set(query.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 3))].slice(0, 8);
     const select = `SELECT v.id, v.conversation_id, v.concept_id, v.title, v.summary, v.detail, cv.title AS conversation_title
       FROM visits_fts f JOIN visits v ON v.rowid = f.rowid JOIN conversations cv ON cv.id = v.conversation_id`;
+    const notRef = ' AND v.ref_visit_id IS NULL';
     let rows: Row[] = [];
     // One map only (kc_recall) or every other map (kc_search_graphs); the parameter is bound before the limit.
     const only = scope.only ?? scope.except;
@@ -245,7 +269,7 @@ export class SqliteRepository implements Repository {
       // All the words first (precise); any of them only when nothing contains them all.
       const match = (join: string) => words.map((w) => `"${w.replaceAll('"', '')}"`).join(join);
       const run = (q: string) =>
-        this.db.prepare(`${select} WHERE visits_fts MATCH ?${other} ORDER BY bm25(visits_fts, 8, 3, 1) LIMIT ?`).all(q, ...extra, limit);
+        this.db.prepare(`${select} WHERE visits_fts MATCH ?${other}${notRef} ORDER BY bm25(visits_fts, 8, 3, 1) LIMIT ?`).all(q, ...extra, limit);
       rows = run(match(' AND '));
       if (rows.length === 0 && words.length > 1) rows = run(match(' OR '));
     } else {
@@ -257,7 +281,7 @@ export class SqliteRepository implements Repository {
         .prepare(
           `SELECT v.id, v.conversation_id, v.concept_id, v.title, v.summary, v.detail, cv.title AS conversation_title
            FROM visits v JOIN conversations cv ON cv.id = v.conversation_id
-           WHERE v.title LIKE ? ESCAPE '\\'${other} ORDER BY length(v.title) LIMIT ?`,
+           WHERE v.title LIKE ? ESCAPE '\\'${other}${notRef} ORDER BY length(v.title) LIMIT ?`,
         )
         .all(like, ...extra, limit);
     }
@@ -338,7 +362,7 @@ export class SqliteRepository implements Repository {
     const words = new Set(query.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 4));
     const bySummary = this.db.prepare(
       `SELECT concept_id, COUNT(*) AS n FROM visits
-       WHERE title LIKE ? ESCAPE '\\' OR summary LIKE ? ESCAPE '\\' GROUP BY concept_id`,
+       WHERE ref_visit_id IS NULL AND (title LIKE ? ESCAPE '\\' OR summary LIKE ? ESCAPE '\\') GROUP BY concept_id`,
     );
     for (const w of words) {
       const like = `%${w.replace(/[\\%_]/g, (m) => `\\${m}`)}%`;
@@ -353,11 +377,11 @@ export class SqliteRepository implements Repository {
 
   rankConcepts(order: 'visits' | 'recent', limit: number): Concept[] {
     const orderBy = order === 'visits' ? 'visit_count DESC, c.last_seen_at DESC' : 'c.last_seen_at DESC, c.rowid DESC';
-    return this.db.prepare(`${CONCEPT_SELECT} ORDER BY ${orderBy} LIMIT ?`).all(limit).map(toConcept);
+    return this.db.prepare(`${CONCEPT_SELECT} WHERE c.name_norm <> ? ORDER BY ${orderBy} LIMIT ?`).all(REF_NORM, limit).map(toConcept);
   }
 
   countConcepts(): number {
-    return Number((this.db.prepare('SELECT COUNT(*) AS n FROM concepts').get() as { n: number }).n);
+    return Number((this.db.prepare('SELECT COUNT(*) AS n FROM concepts WHERE name_norm <> ?').get(REF_NORM) as { n: number }).n);
   }
 
   getVisit(id: string): Visit | undefined {
@@ -365,7 +389,7 @@ export class SqliteRepository implements Repository {
     return r ? toVisit(r) : undefined;
   }
 
-  createVisit(input: Omit<Visit, 'id' | 'seq' | 'createdAt' | 'sourceCount'>): Visit {
+  createVisit(input: Omit<Visit, 'id' | 'seq' | 'createdAt' | 'sourceCount' | 'ref'>): Visit {
     const id = randomUUID();
     const t = now();
     const { next } = this.db
@@ -483,10 +507,11 @@ export class SqliteRepository implements Repository {
            (SELECT COUNT(DISTINCT vs.source_id) FROM visit_sources vs JOIN visits v3 ON v3.id = vs.visit_id
             WHERE v3.concept_id = c.id) AS source_count
          FROM concepts c LEFT JOIN visits v ON v.concept_id = c.id
+         WHERE c.name_norm <> ?
          GROUP BY c.id
          HAVING COUNT(v.id) > 0 OR EXISTS (SELECT 1 FROM concept_links l WHERE l.kind = 'is_a' AND l.to_concept_id = c.id)`,
       )
-      .all()
+      .all(REF_NORM)
       .map((r) => ({ ...toConcept(r), summary: (r.summary as string) ?? '', sourceCount: Number(r.source_count ?? 0), conversationIds: [] as string[], superclassId: null as string | null }));
     // Conversations of each concept, the one with most visits first: the canvas colours and filters by them.
     const byId = new Map(concepts.map((c) => [c.id, c]));
@@ -505,7 +530,7 @@ export class SqliteRepository implements Repository {
     const conversations = this.db
       .prepare(
         `SELECT c.id, c.title FROM conversations c
-         WHERE EXISTS (SELECT 1 FROM visits v WHERE v.conversation_id = c.id) ORDER BY c.last_activity_at DESC`,
+         WHERE EXISTS (SELECT 1 FROM visits v WHERE v.conversation_id = c.id AND v.ref_visit_id IS NULL) ORDER BY c.last_activity_at DESC`,
       )
       .all()
       .map((r) => ({ id: r.id as string, title: r.title as string }));
@@ -515,7 +540,7 @@ export class SqliteRepository implements Repository {
         `SELECT source, target, SUM(w) AS weight, MAX(rel) AS rel, MAX(label) AS label FROM (
            SELECT p.concept_id AS source, v.concept_id AS target, COUNT(*) AS w, 0 AS rel, NULL AS label
            FROM visits v JOIN visits p ON p.id = v.parent_visit_id
-           WHERE p.concept_id <> v.concept_id
+           WHERE p.concept_id <> v.concept_id AND v.ref_visit_id IS NULL AND p.ref_visit_id IS NULL
            GROUP BY 1, 2
            UNION ALL
            SELECT from_concept_id, to_concept_id, 1, 1, MAX(label) FROM map_relations GROUP BY MIN(from_concept_id, to_concept_id), MAX(from_concept_id, to_concept_id)
@@ -582,7 +607,7 @@ export class SqliteRepository implements Repository {
     return this.db
       .prepare(
         `SELECT c.id, c.name FROM concepts c
-         WHERE EXISTS (SELECT 1 FROM visits v WHERE v.concept_id = c.id AND v.parent_visit_id IS NULL)
+         WHERE c.name_norm <> '${REF_NORM}' AND EXISTS (SELECT 1 FROM visits v WHERE v.concept_id = c.id AND v.parent_visit_id IS NULL)
            AND NOT EXISTS (SELECT 1 FROM concept_links l WHERE l.kind = 'is_a' AND l.from_concept_id = c.id)
          ORDER BY c.last_seen_at DESC`,
       )
@@ -644,7 +669,7 @@ export class SqliteRepository implements Repository {
         .prepare(
           `SELECT c.id, c.name, c.created_at,
              EXISTS (SELECT 1 FROM concept_links l WHERE l.kind = 'is_a' AND l.from_concept_id = c.id) AS has_super
-           FROM concepts c`,
+           FROM concepts c WHERE c.name_norm <> '${REF_NORM}'`,
         )
         .all()
         .map((r) => ({ id: r.id as string, name: r.name as string, at: r.created_at as string, hasSuperclass: r.has_super === 1 })),
@@ -653,7 +678,7 @@ export class SqliteRepository implements Repository {
           `SELECT v.id, v.conversation_id, v.concept_id, v.parent_visit_id, v.title, v.created_at,
              (v.detail IS NOT NULL AND trim(v.detail) <> '') AS has_detail,
              (SELECT COUNT(*) FROM visit_sources vs WHERE vs.visit_id = v.id) AS sources
-           FROM visits v`,
+           FROM visits v WHERE v.ref_visit_id IS NULL`,
         )
         .all()
         .map((r) => ({

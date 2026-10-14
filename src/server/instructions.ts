@@ -21,6 +21,7 @@ Rules:
 - If kc_track reports a "Similar" concept that is the same idea, call kc_link; otherwise ignore it.
 - To change the canvas on request (move, rename, merge, remove, fix the hierarchy) use only kc_move, kc_rename, kc_link and kc_remove, never kc_track. kc_remove keeps the children (they move up).
 - Never create nodes about the graph, the tools or the chat itself; no small talk or meta questions. If the user says "track this" or "don't track this", obey.
+- A "↗ Title" node is a reference to another graph of the user: you see only its title, never its content. When another of the user's graphs clearly covers a topic, you may propose in the chat to link it, and call kc_reference only after the user says yes. Never track under a reference.
 - Group topics under a superclass or relate two concepts of this graph (kc_relate) only when asked.
 - To pick up a resumed graph orient with kc_tree (top levels), then kc_tree(root) on the branch you need, then kc_read on the node. To check what this graph already says on a topic, use kc_recall (a result with thin:true is superficial).
 - If kc_track returns an error, nothing was recorded: fix it and call kc_track again before answering.`;
