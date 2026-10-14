@@ -1,3 +1,4 @@
+import { repairMarkdown } from './markdown-repair.ts';
 import { EventEmitter } from 'node:events';
 import type { Repository } from './repository.ts';
 import type { Concept, ConceptMatch, Conversation, Visit } from './types.ts';
@@ -5,6 +6,9 @@ import { normalizeName } from './normalize.ts';
 import { restatesParent, sharesEnough, titleStems } from './similarity.ts';
 import { normalizeSources, normalizeSourceUrl } from './sources.ts';
 import { applyDetailEdit, type DetailEdit, DetailEditError } from './node-edit.ts';
+
+/** A node's markdown as stored: line breaks lost by the model rebuilt, trimmed, null when empty. */
+const cleanDetail = (text: string | null | undefined): string | null => (text ? repairMarkdown(text).trim() || null : null);
 
 export class TrackerError extends Error {}
 
@@ -209,7 +213,7 @@ export class Tracker {
         const visits = knownConcept ? this.repo.getTree(conversationId)!.visits : [];
         const summary = node.summary.trim();
         const excerpt = node.excerpt?.trim() || null;
-        const detail = node.detail?.trim() || null;
+        const detail = cleanDetail(node.detail);
 
         // Same concept under the same parent: refresh that node instead of duplicating it (D15).
         const twin = visits.find((v) => v.conceptId === concept!.id && v.parentVisitId === parentVisitId);
@@ -337,7 +341,7 @@ export class Tracker {
       let detail = node.detail;
       if (textEdit) {
         try {
-          detail = applyDetailEdit(node.detail, edit).trim() || null;
+          detail = cleanDetail(applyDetailEdit(node.detail, edit));
         } catch (err) {
           if (err instanceof DetailEditError) throw new TrackerError(`"${node.title}": ${err.message}`);
           throw err;
@@ -558,7 +562,7 @@ export class Tracker {
       }
       if (edit.summary !== undefined || edit.detail !== undefined) {
         const summary = edit.summary?.trim() ?? visit.summary;
-        const detail = edit.detail === undefined ? visit.detail : edit.detail?.trim() || null;
+        const detail = edit.detail === undefined ? visit.detail : cleanDetail(edit.detail);
         this.keep('visit', visitId, 'summary', visit.summary, summary);
         this.keep('visit', visitId, 'detail', visit.detail, detail);
         this.repo.setVisitSummary(visitId, summary, visit.excerpt, detail);

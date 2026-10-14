@@ -1,3 +1,4 @@
+import { repairMarkdown } from './markdown-repair.ts';
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
 import type { LayoutEntry, Repository } from './repository.ts';
@@ -210,6 +211,20 @@ export class SqliteRepository implements Repository {
     this.migrateTextSearch();
     this.migrateRelations();
     this.migrateReferenceRoots();
+    this.migrateMarkdownDetails();
+  }
+
+  /** Once: node details whose tables or lists were glued onto one line get their line breaks back. */
+  private migrateMarkdownDetails() {
+    if (this.getSetting('migrated_markdown_repair')) return;
+    this.transaction(() => {
+      const set = this.db.prepare('UPDATE visits SET detail = ? WHERE id = ?');
+      for (const r of this.db.prepare('SELECT id, detail FROM visits WHERE detail IS NOT NULL').all()) {
+        const fixed = repairMarkdown(r.detail as string);
+        if (fixed !== r.detail) set.run(fixed, r.id as string);
+      }
+      this.setSetting('migrated_markdown_repair', '1');
+    });
   }
 
   /**

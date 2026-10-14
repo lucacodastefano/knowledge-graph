@@ -39,7 +39,7 @@ const trackShape = () => ({
       z.looseObject({
         title: z.string().describe('Concept name, 1-5 words'),
         summary: z.string().describe('1-2 short sentences: what the concept is (node label)'),
-        detail: z.string().optional().describe('Full text of your answer on this concept, in markdown (tables, lists, **bold**, code); only what concerns this node, not its children'),
+        detail: z.string().optional().describe('Full text of your answer on this concept, in markdown (tables, lists, **bold**, code) with real line breaks: one table row or list item per line, blank line before a table; only what concerns this node, not its children'),
         parent: z.string().describe('Title of the node it belongs under (from the tree, or another node of this call), "root", or "#n" for node n of this call'),
         excerpt: z.string().optional().describe('Rarely: a formula or code line to keep as is'),
         conceptId: z.string().optional().describe('Known concept id to reuse'),
@@ -131,7 +131,7 @@ export function createMcpServer(tracker: Tracker, state: McpSessionState): McpSe
         node: z.string().describe('Title or id'),
         find: z.string().optional().describe('Exact fragment of the detail to replace (must occur once)'),
         replace: z.string().optional().describe('New text for find; "" deletes it'),
-        append: z.string().optional().describe('Markdown added at the end of the detail'),
+        append: z.string().optional().describe('Markdown added at the end of the detail, with real line breaks (one table row or list item per line)'),
         under: z.string().optional().describe('With append: add at the end of the section with this heading'),
         summary: z.string().optional().describe('New summary (node label)'),
         add_sources: z.array(z.string()).optional(),
