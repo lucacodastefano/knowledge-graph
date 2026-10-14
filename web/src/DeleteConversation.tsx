@@ -13,8 +13,10 @@ interface Props {
 export function DeleteConversation({ id, title, layout, onDeleted }: Props) {
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
+  const [commit, setCommit] = useState<string | null>(null);
   useEffect(() => {
     if (!open) return;
+    if (!READONLY) void fetch('/api/health').then((r) => r.json()).then((h) => setCommit(h.commit ?? null)).catch(() => {});
     const away = (e: MouseEvent) => {
       if (!box.current?.contains(e.target as Node)) setOpen(false);
     };
@@ -55,6 +57,7 @@ export function DeleteConversation({ id, title, layout, onDeleted }: Props) {
           <button type="button" role="menuitem" className="danger-text" onClick={remove}>
             Cancella grafo…
           </button>
+          {commit && <div className="menu-note">Versione online: {commit}</div>}
         </div>
       )}
     </div>
