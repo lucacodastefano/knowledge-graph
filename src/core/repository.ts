@@ -54,7 +54,11 @@ export interface Repository {
   countConcepts(): number;
 
   getVisit(id: string): Visit | undefined;
-  createVisit(input: Omit<Visit, 'id' | 'seq' | 'createdAt' | 'sourceCount'>): Visit;
+  createVisit(input: Omit<Visit, 'id' | 'seq' | 'createdAt' | 'sourceCount' | 'ref'>): Visit;
+  /** The shared placeholder concept of every reference node (D25): hidden from the global graph, search and counts. */
+  referenceConcept(): Concept;
+  /** Pairs two reference nodes (each points to the other). */
+  pairReferences(aId: string, bId: string): void;
   setVisitConcept(visitId: string, conceptId: string): void;
   setVisitTitle(visitId: string, title: string): void;
   setVisitSummary(visitId: string, summary: string, excerpt: string | null, detail: string | null): void;
