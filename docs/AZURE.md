@@ -15,7 +15,9 @@ It prints two URLs after about 5 minutes:
 - **Claude connector**: `https://<name>.swedencentral.cloudapp.azure.com/t/<secret>/mcp`. In Claude (Settings > Connectors > Add custom connector) paste it with no other auth. The secret in the URL is the only protection: treat the URL like a password.
 
 ## Update, cost, data
-- Update to the latest `main`: `deploy/azure/update.sh`.
+- Update to the latest `main`: `deploy/azure/update.sh`. Run it once: it also installs a systemd timer on the VM (`kg-autoupdate.timer`, every 5 minutes, no secrets, the repo is public) that fetches the branch and, only if the commit changed, builds the new image and restarts the app. The old container keeps serving during the build; a failed build changes nothing and is not retried until the branch moves on. A lock avoids overlapping runs; the `kgdata` volume is never touched. So merges go live within about 5 minutes with no manual step.
+- Which version is live: the canvas menu ⋯ shows "Versione online: <commit>", and `GET /api/health` (no token) returns `commit`. On the VM: `cat /var/lib/kg-deployed` and `/var/log/kg-autoupdate.log`.
+- Not chosen: a GitHub Actions deploy (as in LocalChat) would need SSH or Azure credentials stored as GitHub secrets.
 - Cost: the script tries only the sizes of Azure's 12-month free offer (B1s, B2ats v2, B2pts v2; new accounts only) across several regions, and creates nothing if none is available. Paid sizes (about EUR 8-10/month) are used only with `ALLOW_PAID=1`, with a warning. Set a budget alert in the portal. Delete everything with `az group delete -n rg-<name>`.
 - Backup: `ssh kg@<fqdn>` then `sudo docker compose -f /opt/kg/deploy/azure/docker-compose.yml exec app node -e "new (require('node:sqlite').DatabaseSync)('/data/graph.db').exec(\"VACUUM INTO '/data/backup.db'\")"`.
 - Env vars of the daemon: `KG_HOST` (default `127.0.0.1`) and `KG_TOKEN`. A non-local host without a token refuses to start. Without `KG_TOKEN` nothing changes for local use.

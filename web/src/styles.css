@@ -166,6 +166,7 @@ button.icon:hover { color: var(--text); }
 .menu { position: absolute; top: 100%; right: 0; z-index: 5; display: flex; flex-direction: column; min-width: 170px; padding: 4px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 24px rgb(0 0 0 / 0.15); }
 .menu button { background: none; border: none; color: var(--text); text-align: left; }
 .menu button:hover { background: var(--accent-soft); }
+.menu-note { padding: 6px 8px 2px; font-size: 11px; opacity: 0.6; }
 .danger-text, button.danger-text { color: #b91c1c; }
 .editable { display: block; width: 100%; margin: 4px 0; padding: 2px 4px; font: inherit; color: inherit; background: transparent; border: none; border-radius: 4px; outline: 1px dashed var(--border); resize: none; field-sizing: content; }
 .editable:focus { outline: 2px solid var(--accent); }
