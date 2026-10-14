@@ -96,9 +96,12 @@ main { position: relative; flex: 1; min-height: 0; overflow: hidden; }
 button { font: inherit; padding: 5px 12px; border-radius: 6px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; }
 button.ghost { background: none; border: none; color: var(--muted); }
 
-.panel { position: absolute; top: 0; right: 0; bottom: 0; width: min(420px, 100%); overflow-y: auto; padding: 16px; background: var(--surface); border-left: 1px solid var(--border); box-shadow: -8px 0 24px rgb(0 0 0 / 0.08); }
-.panel.expanded { width: 100%; z-index: 30; }
-.panel.expanded > :not(header) { max-width: 960px; }
+.panel { position: absolute; top: 0; right: 0; bottom: 0; width: 33.333%; min-width: min(420px, 100%); overflow-y: auto; padding: 16px; background: var(--surface); border-left: 1px solid var(--border); box-shadow: -8px 0 24px rgb(0 0 0 / 0.08); }
+.panel.width-half { width: 50%; }
+.panel.width-full { width: 100%; z-index: 30; }
+.panel.width-full > :not(header) { max-width: 960px; }
+.width-switch { display: flex; margin-right: 4px; }
+.width-switch button.active { color: var(--accent); background: var(--accent-soft); }
 .panel header { display: flex; align-items: start; justify-content: space-between; gap: 8px; }
 .panel h2 { margin: 0; font-size: 18px; }
 .visits { list-style: none; padding: 0; margin: 12px 0 0; }
