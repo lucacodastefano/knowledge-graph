@@ -1,5 +1,6 @@
 import { DeleteConversation } from './DeleteConversation.tsx';
 import { BackToGraph, LinkGraph } from './GraphLinks.tsx';
+import { isTouch, useMobile, useTouch } from './media.ts';
 import { createPortal } from 'react-dom';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -221,6 +222,9 @@ const LAYOUTS: { kind: LayoutKind; label: string; icon: string }[] = [
   { kind: 'mindmap', label: 'Mappa mentale', icon: '✳' },
   { kind: 'tree', label: 'Albero', icon: '⊢' },
 ];
+/** Phone: a graph that would fit only below this zoom opens centred on the current node at MOBILE_ZOOM instead. */
+const MOBILE_MIN_ZOOM = 0.7;
+const MOBILE_ZOOM = 0.8;
 const LAYOUT_KEY = 'kg.layout';
 const HIDE_DASHED_KEY = 'kg.hideDashed';
 
@@ -269,6 +273,15 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
   // The node under the pointer and the one clicked both highlight their neighbourhood, the pointer first.
   const [pointed, setPointed] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  const touch = useTouch();
+  const mobile = useMobile();
+  // Phone: short-lived bar with an "Annulla" after a delete or a drag.
+  const [toast, setToast] = useState<string | null>(null);
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 6000);
+    return () => clearTimeout(t);
+  }, [toast]);
   const onHover = useCallback((id: string | null) => setPointed(id), []);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -470,6 +483,7 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
         return persist(positions);
       };
       act({ redo: () => apply(now), undo: () => apply(start) });
+      if (isTouch()) setToast('Nodo spostato');
     },
     [act, setDropBoth, flow, placeNodes, persist],
   );
@@ -992,11 +1006,35 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
     let cur = tree?.conversation.currentVisitId;
     const parents = new Map((tree?.visits ?? []).map((v) => [v.id, v.parentVisitId]));
     while (cur && branches.hidden.has(cur)) cur = parents.get(cur) ?? null;
+    const centreOn = (id: string, zoom: number, duration = 0) => {
+      const n = flow.getNode(id);
+      if (n) void flow.setCenter(n.position.x + (n.measured?.width ?? 190) / 2, n.position.y + (n.measured?.height ?? 46) / 2, { zoom, duration });
+    };
     requestAnimationFrame(() => {
+      if (mobile) {
+        // Phone: a whole graph fits only at an unreadable zoom, so the view opens on the current node instead; a new node
+        // is brought into view only when it is off screen, without changing the zoom.
+        const roots = (tree?.visits ?? []).filter((v) => !v.parentVisitId && !branches.hidden.has(v.id));
+        const target = cur ?? roots[0]?.id;
+        if (fit === 'all') {
+          void Promise.resolve(flow.fitView({ padding: 0.2, maxZoom: 1.2 })).then(() => {
+            if (flow.getZoom() < MOBILE_MIN_ZOOM && target) centreOn(target, MOBILE_ZOOM);
+          });
+        } else if (cur) {
+          const n = flow.getNode(cur);
+          const box = document.querySelector('.react-flow')?.getBoundingClientRect();
+          if (n && box) {
+            const p = flow.flowToScreenPosition(n.position);
+            const q = flow.flowToScreenPosition({ x: n.position.x + (n.measured?.width ?? 190), y: n.position.y + (n.measured?.height ?? 46) });
+            if (p.x < box.left || p.y < box.top || q.x > box.right || q.y > box.bottom) centreOn(cur, flow.getZoom(), 400);
+          }
+        }
+        return;
+      }
       if (fit === 'all') void flow.fitView({ padding: 0.2, maxZoom: 1.2 });
       else if (cur) void flow.fitView({ nodes: [{ id: cur }], padding: 2, maxZoom: 1.2, duration: 400 });
     });
-  }, [nodes, tree, flow, branches]);
+  }, [nodes, tree, flow, branches, mobile]);
 
   // The concept picked in the search glows in the tree, and the view moves to it. A text hit also switches to
   // the map that holds the node and selects it; this waits until that map is laid out.
@@ -1052,6 +1090,7 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
         const px = parent ? at.get(parent) : undefined;
         return px !== undefined && n.position.x < px ? 'left' : 'right';
       };
+      // Finger: a node moves only once selected, so a swipe that starts on a node pans the canvas.
       return nodes.filter((n) => !branches.hidden.has(n.id)).map((n0) => {
         const folded = collapsed.has(n0.id) && branches.kids.has(n0.id);
         const n =
@@ -1063,12 +1102,13 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
         const related = !focus && !!near?.nodes.has(n.id);
         const dim = !!near && !focus && !related;
         const cover = !!edgeHover?.covering.has(n.id);
-        return fresh.has(n.id) || match || near || cover
+        const out = fresh.has(n.id) || match || near || cover
           ? { ...n, data: { ...n.data, fresh: fresh.has(n.id), match, focus, related, dim, cover } }
           : n;
+        return touch ? { ...out, draggable: n.id === selected } : out;
       });
     },
-    [nodes, fresh, matchConcept, near, focusId, drop, edgeHover, branches, collapsed, toggle],
+    [nodes, fresh, matchConcept, near, focusId, drop, edgeHover, branches, collapsed, toggle, touch, selected],
   );
   const base = edges;
   const shownEdges = useMemo(() => {
@@ -1193,6 +1233,52 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
           id={pinned || conversations[0]?.id || null}
           title={conversations.find((c) => c.id === (pinned || conversations[0]?.id))?.title}
           layout={kind}
+          extra={
+            mobile && !READONLY
+              ? (close) => (
+                  <>
+                    {LAYOUTS.map((l) => (
+                      <button
+                        key={l.kind}
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={l.kind === kind}
+                        onClick={() => {
+                          setKind(l.kind);
+                          try {
+                            localStorage.setItem(LAYOUT_KEY, l.kind);
+                          } catch {
+                            // Not remembered: the choice still applies to this page.
+                          }
+                          close();
+                        }}
+                      >
+                        {l.kind === kind ? '✓' : '\u00a0\u00a0'} Layout: {l.label}
+                      </button>
+                    ))}
+                    <button type="button" role="menuitem" onClick={() => (close(), reorder())}>
+                      Riordina
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setHideDashed(!hideDashed);
+                        try {
+                          localStorage.setItem(HIDE_DASHED_KEY, hideDashed ? '0' : '1');
+                        } catch {
+                          // Not remembered: the choice still applies to this page.
+                        }
+                        close();
+                      }}
+                    >
+                      {hideDashed ? 'Mostra' : 'Nascondi'} relazioni tratteggiate
+                    </button>
+                    <hr />
+                  </>
+                )
+              : undefined
+          }
           onDeleted={() => {
             setPinned(AUTO);
             setTrail([]);
@@ -1223,7 +1309,7 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
           nodesDraggable={!READONLY}
-          nodesConnectable={!READONLY}
+          nodesConnectable={!READONLY && !touch}
           connectionMode={ConnectionMode.Loose}
           onNodeDragStart={onDragStart}
           onNodeDrag={onDrag}
@@ -1247,6 +1333,62 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
           <p className="muted">Inizia a chattare con un modello collegato via MCP: i concetti compariranno qui.</p>
         </div>
       )}
+      {touch && !READONLY && (() => {
+        const v = selected ? tree?.visits.find((x) => x.id === selected) : undefined;
+        if (v && !v.ref) {
+          return (
+            <div className="node-actions" role="toolbar" aria-label="Azioni sul nodo">
+              <span className="node-actions-title">{v.title}</span>
+              <button type="button" onClick={() => onOpenConcept(v.conceptId, v.conversationId)}>
+                Approfondisci
+              </button>
+              {branches.kids.has(v.id) && (
+                <button type="button" className="secondary" onClick={() => toggle(v.id)}>
+                  {collapsed.has(v.id) ? `Espandi (${branches.size.get(v.id) ?? 0})` : 'Comprimi'}
+                </button>
+              )}
+              <button
+                type="button"
+                className="secondary danger"
+                aria-label="Elimina nodo"
+                onClick={() => {
+                  void deleteNode(v);
+                  setToast('Nodo eliminato');
+                }}
+              >
+                Elimina
+              </button>
+              <LinkGraph
+                graph={tree?.conversation ?? null}
+                parentId={v.id}
+                parentTitle={v.title}
+                onLinked={(refId) => {
+                  setNotice(null);
+                  setSelected(refId);
+                }}
+                onError={fail}
+              />
+            </div>
+          );
+        }
+        if (toast) {
+          return (
+            <div className="node-actions toast" role="status">
+              <span className="node-actions-title">{toast}</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setToast(null);
+                  travel(undoStack.current, redoStack.current, 'undo');
+                }}
+              >
+                Annulla
+              </button>
+            </div>
+          );
+        }
+        return null;
+      })()}
     </>
   );
 }

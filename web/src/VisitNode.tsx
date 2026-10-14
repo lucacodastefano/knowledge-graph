@@ -1,6 +1,7 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { HANDLES, type VisitNode as VisitNodeType } from './layout.ts';
 import { READONLY } from './api.ts';
+import { useTouch } from './media.ts';
 
 const POSITION = { left: Position.Left, right: Position.Right, center: Position.Top };
 
@@ -10,6 +11,7 @@ const POSITION = { left: Position.Left, right: Position.Right, center: Position.
  */
 export function VisitNode({ data }: NodeProps<VisitNodeType>) {
   const { visit, current, fresh, match } = data;
+  const touch = useTouch();
   const show = () => data.onHover(visit.id);
   const hide = () => data.onHover(null);
 
@@ -36,7 +38,7 @@ export function VisitNode({ data }: NodeProps<VisitNodeType>) {
           {visit.sourceCount}
         </span>
       )}
-      {data.collapsible && (
+      {data.collapsible && (!touch || data.collapsed) && (
         <button
           type="button"
           className={`collapse-toggle nodrag nopan ${data.toggleSide ?? 'right'}${data.collapsed ? ' folded' : ''}`}
@@ -58,6 +60,9 @@ export function VisitNode({ data }: NodeProps<VisitNodeType>) {
           {data.also.map((o, i) => (
             <span key={o.id}>
               {i > 0 && ', '}
+              {touch ? (
+                <span>«{o.parent}»</span>
+              ) : (
               <button
                 type="button"
                 className="also-link nodrag nopan"
@@ -70,6 +75,7 @@ export function VisitNode({ data }: NodeProps<VisitNodeType>) {
               >
                 «{o.parent}»
               </button>
+              )}
             </span>
           ))}
         </span>

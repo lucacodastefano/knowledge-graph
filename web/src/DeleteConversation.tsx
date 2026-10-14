@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { api, READONLY } from './api.ts';
 
 interface Props {
@@ -7,10 +7,12 @@ interface Props {
   /** The layout on screen: the exported page opens with the same one. */
   layout?: string;
   onDeleted: () => void;
+  /** Extra entries at the top of the menu (phone: the view controls that no longer fit in the bar). */
+  extra?: (close: () => void) => ReactNode;
 }
 
 /** Overflow "⋯" menu of the conversation bar: export the map as a web page (D23), or delete it (asks for confirmation; concepts used elsewhere stay in the personal graph). */
-export function DeleteConversation({ id, title, layout, onDeleted }: Props) {
+export function DeleteConversation({ id, title, layout, onDeleted, extra }: Props) {
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -49,6 +51,7 @@ export function DeleteConversation({ id, title, layout, onDeleted }: Props) {
       </button>
       {open && (
         <div className="menu" role="menu">
+          {extra?.(() => setOpen(false))}
           <button type="button" role="menuitem" onClick={exportPage}>
             Esporta come pagina web
           </button>
