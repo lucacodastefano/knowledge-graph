@@ -1,3 +1,6 @@
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { SqliteRepository } from '../src/core/sqlite-repository.ts';
@@ -24,7 +27,8 @@ test('a reference is a pair of nodes titled with the other graph, hidden from th
   assert.equal(src.parentVisitId, broker.id);
   assert.deepEqual(src.ref, { visitId: back.id, conversationId: b.id, title: 'Streaming' });
   assert.equal(back.title, 'Kafka');
-  assert.equal(back.parentVisitId, null, 'the return node sits at the root of the target graph');
+  const flink = repo.getTree(b.id)!.visits.find((v) => v.title === 'Flink')!;
+  assert.equal(back.parentVisitId, flink.id, 'the return node hangs under the main node of the target graph');
   assert.equal(back.ref?.conversationId, a.id);
   assert.ok(events.some((e) => e.type === 'reference.created'));
 
@@ -79,4 +83,21 @@ test('the model sees only the other graph title on a reference', () => {
   assert.doesNotMatch(read, /Segreto di B|Engine/);
   assert.deepEqual(reader.recall(a.id, 'Streaming'), []);
   assert.equal(Object.keys(reader.exportMap(a.id).pages).length, 1, 'no page for the reference node');
+});
+
+test('return nodes left at root level by older versions are hooked under the main node once', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'kg-'));
+  const file = join(dir, 'g.db');
+  const first = new Tracker(new SqliteRepository(file));
+  const a = first.startConversation('Kafka', null);
+  const b = first.startConversation('Streaming', null);
+  first.track(b.id, [{ title: 'Flink', summary: 'Engine.', parent: 'root' }]);
+  const [, back] = first.createReference(a.id, b.id).visits;
+  const [, backA] = [null, first.repo.getVisit(back.id)!];
+  first.repo.setVisitParent(backA.id, null);
+  first.repo.setSetting('migrated_reference_roots', '');
+  const repo = new SqliteRepository(file);
+  const flink = repo.getTree(b.id)!.visits.find((v) => v.title === 'Flink')!;
+  assert.equal(repo.getVisit(back.id)!.parentVisitId, flink.id);
+  assert.equal(repo.getTree(a.id)!.visits.filter((v) => !v.parentVisitId).length, 1, 'a graph without a main node keeps its reference at root');
 });
