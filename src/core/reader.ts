@@ -1,8 +1,21 @@
-import type { Repository } from './repository.ts';
-import type { Concept, ConceptMatch, ConceptPage, ConceptSection, GroupSuggestion, TextHit, Visit } from './types.ts';
+import type { LayoutEntry, Repository } from './repository.ts';
+import type { Concept, ConceptMatch, ConceptPage, ConceptSection, ConversationTree, GroupSuggestion, TextHit, Visit } from './types.ts';
 import { normalizeName } from './normalize.ts';
 import { TrackerError } from './tracker.ts';
 import { titleStems } from './similarity.ts';
+
+/** Everything the canvas needs to show one map without a server (D23): the page exported as a static file embeds it. */
+export interface MapSnapshot {
+  version: 1;
+  exportedAt: string;
+  /** The layout the user was looking at (radial, mindmap, tree): it shapes the nodes and edges that have no saved position. */
+  layoutKind?: string;
+  tree: ConversationTree;
+  /** Positions and relation bends the user chose, for this map only. */
+  layout: LayoutEntry[];
+  /** "Approfondisci" page of every concept of the map, restricted to this map's occurrence. */
+  pages: Record<string, ConceptPage>;
+}
 
 /** A node of the current map found by kc_recall. Kept compact: it is sent to the model. */
 export interface RecalledNode {
@@ -152,6 +165,23 @@ export class Reader {
       members: map ? [] : this.repo.listMembers(conceptId),
       visits: map ? [...occurrences.filter((o) => here.has(o.id)), ...occurrences.filter((o) => !here.has(o.id))] : occurrences,
     };
+  }
+
+  /** Snapshot of one map for the static export (D23): nothing of the user's other maps is included. */
+  exportMap(conversationId: string, layoutKind?: string): MapSnapshot {
+    const tree = this.repo.getTree(conversationId);
+    if (!tree) throw new TrackerError('Conversation not found');
+    const visitIds = new Set(tree.visits.map((v) => v.id));
+    const relationIds = new Set(tree.relations.map((r) => `r-${r.from}-${r.to}`));
+    const layout = this.repo.layoutEntries().filter((e) => (e.kind === 'visit' ? visitIds.has(e.id) : relationIds.has(e.id)));
+    const pages: Record<string, ConceptPage> = {};
+    for (const conceptId of new Set(tree.visits.map((v) => v.conceptId))) {
+      const page = this.conceptPage(conceptId, conversationId);
+      if (!page) continue;
+      const visits = page.visits.filter((v) => v.conversationId === conversationId);
+      pages[conceptId] = { ...page, visits, visitCount: visits.length };
+    }
+    return { version: 1, exportedAt: new Date().toISOString(), ...(layoutKind ? { layoutKind } : {}), tree, layout, pages };
   }
 
   /**

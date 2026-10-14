@@ -19,7 +19,7 @@ import {
   type Connection,
   type NodeChange,
 } from '@xyflow/react';
-import { api, explain, type Conversation, type Visit, type ConversationTree } from './api.ts';
+import { api, explain, READONLY, SNAPSHOT_LAYOUT, type Conversation, type Visit, type ConversationTree } from './api.ts';
 import type { Found, LiveEvent } from './App.tsx';
 import {
   alsoIn,
@@ -58,7 +58,7 @@ function RelationEdge({ id, data, sourceX, sourceY, targetX, targetY, sourcePosi
   const x = bend ? midX + bend.x / 2 : bx;
   const y = bend ? midY + bend.y / 2 : by;
   const startDrag = (e: React.PointerEvent) => {
-    if (e.button !== 0) return;
+    if (e.button !== 0 || READONLY) return;
     const from = bend ?? { x: 2 * (bx - midX), y: 2 * (by - midY) };
     const zoom = flow.getZoom();
     const x0 = e.clientX;
@@ -225,7 +225,7 @@ function savedHideDashed(): boolean {
 /** The chosen layout is remembered in this browser; storage may be unavailable, radial is the default (WP7). */
 function savedLayout(): LayoutKind {
   try {
-    const v = localStorage.getItem(LAYOUT_KEY);
+    const v = READONLY ? SNAPSHOT_LAYOUT : localStorage.getItem(LAYOUT_KEY);
     return LAYOUTS.some((l) => l.kind === v) ? (v as LayoutKind) : 'radial';
   } catch {
     return 'radial';
@@ -545,6 +545,7 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
   );
   const onEdgeLeave = useCallback(() => setEdgeHover(null), []);
   const onEdgeClick = useCallback((_: unknown, edge: Edge<EdgeData>) => {
+    if (READONLY) return;
     if (edge.className?.includes('relation') || edge.id.startsWith('t-')) setArmed((a) => (a === edge.id ? null : edge.id));
   }, []);
   /** Deletes a node (children detached as roots, positions kept); undo restores it with its links. */
@@ -587,6 +588,7 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
   // Canc removes the armed relation; Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z) walk back and forth through the actions.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (READONLY) return;
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
       const mod = e.ctrlKey || e.metaKey;
@@ -877,6 +879,11 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
   return (
     <>
       <div className="overlay-bar">
+        {READONLY ? (
+          <strong className="bar-map" title={conversations[0]?.title}>
+            {conversations[0]?.title}
+          </strong>
+        ) : (
         <select
           className="bar-map"
           value={pinned}
@@ -891,7 +898,9 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
             </option>
           ))}
         </select>
+        )}
         <div className="bar-group" role="group" aria-label="Vista">
+          {!READONLY && (
           <span className="bar-select" title="Layout">
             <span aria-hidden="true">{LAYOUTS.find((l) => l.kind === kind)?.icon}</span>
             <select
@@ -914,9 +923,10 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
               ))}
             </select>
           </span>
-          <button type="button" className="bar-button bar-icon" onClick={reorder} title="Riordina: rimette nodi e relazioni nel layout scelto (Ctrl+Z annulla)" aria-label="Riordina">
+          )}
+          {!READONLY && <button type="button" className="bar-button bar-icon" onClick={reorder} title="Riordina: rimette nodi e relazioni nel layout scelto (Ctrl+Z annulla)" aria-label="Riordina">
             ↻
-          </button>
+          </button>}
           <button
             type="button"
             className="bar-button bar-icon"
@@ -938,6 +948,7 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
         <DeleteConversation
           id={pinned || conversations[0]?.id || null}
           title={conversations.find((c) => c.id === (pinned || conversations[0]?.id))?.title}
+          layout={kind}
           onDeleted={() => {
             setPinned(AUTO);
             void loadConversations();
@@ -966,8 +977,8 @@ function Tree({ live, found, onOpenConcept, onBackgroundClick }: Props) {
           deleteKeyCode={null}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
-          nodesDraggable
-          nodesConnectable
+          nodesDraggable={!READONLY}
+          nodesConnectable={!READONLY}
           connectionMode={ConnectionMode.Loose}
           onNodeDragStart={onDragStart}
           onNodeDrag={onDrag}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { subscribe, type TrackerEvent } from './api.ts';
+import { READONLY, subscribe, type TrackerEvent } from './api.ts';
 import { ConversationView } from './ConversationView.tsx';
 import { MetricsView } from './MetricsView.tsx';
 import { PersonalView } from './PersonalView.tsx';
@@ -26,7 +26,7 @@ type View = 'conversation' | 'personal' | 'metrics';
 const HOVER_OPEN_MS = 300;
 const HOVER_CLOSE_MS = 400;
 
-const viewFromHash = (): View => (location.hash === '#personale' ? 'personal' : location.hash === '#metriche' ? 'metrics' : 'conversation');
+const viewFromHash = (): View => (READONLY ? 'conversation' : location.hash === '#personale' ? 'personal' : location.hash === '#metriche' ? 'metrics' : 'conversation');
 
 export function App() {
   const [view, setView] = useState<View>(viewFromHash);
@@ -111,12 +111,16 @@ export function App() {
             if (view !== 'conversation') location.hash = '#conversazione';
           }}
         />
-        <nav role="tablist" className="tabs">
-          {tab('conversation', 'Grafo', '#conversazione')}
-          {tab('personal', 'Grafo globale', '#personale')}
-          {tab('metrics', 'Metriche', '#metriche')}
-        </nav>
-        <span className={`dot ${online ? 'on' : ''}`} title={online ? 'Collegato' : 'Non collegato'} />
+        {!READONLY && (
+          <>
+            <nav role="tablist" className="tabs">
+              {tab('conversation', 'Grafo', '#conversazione')}
+              {tab('personal', 'Grafo globale', '#personale')}
+              {tab('metrics', 'Metriche', '#metriche')}
+            </nav>
+            <span className={`dot ${online ? 'on' : ''}`} title={online ? 'Collegato' : 'Non collegato'} />
+          </>
+        )}
       </header>
       <main>
         {view === 'metrics' ? (
