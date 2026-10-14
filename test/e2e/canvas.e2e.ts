@@ -105,18 +105,23 @@ test('the canvas starts blank and grows live while the model tracks concepts', a
   assert.equal(await panel.getByRole('region', { name: 'Fonti' }).getByRole('link', { name: 'kafka.apache.org/documentation' }).count(), 1);
   await page.screenshot({ path: join(out, '5-approfondisci.png') });
 
-  // The arrow widens the panel over the whole canvas; the choice survives a reload, and Esc/close work as before.
+  // Three widths (a third, half, full); the choice survives a reload, and Esc/close work as before.
   const vw = page.viewportSize()!.width;
-  assert.ok(((await panel.boundingBox())!.width) < vw / 2, 'normal width');
-  await panel.getByRole('button', { name: 'Espandi il pannello' }).click();
-  assert.ok(((await panel.boundingBox())!.width) > vw * 0.95, 'expanded over the canvas');
-  await page.screenshot({ path: join(out, '5b-approfondisci-espanso.png') });
+  const width = async () => (await panel.boundingBox())!.width;
+  const near = (w: number, f: number) => Math.abs(w - vw * f) < vw * 0.03;
+  assert.ok(near(await width(), 1 / 3), 'a third by default');
+  await panel.getByRole('button', { name: 'Metà della larghezza' }).click();
+  assert.ok(near(await width(), 1 / 2), 'half');
+  await page.screenshot({ path: join(out, '5b-approfondisci-meta.png') });
+  await panel.getByRole('button', { name: 'Tutto lo spazio' }).click();
+  assert.ok(near(await width(), 1), 'full');
+  await page.screenshot({ path: join(out, '5c-approfondisci-intero.png') });
   await page.reload();
   await titled(page, /^Partizioni$/).first().dblclick();
   await panel.waitFor();
-  assert.ok(((await panel.boundingBox())!.width) > vw * 0.95, 'remembered after reload');
-  await panel.getByRole('button', { name: 'Riduci il pannello' }).click();
-  assert.ok(((await panel.boundingBox())!.width) < vw / 2, 'back to normal');
+  assert.ok(near(await width(), 1), 'remembered after reload');
+  await panel.getByRole('button', { name: 'Un terzo della larghezza' }).click();
+  assert.ok(near(await width(), 1 / 3), 'back to a third');
 });
 
 test('the personal graph shows every concept, previews it on hover and grows live', async () => {

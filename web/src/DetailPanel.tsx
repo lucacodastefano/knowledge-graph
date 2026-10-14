@@ -51,13 +51,23 @@ function collect(sections: ConceptSection[], into: Record<string, NodeDraft>) {
  * "Approfondisci" (D16, D17): every occurrence of a concept with its sub-concepts as sections.
  * The pencil makes the same texts editable in place; merge and delete live in the menu.
  */
-const EXPANDED_KEY = 'kg.panelExpanded';
-const readExpanded = () => {
+type Width = 'third' | 'half' | 'full';
+const WIDTHS: { id: Width; label: string; title: string }[] = [
+  { id: 'third', label: '⅓', title: 'Un terzo della larghezza' },
+  { id: 'half', label: '½', title: 'Metà della larghezza' },
+  { id: 'full', label: '▣', title: 'Tutto lo spazio' },
+];
+const WIDTH_KEY = 'kg.panelWidth';
+const readWidth = (): Width => {
   try {
-    return localStorage.getItem(EXPANDED_KEY) === '1';
+    const w = localStorage.getItem(WIDTH_KEY);
+    if (w === 'third' || w === 'half' || w === 'full') return w;
+    // Before the three widths there was one expand toggle.
+    if (localStorage.getItem('kg.panelExpanded') === '1') return 'full';
   } catch {
-    return false;
+    /* storage unavailable */
   }
+  return 'third';
 };
 
 export function DetailPanel({ conceptId, version, onClose, pinned = true, onPin, onPointer, onOpen }: Props) {
@@ -67,16 +77,15 @@ export function DetailPanel({ conceptId, version, onClose, pinned = true, onPin,
   const [draft, setDraft] = useState<Draft | null>(null);
   const [trees, setTrees] = useState<Record<string, Visit[]>>({});
   const [saving, setSaving] = useState(false);
-  const [expanded, setExpanded] = useState(readExpanded);
-  const toggleExpanded = () =>
-    setExpanded((e) => {
-      try {
-        localStorage.setItem(EXPANDED_KEY, e ? '0' : '1');
-      } catch {
-        /* private mode: the choice just isn't remembered */
-      }
-      return !e;
-    });
+  const [width, setWidthState] = useState<Width>(readWidth);
+  const setWidth = (w: Width) => {
+    setWidthState(w);
+    try {
+      localStorage.setItem(WIDTH_KEY, w);
+    } catch {
+      /* private mode: the choice just isn't remembered */
+    }
+  };
 
   useEffect(() => {
     api.concept(conceptId).then(setPage, (e: Error) => setError(e.message));
@@ -160,7 +169,7 @@ export function DetailPanel({ conceptId, version, onClose, pinned = true, onPin,
 
   return (
     <aside
-      className={`panel${draft ? ' editing' : ''}${expanded ? ' expanded' : ''}`}
+      className={`panel${draft ? ' editing' : ''} width-${width}`}
       aria-label="Dettaglio concetto"
       onMouseEnter={() => onPointer?.(true)}
       onMouseLeave={() => onPointer?.(false)}
@@ -202,16 +211,21 @@ export function DetailPanel({ conceptId, version, onClose, pinned = true, onPin,
               </button>
             </>
           )}
-          <button
-            type="button"
-            className="ghost icon"
-            onClick={toggleExpanded}
-            aria-label={expanded ? 'Riduci il pannello' : 'Espandi il pannello'}
-            title={expanded ? 'Riduci il pannello' : 'Espandi a tutto lo spazio'}
-            aria-pressed={expanded}
-          >
-            {expanded ? '→' : '←'}
-          </button>
+          <div className="width-switch" role="group" aria-label="Larghezza del pannello">
+            {WIDTHS.map((w) => (
+              <button
+                key={w.id}
+                type="button"
+                className={`ghost icon${width === w.id ? ' active' : ''}`}
+                onClick={() => setWidth(w.id)}
+                aria-label={w.title}
+                title={w.title}
+                aria-pressed={width === w.id}
+              >
+                {w.label}
+              </button>
+            ))}
+          </div>
           <button type="button" className="ghost icon" onClick={onClose} aria-label="Chiudi">
             ✕
           </button>
