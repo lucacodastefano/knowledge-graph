@@ -14,6 +14,7 @@ import type {
 import type { Metrics, Period } from '../../src/core/metrics.ts';
 import type { LayoutEntry } from '../../src/core/repository.ts';
 import type { TrackerEvent, VisitEdit } from '../../src/core/tracker.ts';
+import type { MapSnapshot } from '../../src/core/reader.ts';
 
 export type { Metrics, Period, GroupSuggestion, Concept, ConceptOccurrence, ConceptPage, ConceptSection, ConceptSource, Conversation, ConversationTree, PersonalGraph, TextHit, TrackerEvent, Visit, VisitEdit };
 
@@ -48,7 +49,7 @@ export function explain(message: string): string {
   return `Modifica rifiutata: ${message}`;
 }
 
-export const api = {
+const live = {
   conversations: () => get<Conversation[]>('/api/conversations'),
   deleteConversation: (id: string) => send<void>('DELETE', `/api/conversations/${id}`),
   tree: (id: string) => get<ConversationTree>(`/api/conversations/${id}/tree`),
@@ -81,8 +82,67 @@ export const api = {
   removeSource: (visitId: string, sourceId: string) => send<void>('DELETE', `/api/visits/${visitId}/sources/${sourceId}`),
 };
 
+/** The map embedded by "Esporta come pagina web" (D23); null when the canvas runs against the daemon. */
+function readSnapshot(): MapSnapshot | null {
+  try {
+    const text = document.getElementById('kg-snapshot')?.textContent;
+    return text ? (JSON.parse(text) as MapSnapshot) : null;
+  } catch {
+    return null;
+  }
+}
+const snapshot = readSnapshot();
+/** An exported page: one map, read only, no daemon. Every editing affordance checks this. */
+export const READONLY = snapshot !== null;
+/** The layout the exported map was viewed with. */
+export const SNAPSHOT_LAYOUT = snapshot?.layoutKind;
+
+const SEARCH_LIMIT = 20;
+const SNIPPET = 60;
+const fold = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+
+/** The search box of an exported page: the words must all appear in the node's title, summary or detail. */
+function searchSnapshot(snap: MapSnapshot, q: string): TextHit[] {
+  const words = fold(q).split(/\s+/).filter(Boolean);
+  if (!words.length) return [];
+  const hits: TextHit[] = [];
+  for (const v of snap.tree.visits) {
+    const fields = { title: v.title, summary: v.summary, detail: v.detail ?? '' };
+    const hay = fold(Object.values(fields).join('\n'));
+    if (!words.every((w) => hay.includes(w))) continue;
+    const field = (['title', 'summary', 'detail'] as const).find((f) => fold(fields[f]).includes(words[0])) ?? 'detail';
+    const text = fields[field];
+    const at = Math.max(0, fold(text).indexOf(words[0]));
+    const snippet = field === 'title' ? '' : `${at > SNIPPET ? '…' : ''}${text.slice(Math.max(0, at - SNIPPET), at + SNIPPET).replace(/\s+/g, ' ')}`;
+    hits.push({ visitId: v.id, conversationId: v.conversationId, conversationTitle: snap.tree.conversation.title, conceptId: v.conceptId, title: v.title, summary: v.summary, field, snippet });
+    if (hits.length >= SEARCH_LIMIT) break;
+  }
+  return hits;
+}
+
+/** Same calls answered from the snapshot; anything that would write or leave the map is refused. */
+function offlineApi(snap: MapSnapshot): typeof live {
+  const refuse = () => Promise.reject(new Error('Pagina esportata: sola lettura'));
+  const refused = Object.fromEntries(Object.keys(live).map((k) => [k, refuse])) as unknown as typeof live;
+  return {
+    ...refused,
+    conversations: () => Promise.resolve([snap.tree.conversation]),
+    tree: () => Promise.resolve(snap.tree),
+    concept: (id: string) => (snap.pages[id] ? Promise.resolve(snap.pages[id]) : Promise.reject(new Error('Not found'))),
+    layout: () => Promise.resolve(snap.layout),
+    search: (q: string) => {
+      const ids = new Set(searchSnapshot(snap, q).map((h) => h.conceptId));
+      return Promise.resolve(Object.values(snap.pages).filter((p) => ids.has(p.id)).map(({ id, name, createdAt, lastSeenAt, visitCount }) => ({ id, name, createdAt, lastSeenAt, visitCount })));
+    },
+    searchText: (q: string) => Promise.resolve(searchSnapshot(snap, q)),
+  };
+}
+
+export const api = snapshot ? offlineApi(snapshot) : live;
+
 /** Live updates from the daemon, with automatic reconnect. Returns an unsubscribe function. */
 export function subscribe(onEvent: (e: TrackerEvent) => void, onStatus: (online: boolean) => void): () => void {
+  if (READONLY) return () => undefined;
   let ws: WebSocket | undefined;
   let stopped = false;
   let retry: ReturnType<typeof setTimeout> | undefined;

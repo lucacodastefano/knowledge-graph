@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import websocket from '@fastify/websocket';
 import fastifyStatic from '@fastify/static';
@@ -11,6 +12,7 @@ import { Reader } from '../core/reader.ts';
 import { createMcpServer, type McpSessionState } from './mcp.ts';
 import { VERSION } from '../version.ts';
 import { registerAuth, tokenRewriteUrl } from './auth.ts';
+import { exportFileName, renderExport } from './export.ts';
 
 export interface AppOptions {
   tracker: Tracker;
@@ -109,6 +111,19 @@ export async function buildApp({ tracker, webRoot, logger = false, onShutdown, t
     const tree = repo.getTree(req.params.id);
     return tree ?? reply.code(404).send({ error: 'Not found' });
   });
+  // One map as a self-contained page (D23): the canvas with its snapshot embedded, readable offline.
+  app.get<{ Params: { id: string }; Querystring: { layout?: string } }>(
+    '/api/conversations/:id/export.html',
+    { schema: { querystring: { type: 'object', properties: { layout: { enum: ['radial', 'mindmap', 'tree'] } } } } },
+    async (req, reply) => {
+      if (!webRoot || !existsSync(join(webRoot, 'index.html'))) return reply.code(503).send({ error: 'The canvas is not built: run "npm run build:web"' });
+      const snapshot = new Reader(repo).exportMap(req.params.id, req.query.layout);
+      return reply
+        .header('content-disposition', `attachment; filename="${exportFileName(snapshot.tree.conversation.title)}"`)
+        .type('text/html; charset=utf-8')
+        .send(renderExport(webRoot, snapshot));
+    },
+  );
   // Where the user put nodes and relation bends on the canvas (kept across refreshes and layout changes).
   app.get('/api/layout', async () => repo.layoutEntries());
   app.post<{ Body: { items: { kind: 'visit' | 'relation'; id: string; x?: number; y?: number }[] } }>(

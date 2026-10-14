@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Markdown } from './Markdown.tsx';
-import { api, explain, type ConceptOccurrence, type ConceptPage, type ConceptSection, type ConceptSource, type Visit } from './api.ts';
+import { api, explain, READONLY, type ConceptOccurrence, type ConceptPage, type ConceptSection, type ConceptSource, type Visit } from './api.ts';
 import { ConceptSearch } from './ConceptSearch.tsx';
 
 const fmt = (iso: string) => new Date(iso).toLocaleString('it-IT', { dateStyle: 'medium', timeStyle: 'short' });
@@ -216,7 +216,7 @@ export function DetailPanel({ conceptId, conversationId = null, version, onClose
               📌 fissato
             </span>
           )}
-          {page && !draft && (
+          {page && !draft && !READONLY && (
             <>
               <button type="button" className="ghost icon" onClick={startEditing} aria-label="Modifica" title="Modifica">
                 ✎
@@ -396,7 +396,7 @@ export function DetailPanel({ conceptId, conversationId = null, version, onClose
                       {r.name}
                     </button>
                     {r.label && <em className="rel-label">{r.label}</em>}
-                    <span className="rel-actions">
+                    {!READONLY && <span className="rel-actions">
                       <button
                         type="button"
                         className="rel-icon"
@@ -418,7 +418,7 @@ export function DetailPanel({ conceptId, conversationId = null, version, onClose
                       >
                         ✕
                       </button>
-                    </span>
+                    </span>}
                   </li>
                 ))}
               </ul>

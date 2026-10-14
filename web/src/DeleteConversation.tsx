@@ -1,14 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
-import { api } from './api.ts';
+import { api, READONLY } from './api.ts';
 
 interface Props {
   id: string | null;
   title?: string;
+  /** The layout on screen: the exported page opens with the same one. */
+  layout?: string;
   onDeleted: () => void;
 }
 
-/** Overflow "⋯" menu of the conversation bar; "Cancella mappa" asks for confirmation, concepts used elsewhere stay in the personal graph. */
-export function DeleteConversation({ id, title, onDeleted }: Props) {
+/** Overflow "⋯" menu of the conversation bar: export the map as a web page (D23), or delete it (asks for confirmation; concepts used elsewhere stay in the personal graph). */
+export function DeleteConversation({ id, title, layout, onDeleted }: Props) {
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -24,13 +26,21 @@ export function DeleteConversation({ id, title, onDeleted }: Props) {
       document.removeEventListener('keydown', esc);
     };
   }, [open]);
-  if (!id) return null;
+  if (!id || READONLY) return null;
   const remove = () => {
     setOpen(false);
     const ok = window.confirm(
       `Cancellare il grafo «${title ?? 'senza titolo'}»?\n\nI concetti usati anche in altri grafi restano nel grafo globale; gli altri vengono rimossi con le loro relazioni.`,
     );
     if (ok) void api.deleteConversation(id).then(onDeleted);
+  };
+  /** The daemon answers with the whole map as one .html file; the browser saves it (the session cookie covers hosted mode). */
+  const exportPage = () => {
+    setOpen(false);
+    const a = document.createElement('a');
+    a.href = `/api/conversations/${encodeURIComponent(id)}/export.html${layout ? `?layout=${layout}` : ''}`;
+    a.download = '';
+    a.click();
   };
   return (
     <div className="bar-menu" ref={box}>
@@ -39,6 +49,9 @@ export function DeleteConversation({ id, title, onDeleted }: Props) {
       </button>
       {open && (
         <div className="menu" role="menu">
+          <button type="button" role="menuitem" onClick={exportPage}>
+            Esporta come pagina web
+          </button>
           <button type="button" role="menuitem" className="danger-text" onClick={remove}>
             Cancella grafo…
           </button>
