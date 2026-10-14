@@ -190,7 +190,8 @@ export class SqliteRepository implements Repository {
 
   /**
    * D22: relations used to be links between concepts, shown in every map holding both. Each one is kept for every map
-   * that contains both of its concepts (so maps look as before) and leaves concept_links. Idempotent: nothing is left to move.
+   * that contains both of its concepts (so maps look as before). The old rows are kept as 'related_legacy' (read by nothing):
+   * a relation whose concepts share no map is not lost. Idempotent: nothing is left to move.
    */
   private migrateRelations() {
     if (this.db.prepare(`SELECT 1 FROM concept_links WHERE kind = 'related' LIMIT 1`).get() === undefined) return;
@@ -202,7 +203,7 @@ export class SqliteRepository implements Repository {
         JOIN visits a ON a.concept_id = l.from_concept_id
         JOIN visits b ON b.concept_id = l.to_concept_id AND b.conversation_id = a.conversation_id
         WHERE l.kind = 'related';
-        DELETE FROM concept_links WHERE kind = 'related';
+        UPDATE concept_links SET kind = 'related_legacy' WHERE kind = 'related';
       `);
     });
   }
