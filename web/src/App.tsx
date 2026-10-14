@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { READONLY, subscribe, type TrackerEvent } from './api.ts';
 import { ConversationView } from './ConversationView.tsx';
 import { MetricsView } from './MetricsView.tsx';
 import { PersonalView } from './PersonalView.tsx';
 import { DetailPanel } from './DetailPanel.tsx';
 import { ConceptSearch } from './ConceptSearch.tsx';
+import { useMobile } from './media.ts';
 
 /** A tracker event with a sequence number, so views can react to every change. */
 export interface LiveEvent {
@@ -63,6 +64,9 @@ export function App() {
     return () => removeEventListener('keydown', onKey);
   }, [closeConcept]);
   const [found, setFound] = useState<Found | null>(null);
+  // Phone: the search box is a lens in the header that takes the whole row while open.
+  const mobile = useMobile();
+  const [searching, setSearching] = useState(false);
 
   useEffect(() => subscribe((event) => setLive((prev) => ({ seq: (prev?.seq ?? 0) + 1, event })), setOnline), []);
   // The open concept follows corrections made elsewhere (another tab, or the model's kc_link).
@@ -87,7 +91,7 @@ export function App() {
 
   const shown = openConcept ?? (view === 'personal' ? hoverConcept : null);
 
-  const tab = (v: View, label: string, hash: string) => (
+  const tab = (v: View, label: ReactNode, hash: string) => (
     <a href={hash} role="tab" aria-selected={view === v} className={view === v ? 'active' : ''}>
       {label}
     </a>
@@ -95,27 +99,42 @@ export function App() {
 
   return (
     <div className="app">
-      <header className="bar">
-        <strong>Knowledge Graph</strong>
-        <ConceptSearch
-          label="Cerca concetti"
-          placeholder="Cerca nei concetti e nei testi…"
-          className="header-search"
-          onPick={(c) => {
-            openConceptIn(c.id);
-            setFound((prev) => ({ seq: (prev?.seq ?? 0) + 1, conceptId: c.id }));
-          }}
-          onPickHit={(h) => {
-            openConceptIn(h.conceptId, h.conversationId);
-            setFound((prev) => ({ seq: (prev?.seq ?? 0) + 1, conceptId: h.conceptId, visitId: h.visitId, conversationId: h.conversationId }));
-            if (view !== 'conversation') location.hash = '#conversazione';
-          }}
-        />
+      <header className={`bar${searching ? ' searching' : ''}`}>
+        <strong className="brand">Knowledge Graph</strong>
+        {mobile && !searching && (
+          <button type="button" className="ghost icon search-open" aria-label="Cerca" onClick={() => setSearching(true)}>
+            🔍
+          </button>
+        )}
+        {(!mobile || searching) && (
+          <ConceptSearch
+            label="Cerca concetti"
+            placeholder="Cerca nei concetti e nei testi…"
+            className="header-search"
+            autoFocus={mobile}
+            onPick={(c) => {
+              setSearching(false);
+              openConceptIn(c.id);
+              setFound((prev) => ({ seq: (prev?.seq ?? 0) + 1, conceptId: c.id }));
+            }}
+            onPickHit={(h) => {
+              setSearching(false);
+              openConceptIn(h.conceptId, h.conversationId);
+              setFound((prev) => ({ seq: (prev?.seq ?? 0) + 1, conceptId: h.conceptId, visitId: h.visitId, conversationId: h.conversationId }));
+              if (view !== 'conversation') location.hash = '#conversazione';
+            }}
+          />
+        )}
+        {mobile && searching && (
+          <button type="button" className="ghost search-cancel" onClick={() => setSearching(false)}>
+            Annulla
+          </button>
+        )}
         {!READONLY && (
           <>
             <nav role="tablist" className="tabs">
               {tab('conversation', 'Grafo', '#conversazione')}
-              {tab('personal', 'Grafo globale', '#personale')}
+              {tab('personal', <><span className="full">Grafo globale</span><span className="short">Globale</span></>, '#personale')}
               {tab('metrics', 'Metriche', '#metriche')}
             </nav>
             <span className={`dot ${online ? 'on' : ''}`} title={online ? 'Collegato' : 'Non collegato'} />

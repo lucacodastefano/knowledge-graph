@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { isMobile, useMobile } from './media.ts';
 import Graph from 'graphology';
 import Sigma from 'sigma';
 import type { NodeLabelDrawingFunction } from 'sigma/rendering';
@@ -291,7 +292,10 @@ export function PersonalView({ live, found, onOpenConcept, onBackgroundClick, fo
   const [withSources, setWithSources] = useState(false);
   const [focus, setFocus] = useState<string | null>(null);
   const [legend, setLegend] = useState<Group[]>([]);
-  const [legendOpen, setLegendOpen] = useState(() => stored<boolean>('kg.personal.legend', true));
+  const [legendOpen, setLegendOpen] = useState(() => !isMobile() && stored<boolean>('kg.personal.legend', true));
+  // Phone: the toolbar folds into one row with a "Filtri" button.
+  const mobile = useMobile();
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [conversationList, setConversationList] = useState<{ id: string; title: string }[]>([]);
   const [overview, setOverview] = useState(false);
   const [version, setVersion] = useState(0);
@@ -914,10 +918,15 @@ export function PersonalView({ live, found, onOpenConcept, onBackgroundClick, fo
   return (
     <div className="personal-view">
       {count !== null && count > 0 && (
-        <div className="graph-tools">
-          <span className="muted small" data-testid="concept-count">
+        <div className={`graph-tools${mobile && !filtersOpen ? ' folded' : ''}`}>
+          <span className="muted small keep" data-testid="concept-count">
             {filtered ? `${shown} di ${plural(count, 'concetto', 'concetti')}` : plural(count, 'concetto', 'concetti')}
           </span>
+          {mobile && (
+            <button type="button" className="secondary keep tools-toggle" aria-expanded={filtersOpen} onClick={() => setFiltersOpen(!filtersOpen)}>
+              Filtri{filtered ? ' •' : ''} {filtersOpen ? '▾' : '▸'}
+            </button>
+          )}
           <label className="tool">
             Colore
             <select
@@ -1003,7 +1012,7 @@ export function PersonalView({ live, found, onOpenConcept, onBackgroundClick, fo
               aria-expanded={legendOpen}
               onClick={() => {
                 setLegendOpen(!legendOpen);
-                store('kg.personal.legend', !legendOpen);
+                if (!isMobile()) store('kg.personal.legend', !legendOpen);
               }}
             >
               {colorBy === 'community' ? 'Comunità' : 'Grafi'} <span aria-hidden="true">{legendOpen ? '▾' : '▸'}</span>

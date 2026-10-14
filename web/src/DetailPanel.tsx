@@ -213,7 +213,7 @@ export function DetailPanel({ conceptId, conversationId = null, version, onClose
         <div className="panel-tools">
           {pinned && (
             <span className="pin" title="Fissato su questo concetto: clic nel vuoto, Esc o ✕ per sbloccare">
-              📌 fissato
+              📌<span className="pin-text"> fissato</span>
             </span>
           )}
           {page && !draft && !READONLY && (
